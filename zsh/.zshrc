@@ -43,6 +43,8 @@ alias gcomm="git commit -m"
 alias gcom="git commit"
 alias gcoma="git commit --amend"
 alias vim="nvim"
+alias tmsu="$HOME/.tmux-setup-sessions.sh"
+alias tmux-setup="$HOME/.tmux-setup-sessions.sh"
 
 export PATH="$HOME/.local/bin:$PATH"
 

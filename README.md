@@ -79,6 +79,21 @@ SKIP_DOTFILES_PREPUSH=1 git push
   - `ls -l ~/.codex/AGENTS.md`
   - `ls -l ~/.codex/config.toml` (if using a repo-local Codex config)
 
+## Tmux Session Setup
+Use `tmsu` or `tmux-setup` to create the default work sessions:
+
+```sh
+tmsu
+```
+
+By default this creates or updates `applied3`, `applied4`, `applied5`, `applied6`, `1earn`, `2eview`, `core-stack`, `dotfiles`, and `skills`, each with `agents`, `vim`, `git`, and `adp` windows. It is idempotent: existing sessions and windows are left alone.
+
+Customize one run with:
+
+```sh
+tmsu "review=$HOME/applied3" "dotfiles=$HOME/Documents/dotfiles"
+```
+
 ## Commit Message Rules (Codex/AI)
 Commit message guidance for Codex lives in `codex/COMMIT_RULES.md`.
 These are style rules only (no Git hook/template enforcement).
