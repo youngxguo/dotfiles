@@ -149,7 +149,7 @@ require("lazy").setup({
     build = ":TSUpdate",
     config = function()
       require("nvim-treesitter").setup({
-        ensure_installed = { "javascript", "typescript", "lua", "c", "cpp" },
+        ensure_installed = { "javascript", "typescript", "tsx", "lua", "c", "cpp" },
         auto_install = true,
       })
     end,
