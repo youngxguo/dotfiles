@@ -24,6 +24,7 @@ local commands = {
 
   -- navigation
   { "ToggleFileTree",          function() vim.cmd("NvimTreeToggle") end },
+  { "ToggleStickyContext",     function() vim.cmd("TSContext toggle") end },
   { "PickBreadcrumb",          function() require("dropbar.api").pick() end },
   { "VerticalSplit",           function() vim.cmd("vsplit") end },
   { "HorizontalSplit",         function() vim.cmd("split") end },

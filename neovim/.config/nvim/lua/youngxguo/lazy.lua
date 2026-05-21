@@ -242,7 +242,22 @@ require("lazy").setup({
     },
   },
 
-  { "nvim-treesitter/nvim-treesitter-context", main = "treesitter-context", opts = { max_lines = 3 } },
+  {
+    "nvim-treesitter/nvim-treesitter-context",
+    main = "treesitter-context",
+    opts = {
+      enable = true,
+      max_lines = 6,
+      multiline_threshold = 1,
+      trim_scope = "outer",
+      mode = "topline",
+      separator = nil,
+      zindex = 20,
+    },
+    keys = {
+      { "<leader>ut", "<cmd>TSContext toggle<CR>", desc = "Toggle sticky context" },
+    },
+  },
   {
     "Bekaboo/dropbar.nvim",
     event = { "BufReadPost", "BufNewFile" },
