@@ -1,9 +1,8 @@
--- Reserve a space in the gutter
-vim.opt.signcolumn = 'yes'
-
 vim.diagnostic.config({
   underline = true,
-  update_in_insert = true,
+  -- Off: recomputing diagnostics on every keystroke is noisy/laggy in large
+  -- TS files. They refresh when you stop typing instead.
+  update_in_insert = false,
   virtual_text = { spacing = 4, prefix = '●' },
   signs = {
     text = {
@@ -33,6 +32,8 @@ vim.api.nvim_create_autocmd('LspAttach', {
       end
     end, opts)
     vim.keymap.set('n', 'gr', '<cmd>FzfLua lsp_references<cr>', opts)
+    vim.keymap.set('n', '<leader>rn', vim.lsp.buf.rename, vim.tbl_extend('force', opts, { desc = 'LSP rename' }))
+    vim.keymap.set({ 'n', 'v' }, '<leader>ca', vim.lsp.buf.code_action, vim.tbl_extend('force', opts, { desc = 'LSP code action' }))
     vim.keymap.set('n', '<leader>dd', function()
       require("fzf-lua").diagnostics_document()
     end, opts)

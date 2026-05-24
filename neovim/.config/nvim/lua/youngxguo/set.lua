@@ -16,7 +16,7 @@ vim.opt.cursorline = true
 vim.opt.swapfile = false
 vim.opt.backup = false
 
-vim.opt.hlsearch = false
+vim.opt.hlsearch = true
 vim.opt.incsearch = true
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
@@ -86,6 +86,10 @@ local diffview_refresh_timer = uv.new_timer()
 local diffview_refresh_delay_ms = 250
 
 local function refresh_diffview_if_open()
+  -- Don't force-load lazy diffview: only inspect it if it's already loaded.
+  if not package.loaded["diffview"] then
+    return
+  end
   pcall(function()
     local lib = require("diffview.lib")
     if lib.get_current_view() then

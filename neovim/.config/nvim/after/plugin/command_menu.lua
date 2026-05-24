@@ -2,6 +2,9 @@
 -- Type ":" and fuzzy-search these names via cmdline completion.
 -- Each entry: { "CommandName", function, "description" }
 
+local actions = require("youngxguo.actions")
+local diffview_nav = require("youngxguo.diffview_nav")
+
 local commands = {
   -- search & files
   { "FindFiles",               function() require("fzf-lua").files() end },
@@ -21,6 +24,8 @@ local commands = {
 
   -- edit
   { "Format",                  function() require("conform").format({ lsp_format = "never", timeout_ms = 5000 }) end },
+  { "Rename",                  function() vim.lsp.buf.rename() end },
+  { "CodeAction",              function() vim.lsp.buf.code_action() end },
 
   -- navigation
   { "ToggleFileTree",          function() vim.cmd("NvimTreeToggle") end },
@@ -32,34 +37,20 @@ local commands = {
   { "CloseTab",                function() vim.cmd("tabclose") end },
 
   -- yank
-  { "YankFilePath",            function()
-    local text = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":.")
-    vim.fn.setreg("+", text)
-    vim.notify(text)
-  end },
-  { "YankGitLink",             function()
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<leader>yl", true, true, true), "m", false)
-  end },
+  { "YankFilePath",            actions.yank_file_path },
+  { "YankGitLink",             actions.yank_git_link },
 
   -- git
   { "GitNextChange",           function() require("gitsigns").nav_hunk("next") end },
   { "GitPrevChange",           function() require("gitsigns").nav_hunk("prev") end },
-  { "GitBlameCommit",          function()
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<leader>gc", true, true, true), "m", false)
-  end },
-  { "GitOpenCommitRemote",     function()
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<leader>gC", true, true, true), "m", false)
-  end },
+  { "GitBlameCommit",          actions.git_blame_commit_diffview },
+  { "GitOpenCommitRemote",     actions.git_blame_commit_remote },
   { "GitDiffSplit",            function() vim.cmd("Gdiffsplit") end },
   { "GitStatus",               function() vim.cmd("Neogit") end },
   { "GitBranches",             function() require("fzf-lua").git_branches() end },
-  { "GitDiff",                 function()
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<leader>gd", true, true, true), "m", false)
-  end },
+  { "GitDiff",                 diffview_nav.open_diff },
   { "GitDiffClose",            function() vim.cmd("DiffviewClose") end },
-  { "GitHistory",              function()
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<leader>gl", true, true, true), "m", false)
-  end },
+  { "GitHistory",              diffview_nav.open_history },
   { "GitLogFile",              function() require("fzf-lua").git_bcommits() end },
 
   -- PR review (Octo)

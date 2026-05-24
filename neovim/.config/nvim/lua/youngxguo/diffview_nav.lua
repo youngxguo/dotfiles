@@ -1,3 +1,9 @@
+-- Diffview navigation helpers: focus an already-open Diffview / file-history
+-- tab if one exists (refreshing it), otherwise open a fresh one. Exposed as
+-- functions so the diffview spec keys and the command palette share them.
+
+local M = {}
+
 local function diffview_ctx()
   local ok_lib, lib = pcall(require, "diffview.lib")
   if not ok_lib or not lib then
@@ -57,43 +63,8 @@ local function focus_view(predicate, on_focus)
   return true
 end
 
-local function file_history_matches(view, file)
-  local ctx = diffview_ctx()
-  if not ctx or not is_view(view, ctx.FileHistoryView) then
-    return false
-  end
-
-  if not (view.panel and view.panel.single_file) then
-    return false
-  end
-
-  local path_args = view.adapter and view.adapter.ctx and view.adapter.ctx.path_args or nil
-  if type(path_args) ~= "table" or #path_args == 0 then
-    return false
-  end
-
-  local target = vim.fs.normalize(vim.fn.fnamemodify(file, ":p"))
-  local repo_root = view.adapter.ctx.toplevel and vim.fs.normalize(view.adapter.ctx.toplevel) or nil
-
-  for _, arg in ipairs(path_args) do
-    if type(arg) == "string" then
-      local normalized = vim.fs.normalize(arg)
-      if normalized == target then
-        return true
-      end
-
-      if repo_root and arg:sub(1, 1) ~= "/" then
-        if vim.fs.normalize(repo_root .. "/" .. arg) == target then
-          return true
-        end
-      end
-    end
-  end
-
-  return false
-end
-
-vim.keymap.set("n", "<leader>gd", function()
+-- Open the working-tree diff, or focus + refresh an existing one.
+function M.open_diff()
   if focus_view(function(view, ctx)
     return is_view(view, ctx.DiffView)
   end, function()
@@ -103,11 +74,14 @@ vim.keymap.set("n", "<leader>gd", function()
   end
 
   vim.cmd("DiffviewOpen")
-end, { silent = true, desc = "Git diff (Diffview)" })
+end
 
-vim.keymap.set("n", "<leader>gD", "<cmd>DiffviewClose<CR>", { silent = true, desc = "Close Diffview" })
+function M.close()
+  vim.cmd("DiffviewClose")
+end
 
-vim.keymap.set("n", "<leader>gl", function()
+-- Open file history, or focus + refresh an existing (multi-file) history view.
+function M.open_history()
   if focus_view(function(view, ctx)
     return is_view(view, ctx.FileHistoryView) and view.panel and not view.panel.single_file
   end, function()
@@ -117,8 +91,6 @@ vim.keymap.set("n", "<leader>gl", function()
   end
 
   vim.cmd("DiffviewFileHistory --max-count=20")
-end, { silent = true, desc = "Git history (Diffview)" })
+end
 
-vim.keymap.set("n", "<leader>gL", function()
-  require("fzf-lua").git_bcommits()
-end, { silent = true, desc = "Git log current file" })
+return M

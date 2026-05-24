@@ -1,6 +1,4 @@
-vim.g.mapleader = " "
--- file tree sidebar (vscode-like Ctrl+B)
-vim.keymap.set("n", "<leader>b", "<cmd>NvimTreeToggle<CR>", { silent = true })
+local actions = require("youngxguo.actions")
 
 -- all project files with open buffers + recent files pinned to the top
 vim.keymap.set("n", "<C-p>", function()
@@ -84,6 +82,19 @@ vim.keymap.set("n", "<C-l>", function() tmux_navigate("l") end, { silent = true 
 vim.api.nvim_set_keymap("n", "<leader>\\", ":vsplit<CR>", { noremap = true, silent = true })
 vim.api.nvim_set_keymap("n", "<leader>-", ":split<CR>", { noremap = true, silent = true })
 
+-- zoom: toggle maximizing the current split (tmux prefix-z style); per-tab
+vim.keymap.set("n", "<leader>z", function()
+  if vim.t.zoom_restore then
+    vim.cmd(vim.t.zoom_restore)
+    vim.t.zoom_restore = nil
+  elseif vim.fn.winnr("$") > 1 then
+    local restore = vim.fn.winrestcmd()
+    vim.cmd("wincmd _")
+    vim.cmd("wincmd |")
+    vim.t.zoom_restore = restore
+  end
+end, { silent = true, desc = "Toggle zoom current split" })
+
 -- search: center + open folds after jumping (neoscroll animates the zz)
 vim.keymap.set("n", "n", "nzzzv")
 vim.keymap.set("n", "N", "Nzzzv")
@@ -92,80 +103,21 @@ vim.keymap.set("n", "N", "Nzzzv")
 vim.keymap.set("n", "<leader>tn", "<cmd>tabnew<CR>", { silent = true })
 vim.keymap.set("n", "<leader>tc", "<cmd>tabclose<CR>", { silent = true })
 
--- yank to system clipboard and notify
-local function yank_and_notify(text)
-  vim.fn.setreg("+", text)
-  -- ensure OSC 52 copy is triggered directly
-  local osc52 = vim.g.clipboard and vim.g.clipboard.copy and vim.g.clipboard.copy["+"]
-  if osc52 then osc52({ text }) end
-  vim.notify(text)
-end
-
 -- yank file path (relative to cwd)
-vim.keymap.set("n", "<leader>yf", function()
-  local path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":.")
-  yank_and_notify(path)
-end, { silent = true })
+vim.keymap.set("n", "<leader>yf", actions.yank_file_path, { silent = true, desc = "Yank file path" })
 
--- yank remote line link
-local function git_remote_url(path, line_suffix)
-  local remote = vim.fn.trim(vim.fn.system("git remote get-url origin"))
-  if vim.v.shell_error ~= 0 then
-    vim.notify("Not a git repo or no remote", vim.log.levels.ERROR)
-    return
-  end
-  local url = remote:gsub("git@([^:]+):", "https://%1/"):gsub("%.git$", "")
-  local commit = vim.fn.trim(vim.fn.system("git rev-parse origin/HEAD"))
-  url = url .. "/blob/" .. commit .. "/" .. path .. line_suffix
-  yank_and_notify(url)
-end
-
-vim.keymap.set({ "n", "v" }, "<leader>yl", function()
-  local path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":.")
-  local mode = vim.fn.mode()
-  if mode == "v" or mode == "V" or mode == "\22" then
-    local start = vim.fn.line("v")
-    local finish = vim.fn.line(".")
-    if start > finish then start, finish = finish, start end
-    git_remote_url(path, "#L" .. start .. "-L" .. finish)
-  else
-    git_remote_url(path, "#L" .. vim.fn.line("."))
-  end
-end, { silent = true })
+-- yank remote line link (current line or visual range), anchored at HEAD
+vim.keymap.set({ "n", "v" }, "<leader>yl", actions.yank_git_link, { silent = true, desc = "Yank git line link" })
 
 -- git hunk navigation (gitsigns)
 vim.keymap.set("n", "<leader>gj", function() require("gitsigns").nav_hunk("next") end, { silent = true, desc = "Next git change" })
 vim.keymap.set("n", "<leader>gk", function() require("gitsigns").nav_hunk("prev") end, { silent = true, desc = "Previous git change" })
 
 -- git blame: view current line's commit in Diffview
-vim.keymap.set("n", "<leader>gc", function()
-  local file = vim.fn.expand("%:p")
-  local lnum = vim.fn.line(".")
-  local out = vim.fn.system({ "git", "blame", "-L", lnum .. "," .. lnum, "--porcelain", "--", file })
-  local sha = out:match("^(%x+)")
-  if not sha or sha:match("^0+$") then
-    vim.notify("No commit for this line (uncommitted change)", vim.log.levels.WARN)
-    return
-  end
-  vim.cmd("DiffviewOpen " .. sha .. "^.." .. sha)
-end, { silent = true, desc = "Git blame commit in Diffview" })
+vim.keymap.set("n", "<leader>gc", actions.git_blame_commit_diffview, { silent = true, desc = "Git blame commit in Diffview" })
 
 -- git blame: open current line's commit on remote
-vim.keymap.set("n", "<leader>gC", function()
-  local file = vim.fn.expand("%:p")
-  local lnum = vim.fn.line(".")
-  local out = vim.fn.system({ "git", "blame", "-L", lnum .. "," .. lnum, "--porcelain", "--", file })
-  local sha = out:match("^(%x+)")
-  if not sha or sha:match("^0+$") then
-    vim.notify("No commit for this line (uncommitted change)", vim.log.levels.WARN)
-    return
-  end
-  local remote_url = vim.fn.system("git remote get-url origin"):gsub("%s+$", "")
-  -- normalize to https URL
-  remote_url = remote_url:gsub("^git@([^:]+):", "https://%1/"):gsub("%.git$", "")
-  local url = remote_url .. "/commit/" .. sha
-  yank_and_notify(url)
-end, { silent = true, desc = "Open line's commit on remote" })
+vim.keymap.set("n", "<leader>gC", actions.git_blame_commit_remote, { silent = true, desc = "Open line's commit on remote" })
 
 -- git workflow
 vim.keymap.set("n", "<leader>gs", "<cmd>Gdiffsplit<CR>", { silent = true })
