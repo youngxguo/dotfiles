@@ -1,4 +1,5 @@
 codex/config.toml
+.claude/
 __pycache__/
 *.py[cod]
 .pytest_cache/
