@@ -28,7 +28,7 @@ tok="$(echo "$payload" | jq -r '.context_window.total_input_tokens // empty')"
 worktree="$(echo "$payload" | jq -r '.worktree.name // empty')"
 sess="$(echo "$payload" | jq -r '.session_name // empty')"
 max_mode="$(echo "$payload" | jq -r '.model.max_mode // false')"
-vim_mode="$(echo "$payload" | jq -r '.vim.mode // empty')'
+vim_mode="$(echo "$payload" | jq -r '.vim.mode // empty')"
 
 pct="$(printf '%.0f\n' "$pct_raw" 2>/dev/null || echo 0)"
 if ! [[ "$pct" =~ ^[0-9]+$ ]]; then pct=0; fi
