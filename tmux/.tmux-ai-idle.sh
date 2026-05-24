@@ -14,7 +14,7 @@ from pathlib import Path
 IDLE_THRESHOLD = 15
 IDLE_COLORS = ("#[fg=#eee8d5,bg=#dc322f,bold]", "#[fg=#eee8d5,bg=#ff6961,bold]")
 THINKING_COLORS = ("#[fg=#002b36,bg=#ffd700,bold]", "#[fg=#002b36,bg=#f0ad4e,bold]")
-AI_COMMAND_RE = re.compile(r"(^|[ /])(claude|codex|agent|cursor-agent)([ \t/\n]|$)", re.IGNORECASE)
+AI_COMMAND_RE = re.compile(r"(^|[\s/])(claude|codex|agent|cursor-agent)([\s/]|$)", re.IGNORECASE)
 
 
 def tmux_binary():
@@ -63,8 +63,11 @@ def recreate_tmux_socket_dir():
 def is_ai_window(cmd, tty):
     if cmd in {"claude", "codex", "agent", "cursor-agent"}:
         return True
-    if cmd != "node" or not tty:
+    if not tty:
         return False
+    # pane_current_command is unreliable for these CLIs: Claude Code reports its
+    # version string (e.g. "2.1.150"), others report "node". Fall back to scanning
+    # the tty's processes for a known agent command in every non-matching case.
 
     tty_name = tty[5:] if tty.startswith("/dev/") else tty
     result = subprocess.run(
