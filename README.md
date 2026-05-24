@@ -42,6 +42,21 @@ APPLY_LOGIN_SHELL=1 python3 install.py
 
 The script is designed to be rerunnable and backs up pre-existing target files before replacing them with symlinks.
 
+## Cleanup / Uninstall
+Remove the symlinks this repo created, leaving everything else in place:
+
+```sh
+python3 install.py --cleanup
+```
+
+Preview first without changing anything:
+
+```sh
+python3 install.py --cleanup --dry-run
+```
+
+A target is removed only when it is a symlink that resolves back into this repo, so real files (and symlinks pointing elsewhere) are left untouched. Installed packages, cloned repos (`oh-my-zsh`, `scm_breeze`), and `*.bak.*` backups are **not** removed. The link set is shared with the install flow (`managed_links()`), so cleanup never drifts from what setup created. Re-running `install.py` restores the links.
+
 ## Git Hooks (Recommended)
 Enable the repo-managed hooks so `pre-push` runs an install idempotency check:
 

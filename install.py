@@ -260,7 +260,7 @@ def install_btop():
         print("skipping btop: no supported installer available")
 
     print("applying btop config")
-    link_file(REPO_ROOT / "btop/.config/btop/btop.conf", HOME / ".config/btop/btop.conf")
+    apply_links(links_for("btop"))
 
 
 def install_homebrew_only_package(pkg):
@@ -325,6 +325,67 @@ def link_file(source_path, target_path):
         print(f"backed up existing file to {backup}")
 
     target.symlink_to(source)
+
+
+def managed_links():
+    """Single source of truth for every symlink this repo manages.
+
+    Returns a list of (category, source, target) tuples. Both the setup flow
+    (via ``links_for``/``apply_links``) and ``cleanup_links`` iterate over this,
+    so the two can never drift. Dynamic categories (ghostty assets, tmux
+    scripts) are enumerated from whatever currently exists in the repo; targets
+    read the module-global ``HOME`` at call time so verify mode works.
+    """
+    links = [
+        ("zsh", REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc"),
+        ("ghostty", REPO_ROOT / "ghostty/config", HOME / ".config/ghostty/config"),
+    ]
+
+    shader_dir = REPO_ROOT / "ghostty/shaders"
+    if shader_dir.is_dir():
+        for shader_file in sorted(shader_dir.glob("*.glsl")):
+            links.append(("ghostty", shader_file, HOME / ".config/ghostty/shaders" / shader_file.name))
+    theme_dir = REPO_ROOT / "ghostty/themes"
+    if theme_dir.is_dir():
+        for theme_file in sorted(theme_dir.iterdir()):
+            if theme_file.is_file():
+                links.append(("ghostty", theme_file, HOME / ".config/ghostty/themes" / theme_file.name))
+
+    links.append(("tmux", REPO_ROOT / "tmux/.tmux.conf", HOME / ".tmux.conf"))
+    for script in sorted((REPO_ROOT / "tmux").glob(".tmux-*.sh")):
+        links.append(("tmux", script, HOME / script.name))
+
+    links.append(("btop", REPO_ROOT / "btop/.config/btop/btop.conf", HOME / ".config/btop/btop.conf"))
+
+    if sys.platform == "darwin":
+        vscode_user_dir = HOME / "Library/Application Support/Code/User"
+    else:
+        vscode_user_dir = HOME / ".config/Code/User"
+    links.append(("vscode", REPO_ROOT / "vscode/settings.json", vscode_user_dir / "settings.json"))
+    links.append(("vscode", REPO_ROOT / "vscode/keybindings.json", vscode_user_dir / "keybindings.json"))
+
+    links.append(("claude", REPO_ROOT / "claude/CLAUDE.md", HOME / ".claude/CLAUDE.md"))
+    links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
+    links.append(("codex", REPO_ROOT / "codex/config.toml", HOME / ".codex/config.toml"))
+    links.append(("hunk", REPO_ROOT / "hunk/.config/hunk/config.toml", HOME / ".config/hunk/config.toml"))
+    links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
+
+    return links
+
+
+def links_for(category):
+    return [(source, target) for cat, source, target in managed_links() if cat == category]
+
+
+def apply_links(links):
+    """Symlink each (source, target) whose source exists; return count applied."""
+    applied = 0
+    for source, target in links:
+        if not Path(source).exists():
+            continue
+        link_file(source, target)
+        applied += 1
+    return applied
 
 
 def install_homebrew():
@@ -401,7 +462,7 @@ def install_zsh_stack():
                     print(f"skipping fzf installer (not found at {fzf_install})")
 
     print("applying zsh config")
-    link_file(REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc")
+    apply_links(links_for("zsh"))
 
     if VERIFY_MODE:
         print("verify mode: skipping chsh")
@@ -419,35 +480,19 @@ def install_zsh_stack():
 
 def install_ghostty():
     print("applying ghostty config")
-    link_file(REPO_ROOT / "ghostty/config", HOME / ".config/ghostty/config")
-    shader_dir = REPO_ROOT / "ghostty/shaders"
-    if shader_dir.is_dir():
-        for shader_file in sorted(shader_dir.glob("*.glsl")):
-            link_file(shader_file, HOME / ".config/ghostty/shaders" / shader_file.name)
-    theme_dir = REPO_ROOT / "ghostty/themes"
-    if theme_dir.is_dir():
-        for theme_file in sorted(theme_dir.iterdir()):
-            if theme_file.is_file():
-                link_file(theme_file, HOME / ".config/ghostty/themes" / theme_file.name)
+    apply_links(links_for("ghostty"))
 
 
 def install_tmux():
     print("installing tmux")
     install_package("tmux")
     print("applying tmux config")
-    link_file(REPO_ROOT / "tmux/.tmux.conf", HOME / ".tmux.conf")
-    for script in sorted((REPO_ROOT / "tmux").glob(".tmux-*.sh")):
-        link_file(script, HOME / script.name)
+    apply_links(links_for("tmux"))
 
 
 def install_vscode():
     print("copying vscode configs")
-    if sys.platform == "darwin":
-        vscode_user_dir = HOME / "Library/Application Support/Code/User"
-    else:
-        vscode_user_dir = HOME / ".config/Code/User"
-    link_file(REPO_ROOT / "vscode/settings.json", vscode_user_dir / "settings.json")
-    link_file(REPO_ROOT / "vscode/keybindings.json", vscode_user_dir / "keybindings.json")
+    apply_links(links_for("vscode"))
 
 
 def install_scm_breeze():
@@ -474,43 +519,44 @@ def install_scm_breeze():
 
 
 def install_claude():
-    source = REPO_ROOT / "claude/CLAUDE.md"
-    if not source.exists():
+    links = links_for("claude")
+    if not any(Path(source).exists() for source, _ in links):
         print("skipping claude global instructions: no claude/CLAUDE.md present")
         return
     print("applying claude global instructions")
-    link_file(source, HOME / ".claude/CLAUDE.md")
+    apply_links(links)
 
 
 def install_codex():
-    agents_source = REPO_ROOT / "codex/AGENTS.md"
-    if agents_source.exists():
+    agents_links = [(s, d) for s, d in links_for("codex") if Path(s).name == "AGENTS.md"]
+    config_links = [(s, d) for s, d in links_for("codex") if Path(s).name == "config.toml"]
+
+    if any(Path(s).exists() for s, _ in agents_links):
         print("applying codex global instructions")
-        link_file(agents_source, HOME / ".codex/AGENTS.md")
+        apply_links(agents_links)
     else:
         print("skipping codex global instructions: no codex/AGENTS.md present")
 
-    config_source = REPO_ROOT / "codex/config.toml"
-    if not config_source.exists():
+    if any(Path(s).exists() for s, _ in config_links):
+        print("applying codex config")
+        apply_links(config_links)
+    else:
         print("skipping codex config: no repo-local codex/config.toml present")
-        return
-    print("applying codex config")
-    link_file(config_source, HOME / ".codex/config.toml")
 
 
 def install_hunk():
-    source = REPO_ROOT / "hunk/.config/hunk/config.toml"
-    if not source.exists():
+    links = links_for("hunk")
+    if not any(Path(source).exists() for source, _ in links):
         print("skipping hunk config: no repo-local hunk/config.toml present")
         return
     print("applying hunk config")
-    link_file(source, HOME / ".config/hunk/config.toml")
+    apply_links(links)
 
 
 def install_neovim():
     if VERIFY_MODE:
         print("verify mode: skipping neovim package/bootstrap")
-        link_file(REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim")
+        apply_links(links_for("neovim"))
         print("verify mode: skipping neovim sync")
         return
     install_package("neovim")
@@ -530,7 +576,7 @@ def install_neovim():
     if not command_exists("nvim"):
         print("skipping neovim config: nvim is not installed")
         return
-    link_file(REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim")
+    apply_links(links_for("neovim"))
     print("syncing neovim plugins")
     run(["nvim", "--headless", "+lua require('lazy').sync({wait = true})", "+qa"])
     run(["nvim", "--headless", "-c", "TSUpdateSync", "-c", "quitall"])
@@ -549,6 +595,38 @@ def run_install_flow():
     install_scm_breeze()
     install_neovim()
     print("Done")
+
+
+def cleanup_links(dry_run=False):
+    """Remove only the symlinks this repo created.
+
+    A target is removed only when it is a symlink that resolves into this repo,
+    so real user files (and symlinks pointing elsewhere) are left untouched.
+    Packages, cloned repos, and ``*.bak.*`` backups are not affected.
+    """
+    label = " (dry run)" if dry_run else ""
+    print(f"cleaning up repo-managed symlinks{label}")
+    removed = 0
+    skipped = 0
+    for _category, source, target in managed_links():
+        target = Path(target)
+        if target.is_symlink():
+            if target.resolve() == Path(source).resolve():
+                if dry_run:
+                    print(f"would remove link: {target}")
+                else:
+                    target.unlink()
+                    print(f"removed link: {target}")
+                removed += 1
+            else:
+                print(f"skipping {target}: symlink points outside repo -> {os.readlink(target)}")
+                skipped += 1
+        elif target.exists():
+            print(f"skipping {target}: real file, not a repo symlink")
+            skipped += 1
+
+    verb = "would remove" if dry_run else "removed"
+    print(f"cleanup done: {verb} {removed} link(s), skipped {skipped}")
 
 
 def snapshot_tree(root):
@@ -658,6 +736,16 @@ def parse_args():
         action="store_true",
         help="Run Neovim checkhealth and fail if health reports errors.",
     )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove repo-managed symlinks from $HOME (packages and real files are left untouched).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --cleanup, print what would be removed without changing anything.",
+    )
     return parser.parse_args()
 
 
@@ -668,6 +756,9 @@ def main():
         return
     if args.verify_neovim_health:
         verify_neovim_health()
+        return
+    if args.cleanup:
+        cleanup_links(dry_run=args.dry_run)
         return
     run_install_flow()
 
