@@ -28,6 +28,7 @@ VIOLET=$'\e[38;5;61m'
 GREEN=$'\e[38;5;64m'
 YELLOW=$'\e[38;5;136m'
 RED=$'\e[38;5;160m'
+TRACK=$'\e[48;5;236m'   # dark-gray background behind the bar interior
 
 round_pct() {
   awk -v x="${1:-0}" 'BEGIN { if (x=="") x=0; printf "%d", x + 0.5 }'
@@ -72,8 +73,8 @@ bar() {
   local empty_str=""
   for ((i = 0; i < empty; i++)); do empty_str+=" "; done
 
-  printf '%s▕%s%s%s%s%s▏%s' \
-    "$DIM" "$RESET" "$color" "$fill_str" "$DIM" "$empty_str" "$RESET"
+  printf '%s▕%s%s%s%s%s%s%s%s▏%s' \
+    "$DIM" "$RESET" "$TRACK" "$color" "$fill_str" "$DIM" "$empty_str" "$RESET" "$DIM" "$RESET"
 }
 
 home_short="${cwd/#$HOME/\~}"
