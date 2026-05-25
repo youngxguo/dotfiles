@@ -62,6 +62,10 @@ command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 export GIT_EDITOR=nvim
 
 # git aliases
+alias gs="git status"
+alias gd="git diff"
+alias gdc="git diff --cached"
+alias gp="git push"
 alias gcomm="git commit -m"
 alias gcom="git commit"
 alias gcoma="git commit --amend"
