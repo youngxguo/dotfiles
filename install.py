@@ -504,29 +504,6 @@ def install_vscode():
     apply_links(links_for("vscode"))
 
 
-def install_scm_breeze():
-    if VERIFY_MODE:
-        print("verify mode: skipping scm breeze bootstrap")
-        return
-    print("installing scm breeze (git plugin)")
-    scm_dir = HOME / ".scm_breeze"
-    clone_if_missing("https://github.com/scmbreeze/scm_breeze.git", scm_dir)
-    scm_lib = scm_dir / "lib/scm_breeze.sh"
-    if not scm_lib.exists():
-        print(f"skipping scm breeze config bootstrap (not found at {scm_lib})")
-        return
-    if not command_exists("bash"):
-        print("skipping scm breeze config bootstrap: bash is not available")
-        return
-    print("ensuring scm breeze user config files")
-    cmd = (
-        f"scmbDir={shlex.quote(str(scm_dir))}; "
-        f"source {shlex.quote(str(scm_lib))}; "
-        "_create_or_patch_scmbrc"
-    )
-    run(["bash", "-lc", cmd])
-
-
 def install_claude():
     links = links_for("claude")
     if not any(Path(source).exists() for source, _ in links):
@@ -601,7 +578,6 @@ def run_install_flow():
     install_claude()
     install_codex()
     install_hunk()
-    install_scm_breeze()
     install_neovim()
     print("Done")
 

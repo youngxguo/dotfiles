@@ -29,9 +29,6 @@ setopt HIST_VERIFY            # show expanded history line instead of running it
 setopt SHARE_HISTORY          # live-share history across running shells
 setopt EXTENDED_HISTORY       # record timestamps
 
-# scm breeze
-[ -s "$HOME/.scm_breeze/scm_breeze.sh" ] && source "$HOME/.scm_breeze/scm_breeze.sh"
-
 # fzf — Ctrl+R / Ctrl+T / Esc-c (repeat `source ~/.zshrc`: no-op)
 if [[ -z ${_dotfiles_fzf_rc-} && -o zle ]] && (( ${+commands[fzf]} )); then
   () {

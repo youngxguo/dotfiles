@@ -33,7 +33,6 @@ APPLY_LOGIN_SHELL=1 python3 install.py
 - Installs Homebrew-managed Neovim helper tools when Homebrew is available: `prettier`, `tree-sitter-cli`, `typescript-language-server`, `basedpyright`, `gh`, `chafa`, `viu`, `mercurial`
 - Installs the ESLint language server from npm when `npm` is available
 - Installs Oh My Zsh and shell plugins
-- Installs `scm_breeze`
 - Symlinks configs from this repo into `$HOME`
 - Applies Starship prompt config (`~/.config/starship.toml`)
 - Applies tracked Claude global instructions (`~/.claude/CLAUDE.md`) when `claude/CLAUDE.md` is present
@@ -56,7 +55,7 @@ Preview first without changing anything:
 python3 install.py --cleanup --dry-run
 ```
 
-A target is removed only when it is a symlink that resolves back into this repo, so real files (and symlinks pointing elsewhere) are left untouched. Installed packages, cloned repos (`oh-my-zsh`, `scm_breeze`), and `*.bak.*` backups are **not** removed. The link set is shared with the install flow (`managed_links()`), so cleanup never drifts from what setup created. Re-running `install.py` restores the links.
+A target is removed only when it is a symlink that resolves back into this repo, so real files (and symlinks pointing elsewhere) are left untouched. Installed packages, cloned repos (`oh-my-zsh`), and `*.bak.*` backups are **not** removed. The link set is shared with the install flow (`managed_links()`), so cleanup never drifts from what setup created. Re-running `install.py` restores the links.
 
 ## Git Hooks (Recommended)
 Enable the repo-managed hooks so `pre-push` runs an install idempotency check:
