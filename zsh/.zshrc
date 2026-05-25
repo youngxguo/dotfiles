@@ -30,7 +30,10 @@ if [[ -z ${_dotfiles_fzf_rc-} && -o zle ]] && (( ${+commands[fzf]} )); then
     else
       source <(command fzf --zsh 2>/dev/null)
     fi
-  }
+    # fzf's option save/restore re-sets every zsh option on load; on zsh 5.9
+    # that includes the unchangeable `zle`/`monitor`, which print a harmless
+    # "can't change option" to stderr. Drop just those lines; keep real errors.
+  } 2> >(grep -v "can't change option:" >&2)
   _dotfiles_fzf_rc=1
 fi
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
