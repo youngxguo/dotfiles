@@ -3,7 +3,6 @@ command_timeout = 1000
 palette = "solarized_dark"
 
 format = "$directory$git_branch$git_status$fill$cmd_duration$jobs$line_break$character"
-right_format = "$python$nodejs$rust$golang"
 
 [palettes.solarized_dark]
 base0 = "#839496"
@@ -21,7 +20,7 @@ style = "bold blue"
 truncation_length = 4
 truncate_to_repo = false
 read_only = "  ro"
-format = "[ $path]($style)[$read_only]($read_only_style) "
+format = "[$path]($style)[$read_only]($read_only_style) "
 
 [git_branch]
 style = "bold violet"
@@ -58,24 +57,3 @@ success_symbol = "[❯](bold green)"
 error_symbol = "[❯](bold red)"
 vimcmd_symbol = "[❮](bold green)"
 format = "$symbol "
-
-[python]
-symbol = " "
-style = "green"
-format = "[$symbol$version$virtualenv]($style) "
-version_format = "v${raw}"
-
-[nodejs]
-symbol = " "
-style = "green"
-format = "[$symbol$version]($style) "
-
-[rust]
-symbol = " "
-style = "orange"
-format = "[$symbol$version]($style) "
-
-[golang]
-symbol = " "
-style = "cyan"
-format = "[$symbol$version]($style) "
