@@ -370,7 +370,6 @@ def managed_links():
     links.append(("claude", REPO_ROOT / "claude/CLAUDE.md", HOME / ".claude/CLAUDE.md"))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
     links.append(("codex", REPO_ROOT / "codex/config.toml", HOME / ".codex/config.toml"))
-    links.append(("hunk", REPO_ROOT / "hunk/.config/hunk/config.toml", HOME / ".config/hunk/config.toml"))
     links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
 
     return links
@@ -530,15 +529,6 @@ def install_codex():
         print("skipping codex config: no repo-local codex/config.toml present")
 
 
-def install_hunk():
-    links = links_for("hunk")
-    if not any(Path(source).exists() for source, _ in links):
-        print("skipping hunk config: no repo-local hunk/config.toml present")
-        return
-    print("applying hunk config")
-    apply_links(links)
-
-
 def install_neovim():
     if VERIFY_MODE:
         print("verify mode: skipping neovim package/bootstrap")
@@ -556,7 +546,6 @@ def install_neovim():
     install_homebrew_only_package("chafa")
     install_homebrew_only_package("viu")
     install_homebrew_only_package("mercurial")
-    install_npm_global("hunkdiff", ("hunk",))
     install_npm_global("vscode-langservers-extracted", ("vscode-eslint-language-server",))
     ensure_fd_compat_shim()
     if not command_exists("nvim"):
@@ -577,7 +566,6 @@ def run_install_flow():
     install_vscode()
     install_claude()
     install_codex()
-    install_hunk()
     install_neovim()
     print("Done")
 
