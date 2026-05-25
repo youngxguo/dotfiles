@@ -44,6 +44,11 @@ float antialising(float distance) {
  return 1. - smoothstep(0., normalize(vec2(2., 2.), 0.).x, distance);
 }
 
+// Soft exponential halo from an SDF edge: 1 at the edge, decaying outward, 0 inside the shape.
+float glow(float d, float radius) {
+ return exp(-max(d, 0.0) / radius) * step(0.0, d);
+}
+
 float determineStartVertexFactor(vec2 a, vec2 b) {
  // Conditions using step
  float condition1 = step(b.x, a.x) * step(a.y, b.y); // a.x < b.x && a.y > b.y
@@ -56,11 +61,16 @@ float determineStartVertexFactor(vec2 a, vec2 b) {
 vec2 getRectangleCenter(vec4 rectangle) {
  return vec2(rectangle.x + (rectangle.z / 2.), rectangle.y - (rectangle.w / 2.));
 }
-float ease(float x) {
- return pow(1.0 - x, 3.0);
-}
+// --- Tunables -------------------------------------------------------------
+const float DURATION = 0.15; // IN SECONDS — keep short for a snappy feel
+const float EASE_POWER = 4.0; // higher = snappier trail collapse (was 3.0)
+const float GLOW_RADIUS = 0.02; // halo falloff width in normalized units (bump for more bloom)
+const float GLOW_STRENGTH = 0.6; // brightness of the additive glow halo
+// --------------------------------------------------------------------------
 
-const float DURATION = 0.15; //IN SECONDS
+float ease(float x) {
+ return pow(1.0 - x, EASE_POWER);
+}
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
 {
@@ -110,4 +120,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
  newColor = mix(newColor, iCurrentCursorColor, antialising(sdfCurrentCursor));
  newColor = mix(newColor, fragColor, step(sdfCurrentCursor, 0.));
  fragColor = mix(fragColor, newColor, step(sdfCurrentCursor, easedProgress * lineLength));
+
+ // Additive glow halo around the cursor and trail — soft edges that bleed light.
+ // Modulated by easedProgress so it pulses on each move and snaps away once settled.
+ float glowTaper = 1.0 - clamp(sdfCurrentCursor / max(lineLength, 1e-4), 0.0, 1.0);
+ float trailGlow = glow(sdfTrail, GLOW_RADIUS) * glowTaper;
+ float cursorGlow = glow(sdfCurrentCursor, GLOW_RADIUS);
+ float glowAmt = clamp((trailGlow + cursorGlow) * GLOW_STRENGTH * easedProgress, 0.0, 1.0);
+ vec3 glowColor = iCurrentCursorColor.rgb * glowAmt;
+ fragColor.rgb = 1.0 - (1.0 - fragColor.rgb) * (1.0 - glowColor); // screen blend
 }
