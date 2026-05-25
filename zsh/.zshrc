@@ -70,8 +70,6 @@ alias gcomm="git commit -m"
 alias gcom="git commit"
 alias gcoma="git commit --amend"
 alias vim="nvim"
-alias tmsu="$HOME/.tmux-setup-sessions.sh"
-alias tmux-setup="$HOME/.tmux-setup-sessions.sh"
 alias fep='docker port "$(cat "$(git rev-parse --show-toplevel)/.dev_docker_name")" 8080/tcp | sed -n "s/.*://p" | head -n1'
 
 export PATH="$HOME/.local/bin:$PATH"

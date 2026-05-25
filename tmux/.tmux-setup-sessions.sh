@@ -1,46 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-default_windows="agents vim git adp"
+default_windows="agents vim git"
 
-root="${TMUX_SETUP_ROOT:-$HOME}"
-specs_text="${TMUX_SETUP_SPECS:-}"
-sessions_text="${TMUX_SETUP_SESSIONS:-}"
+dir=""
+name="${TMUX_SETUP_NAME:-}"
+target_session=""
+target_window=""
 windows_text="${TMUX_SETUP_WINDOWS:-$default_windows}"
 attach=1
 dry_run=0
 
 usage() {
   cat <<'EOF'
-Usage: .tmux-setup-sessions.sh [options] [session[=directory] ...]
+Usage: .tmux-setup-sessions.sh [options] [directory]
 
-Create or update tmux work sessions. By default this creates:
-  applied3=$HOME/applied3
-  applied4=$HOME/applied4
-  applied5=$HOME/applied5
-  applied6=$HOME/applied6
-  1earn=$HOME/applied3
-  2eview=$HOME/applied3
-  core-stack=$HOME/core-stack
-  dotfiles=$HOME/Documents/dotfiles
-  skills=$HOME/claude-code-shared
+Ensure three windows exist for one directory: agents vim git
 
-Each session gets these windows:
-  agents vim git adp
+Two modes:
+  In-place (--session NAME): add any missing windows to an existing session,
+    rooted at the directory. Does not create a new session or switch clients.
+    This is what the `prefix + T` tmux binding uses on the current session.
+  Standalone (default): create (or re-use) a session named after the directory's
+    basename, add the windows, then attach/switch to it.
+
+The directory defaults to the current directory.
 
 Options:
-  --root DIR           Parent directory for session worktrees (default: $HOME)
-  --specs LIST         Space- or comma-separated session[=directory] specs
-  --sessions LIST      Space- or comma-separated session names under --root
+  --session NAME       In-place: set up windows in this existing session
+  --window ID          In-place: claim this window for the first name (rename it
+                       instead of leaving it alongside the new windows)
+  --name NAME          Standalone: session name (default: basename of directory)
   --windows LIST       Space- or comma-separated window names
-  --no-attach          Create sessions/windows but do not attach or switch
+  --no-attach          Standalone: create the session/windows but do not attach
   --dry-run            Print tmux commands without running them
   -h, --help           Show this help
 
 Environment:
-  TMUX_SETUP_ROOT      Same as --root
-  TMUX_SETUP_SPECS     Same as --specs
-  TMUX_SETUP_SESSIONS  Same as --sessions
+  TMUX_SETUP_NAME      Same as --name
   TMUX_SETUP_WINDOWS   Same as --windows
   TMUX_SETUP_SOCKET    Use a named tmux socket, useful for testing
 EOF
@@ -48,16 +45,16 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --root)
-      root="${2:?missing value for --root}"
+    --session)
+      target_session="${2:?missing value for --session}"
       shift 2
       ;;
-    --specs)
-      specs_text="${2:?missing value for --specs}"
+    --window)
+      target_window="${2:?missing value for --window}"
       shift 2
       ;;
-    --sessions)
-      sessions_text="${2:?missing value for --sessions}"
+    --name)
+      name="${2:?missing value for --name}"
       shift 2
       ;;
     --windows)
@@ -92,22 +89,23 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$#" -gt 0 ]; then
-  specs_text="$*"
-elif [ -z "$specs_text" ] && [ -n "$sessions_text" ]; then
-  specs_text="$sessions_text"
-elif [ -z "$specs_text" ]; then
-  specs_text="applied3=$root/applied3 applied4=$root/applied4 applied5=$root/applied5 applied6=$root/applied6 1earn=$root/applied3 2eview=$root/applied3 core-stack=$root/core-stack dotfiles=$root/Documents/dotfiles skills=$root/claude-code-shared"
+  dir="$1"
 fi
 
-specs_text="${specs_text//,/ }"
+dir="${dir:-$PWD}"
+
+case "$dir" in
+  "~")   dir="$HOME" ;;
+  "~/"*) dir="$HOME/${dir#"~/"}" ;;
+esac
+
+if ! dir="$(cd "$dir" 2>/dev/null && pwd)"; then
+  printf 'no such directory: %s\n' "$dir" >&2
+  exit 1
+fi
+
 windows_text="${windows_text//,/ }"
-read -r -a specs <<< "$specs_text"
 read -r -a windows <<< "$windows_text"
-
-if [ "${#specs[@]}" -eq 0 ] || [ -z "${specs[0]}" ]; then
-  printf 'no session specs requested\n' >&2
-  exit 2
-fi
 
 if [ "${#windows[@]}" -eq 0 ] || [ -z "${windows[0]}" ]; then
   printf 'no windows requested\n' >&2
@@ -148,115 +146,81 @@ window_exists() {
   capture_tmux list-windows -t "$session:" -F '#{window_name}' 2>/dev/null | grep -Fxq "$window"
 }
 
-workdir_for_session() {
+ensure_window() {
   local session="$1"
+  local window="$2"
 
-  if [[ "$session" = /* ]]; then
-    printf '%s\n' "$session"
-  else
-    printf '%s/%s\n' "$root" "$session"
+  [ -n "$window" ] || return 0
+  if window_exists "$session" "$window"; then
+    return 0
   fi
+
+  run_tmux new-window -d -t "$session:" -n "$window" -c "$dir"
 }
 
-normalize_workdir() {
-  local dir="$1"
-
-  case "$dir" in
-    "~")
-      printf '%s\n' "$HOME"
-      ;;
-    "~/"*)
-      printf '%s/%s\n' "$HOME" "${dir#"~/"}"
-      ;;
-    /*)
-      printf '%s\n' "$dir"
-      ;;
-    *)
-      printf '%s/%s\n' "$root" "$dir"
-      ;;
-  esac
+is_target_window() {
+  local candidate="$1" window
+  for window in "${windows[@]}"; do
+    [ "$candidate" = "$window" ] && return 0
+  done
+  return 1
 }
 
-parse_spec() {
-  local spec="$1"
-  local session
-  local dir
-
-  if [[ "$spec" == *=* ]]; then
-    session="${spec%%=*}"
-    dir="${spec#*=}"
-  else
-    session="$spec"
-    dir="$(workdir_for_session "$session")"
+# In-place mode: set up the windows in the current session and stay put. The
+# window the user is in is claimed for the first name (e.g. renamed to "agents")
+# rather than left alongside, so a fresh one-window session becomes exactly the
+# requested set.
+if [ -n "$target_session" ]; then
+  if ! session_exists "$target_session"; then
+    printf 'session does not exist: %s\n' "$target_session" >&2
+    exit 1
   fi
 
-  if [ -z "$session" ] || [ -z "$dir" ]; then
-    return 1
+  first="${windows[0]}"
+  if [ -n "$first" ] && ! window_exists "$target_session" "$first"; then
+    curname=""
+    if [ -n "$target_window" ]; then
+      curname="$(capture_tmux display-message -p -t "$target_window" '#{window_name}' 2>/dev/null || true)"
+    fi
+
+    # Only reuse the current window if it isn't already one of the other
+    # requested windows; otherwise create the first one fresh.
+    if [ -n "$target_window" ] && ! is_target_window "$curname"; then
+      run_tmux rename-window -t "$target_window" "$first"
+    else
+      ensure_window "$target_session" "$first"
+    fi
   fi
-
-  printf '%s\t%s\n' "$session" "$(normalize_workdir "$dir")"
-}
-
-created_sessions=()
-available_sessions=()
-
-for spec in "${specs[@]}"; do
-  [ -n "$spec" ] || continue
-
-  if ! parsed="$(parse_spec "$spec")"; then
-    printf 'skipping invalid session spec: %s\n' "$spec" >&2
-    continue
-  fi
-
-  session="${parsed%%$'\t'*}"
-  dir="${parsed#*$'\t'}"
-
-  if [ ! -d "$dir" ]; then
-    printf 'skipping %s: %s does not exist\n' "$session" "$dir" >&2
-    continue
-  fi
-
-  if ! session_exists "$session"; then
-    run_tmux new-session -d -s "$session" -n "${windows[0]}" -c "$dir"
-    created_sessions+=("$session")
-  fi
-  available_sessions+=("$session")
 
   for window in "${windows[@]:1}"; do
-    [ -n "$window" ] || continue
-
-    if window_exists "$session" "$window"; then
-      continue
-    fi
-
-    run_tmux new-window -d -t "$session:" -n "$window" -c "$dir"
+    ensure_window "$target_session" "$window"
   done
-done
 
-if [ "${#available_sessions[@]}" -eq 0 ]; then
-  printf 'no requested sessions exist\n' >&2
-  exit 1
-elif [ "${#created_sessions[@]}" -eq 0 ]; then
-  first_session="${available_sessions[0]}"
-else
-  first_session="${created_sessions[0]}"
-fi
-
-if [ "$dry_run" -eq 1 ]; then
-  if [ "$attach" -eq 1 ]; then
-    if [ -n "${TMUX:-}" ]; then
-      run_tmux switch-client -t "$first_session"
-    else
-      run_tmux attach-session -t "$first_session"
-    fi
-  fi
   exit 0
 fi
 
+# Standalone mode: create (or re-use) a session named after the directory.
+# tmux forbids "." and ":" in session names; fold them to "_".
+session="${name:-$(basename "$dir")}"
+session="${session//[.:]/_}"
+
+if [ -z "$session" ]; then
+  printf 'could not derive a session name from %s\n' "$dir" >&2
+  exit 2
+fi
+
+if ! session_exists "$session"; then
+  run_tmux new-session -d -s "$session" -n "${windows[0]}" -c "$dir"
+fi
+
+for window in "${windows[@]:1}"; do
+  ensure_window "$session" "$window"
+done
+
 if [ "$attach" -eq 1 ]; then
   if [ -n "${TMUX:-}" ]; then
-    run_tmux switch-client -t "$first_session"
+    run_tmux switch-client -t "$session"
   else
-    run_tmux attach-session -t "$first_session"
+    run_tmux attach-session -t "$session"
   fi
 fi

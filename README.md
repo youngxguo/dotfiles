@@ -96,18 +96,18 @@ SKIP_DOTFILES_PREPUSH=1 git push
   - `ls -l ~/.codex/config.toml` (if using a repo-local Codex config)
 
 ## Tmux Session Setup
-Use `tmsu` or `tmux-setup` to create the default work sessions:
+Press `Ctrl+Space` then `t` to set up `agents`, `vim`, and `git` windows in the **current session**, rooted at the current pane's directory. It stays put — no new session, no client switch. The window you're in is claimed as the first (`agents`), so a fresh one-window session becomes exactly those three. Only missing windows are added, so it's safe to press repeatedly. (This overrides tmux's default `prefix t` clock view.)
+
+The binding calls `~/.tmux-setup-sessions.sh` (see `tmux/.tmux-setup-sessions.sh`) in its in-place mode. You can also run the script directly:
 
 ```sh
-tmsu
-```
+# In-place: add the windows to an existing session (what the binding uses)
+~/.tmux-setup-sessions.sh --session mywork ~/applied3
 
-By default this creates or updates `applied3`, `applied4`, `applied5`, `applied6`, `1earn`, `2eview`, `core-stack`, `dotfiles`, and `skills`, each with `agents`, `vim`, `git`, and `adp` windows. It is idempotent: existing sessions and windows are left alone.
-
-Customize one run with:
-
-```sh
-tmsu "review=$HOME/applied3" "dotfiles=$HOME/Documents/dotfiles"
+# Standalone: create (or re-use) a session named after the directory and attach
+~/.tmux-setup-sessions.sh ~/applied3
+~/.tmux-setup-sessions.sh --name review ~/applied3      # override the session name
+~/.tmux-setup-sessions.sh --windows "agents vim git logs"
 ```
 
 ## Commit Message Rules (Codex/AI)
