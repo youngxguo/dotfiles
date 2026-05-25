@@ -59,6 +59,8 @@ PACKAGE_BINARIES = {
     "tmux": ("tmux",),
     "direnv": ("direnv",),
     "fzf": ("fzf",),
+    "fd": ("fd",),
+    "starship": ("starship",),
     "btop": ("btop",),
 }
 
@@ -338,6 +340,7 @@ def managed_links():
     """
     links = [
         ("zsh", REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc"),
+        ("zsh", REPO_ROOT / "starship/starship.toml", HOME / ".config/starship.toml"),
         ("ghostty", REPO_ROOT / "ghostty/config", HOME / ".config/ghostty/config"),
     ]
 
@@ -446,10 +449,16 @@ def install_zsh_stack():
 
         print("installing zsh plugins")
         install_package("direnv")
+        install_package("starship")
+        install_package("fd")
         zsh_custom = os.environ.get("ZSH_CUSTOM", str(HOME / ".oh-my-zsh/custom"))
         clone_if_missing(
             "https://github.com/zsh-users/zsh-autosuggestions",
             Path(zsh_custom) / "plugins/zsh-autosuggestions",
+        )
+        clone_if_missing(
+            "https://github.com/zsh-users/zsh-syntax-highlighting",
+            Path(zsh_custom) / "plugins/zsh-syntax-highlighting",
         )
 
         if install_package("fzf"):

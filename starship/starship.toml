@@ -1,0 +1,81 @@
+add_newline = false
+command_timeout = 1000
+palette = "solarized_dark"
+
+format = "$directory$git_branch$git_status$fill$cmd_duration$jobs$line_break$character"
+right_format = "$python$nodejs$rust$golang"
+
+[palettes.solarized_dark]
+base0 = "#839496"
+base01 = "#586e75"
+blue = "#268bd2"
+cyan = "#2aa198"
+green = "#859900"
+orange = "#cb4b16"
+red = "#dc322f"
+violet = "#6c71c4"
+yellow = "#b58900"
+
+[directory]
+style = "bold blue"
+truncation_length = 4
+truncate_to_repo = false
+read_only = "  ro"
+format = "[ $path]($style)[$read_only]($read_only_style) "
+
+[git_branch]
+style = "bold violet"
+format = "[ $branch]($style) "
+
+[git_status]
+style = "yellow"
+format = "([$all_status$ahead_behind]($style) )"
+conflicted = "! "
+ahead = "⇡ "
+behind = "⇣ "
+diverged = "⇕ "
+untracked = "? "
+stashed = " "
+modified = "* "
+staged = "+ "
+renamed = "» "
+deleted = "✘ "
+
+[fill]
+symbol = " "
+
+[cmd_duration]
+min_time = 2000
+style = "base01"
+format = "[ $duration]($style) "
+
+[jobs]
+style = "orange"
+format = "[ $number]($style) "
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+vimcmd_symbol = "[❮](bold green)"
+format = "$symbol "
+
+[python]
+symbol = " "
+style = "green"
+format = "[$symbol$version$virtualenv]($style) "
+version_format = "v${raw}"
+
+[nodejs]
+symbol = " "
+style = "green"
+format = "[$symbol$version]($style) "
+
+[rust]
+symbol = " "
+style = "orange"
+format = "[$symbol$version]($style) "
+
+[golang]
+symbol = " "
+style = "cyan"
+format = "[$symbol$version]($style) "

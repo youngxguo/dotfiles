@@ -35,6 +35,7 @@ APPLY_LOGIN_SHELL=1 python3 install.py
 - Installs Oh My Zsh and shell plugins
 - Installs `scm_breeze`
 - Symlinks configs from this repo into `$HOME`
+- Applies Starship prompt config (`~/.config/starship.toml`)
 - Applies tracked Claude global instructions (`~/.claude/CLAUDE.md`) when `claude/CLAUDE.md` is present
 - Applies tracked Codex global instructions (`~/.codex/AGENTS.md`) when `codex/AGENTS.md` is present (in-repo symlink to `claude/CLAUDE.md`, so both tools share one source of truth)
 - Applies repo-local Codex CLI config (`~/.codex/config.toml`) when `codex/config.toml` is present
@@ -85,6 +86,7 @@ SKIP_DOTFILES_PREPUSH=1 git push
 - `python3 install.py --verify-neovim-health`
 - Confirm symlinks:
   - `ls -l ~/.zshrc`
+  - `ls -l ~/.config/starship.toml`
   - `ls -l ~/.tmux.conf`
   - `ls -l ~/.config/btop/btop.conf`
   - `ls -l ~/.config/nvim`
