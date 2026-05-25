@@ -134,5 +134,11 @@ return {
         },
       }
     end,
+    config = function(_, opts)
+      require("fidget").setup(opts)
+      -- Route general vim.notify messages through fidget's themed surface,
+      -- alongside the LSP progress display.
+      vim.notify = require("fidget").notify
+    end,
   },
 }

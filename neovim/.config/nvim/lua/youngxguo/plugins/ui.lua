@@ -60,7 +60,15 @@ return {
     },
   },
 
-  { "lukas-reineke/indent-blankline.nvim", main = "ibl", event = { "BufReadPost", "BufNewFile" }, opts = {} },
+  {
+    "lukas-reineke/indent-blankline.nvim",
+    main = "ibl",
+    event = { "BufReadPost", "BufNewFile" },
+    opts = {
+      -- IblScope is themed in youngxguo.theme.apply_ui_highlights.
+      scope = { enabled = true, highlight = "IblScope", show_start = false, show_end = false },
+    },
+  },
 
   {
     "karb94/neoscroll.nvim",

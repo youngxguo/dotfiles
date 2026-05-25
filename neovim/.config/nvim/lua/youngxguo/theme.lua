@@ -51,6 +51,9 @@ function M.apply_ui_highlights()
   vim.api.nvim_set_hl(0, "YoungFidgetError", { fg = c.red, bg = fidget_bg, bold = true })
   vim.api.nvim_set_hl(0, "YoungFidgetDebug", { fg = c.base01, bg = fidget_bg })
   vim.api.nvim_set_hl(0, "YoungFidgetSeparator", { fg = c.base01, bg = fidget_bg })
+
+  -- indent-blankline active-scope guide, tied to the tabline/bufferline accent.
+  vim.api.nvim_set_hl(0, "IblScope", { fg = c.blue })
 end
 
 function M.bufferline_highlights()
