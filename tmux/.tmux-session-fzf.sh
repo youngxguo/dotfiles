@@ -5,7 +5,8 @@
 # pane of the highlighted session, and lets 1-9 jump straight to a session.
 # Meant to run inside a `display-popup -E` overlay; see `bind-key S` in
 # .tmux.conf. AI-state and @git_branch session options are populated by
-# ~/.tmux-ai-idle.sh and ~/.tmux-update-branches.sh respectively.
+# ~/.tmux-ai-idle.sh and ~/.tmux-update-branches.sh respectively. Branch labels
+# are cached so the popup can appear immediately.
 set -euo pipefail
 
 # Emit one line per session as: <name>\t<ANSI-styled display column>.
@@ -36,7 +37,21 @@ case "${1:-}" in
   --list) list; exit 0 ;;
 esac
 
-~/.tmux-update-branches.sh 2>/dev/null || true
+refresh_branches_async() {
+  local uid lock
+  uid="${UID:-$(id -u 2>/dev/null || printf user)}"
+  lock="${TMPDIR:-/tmp}/tmux-update-branches-$uid.lock"
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock -n 9 || exit 0
+      ~/.tmux-update-branches.sh >/dev/null 2>&1 || true
+    ) 9>"$lock" &
+  else
+    ~/.tmux-update-branches.sh >/dev/null 2>&1 &
+  fi
+}
+
+refresh_branches_async
 
 # 1-9 jump to and switch that session. Bare digits mean they can't be typed
 # into the fuzzy filter (letters still work); swap to alt-N below to change.
@@ -61,7 +76,8 @@ sel=$(
     --reverse --no-sort --cycle \
     --preview 'tmux capture-pane -ep -t {1}' \
     --preview-window=right:55%:nowrap \
-    --header 'enter/1-9: switch  ·  ctrl-x: kill session' \
+    --header 'enter/1-9: switch  ·  ctrl-r: refresh  ·  ctrl-x: kill session' \
+    --bind "ctrl-r:execute-silent(~/.tmux-update-branches.sh >/dev/null 2>&1)+reload($0 --list)" \
     --bind "ctrl-x:execute-silent(tmux kill-session -t {1})+reload($0 --list)" \
     "${hotkeys[@]}" "${start_bind[@]}" \
   | cut -f1
