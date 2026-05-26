@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Split the current tmux pane, rebalancing the layout to match the existing
-# split bindings. In the "agents" window only, if the source pane is running a
-# known agent CLI (TMUX_AGENT_COMMANDS in ~/.tmux-lib.sh), launch that same
-# command in the new pane so you don't have to retype it.
+# split bindings. If the source pane is running a known agent CLI
+# (TMUX_AGENT_COMMANDS in ~/.tmux-lib.sh), launch that same command in the new
+# pane so you don't have to retype it.
 #
 # Usage: .tmux-agent-split.sh <orientation> <pane_id>
 #   orientation: h (horizontal split) | v (vertical split)
@@ -25,7 +25,6 @@ esac
 target=()
 [ -n "$pane_id" ] && target=(-t "$pane_id")
 
-window_name="$("$TMUX_BIN" display-message -p "${target[@]}" '#{window_name}')"
 pane_path="$("$TMUX_BIN" display-message -p "${target[@]}" '#{pane_current_path}')"
 pane_pid="$("$TMUX_BIN" display-message -p "${target[@]}" '#{pane_pid}')"
 
@@ -50,10 +49,7 @@ detect_agent() {
   return 1
 }
 
-agent_cmd=""
-if [ "$window_name" = "agents" ]; then
-  agent_cmd="$(detect_agent "$pane_pid" || true)"
-fi
+agent_cmd="$(detect_agent "$pane_pid" || true)"
 
 new_pane="$("$TMUX_BIN" split-window "$split_flag" -c "$pane_path" "${target[@]}" -P -F '#{pane_id}')"
 "$TMUX_BIN" select-layout "${target[@]}" "$layout"
