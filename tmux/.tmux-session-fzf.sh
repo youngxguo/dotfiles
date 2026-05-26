@@ -43,15 +43,27 @@ esac
 hotkeys=()
 for n in 1 2 3 4 5 6 7 8 9; do hotkeys+=(--bind "$n:pos($n)+accept"); done
 
+# Open with the current session highlighted instead of the first row. NR in
+# list() follows list-sessions order, so the same lookup gives fzf's 1-based
+# position. pos() runs on the start event; that needs fzf --sync below, since
+# otherwise the list isn't loaded yet when start fires.
+start_bind=()
+cur=$(tmux display-message -p '#S' 2>/dev/null || true)
+if [ -n "$cur" ]; then
+  idx=$(tmux list-sessions -F '#{session_name}' 2>/dev/null \
+    | grep -nxF -- "$cur" | head -1 | cut -d: -f1 || true)
+  [ -n "${idx:-}" ] && start_bind=(--bind "start:pos($idx)")
+fi
+
 sel=$(
-  list | fzf --ansi \
+  list | fzf --ansi --sync \
     --delimiter='\t' --with-nth=2 \
     --reverse --no-sort --cycle \
     --preview 'tmux capture-pane -ep -t {1}' \
-    --preview-window=right:55%:wrap \
+    --preview-window=right:55%:nowrap \
     --header 'enter/1-9: switch  ·  ctrl-x: kill session' \
     --bind "ctrl-x:execute-silent(tmux kill-session -t {1})+reload($0 --list)" \
-    "${hotkeys[@]}" \
+    "${hotkeys[@]}" "${start_bind[@]}" \
   | cut -f1
 ) || exit 0
 
