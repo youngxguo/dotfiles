@@ -1,6 +1,8 @@
 # zsh
 export ZSH="$HOME/.oh-my-zsh"
 
+export PATH="$HOME/.local/bin:$PATH"
+
 # prompt: starship replaces the oh-my-zsh theme (config in starship/starship.toml)
 ZSH_THEME=""
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=10"
@@ -71,8 +73,6 @@ alias gcom="git commit"
 alias gcoma="git commit --amend"
 alias vim="nvim"
 alias fep='docker port "$(cat "$(git rev-parse --show-toplevel)/.dev_docker_name")" 8080/tcp | sed -n "s/.*://p" | head -n1'
-
-export PATH="$HOME/.local/bin:$PATH"
 
 # nvm — lazy-loaded to keep shell startup fast. The default node version stays
 # on PATH immediately (so node/npm work in scripts and subshells); the full nvm
