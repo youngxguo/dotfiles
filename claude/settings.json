@@ -3,11 +3,14 @@
     "defaultMode": "bypassPermissions"
   },
   "model": "opus",
-  "effortLevel": "xhigh",
-  "skipDangerousModePermissionPrompt": true,
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.sh",
     "padding": 0
+  },
+  "effortLevel": "xhigh",
+  "skipDangerousModePermissionPrompt": true,
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": true
   }
 }
