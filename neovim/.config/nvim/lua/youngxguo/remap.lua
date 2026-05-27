@@ -54,7 +54,10 @@ vim.keymap.set("n", "<C-p>", function()
 
   fzf.global({
     raw_cmd = raw,
-    fzf_opts = { ["--tiebreak"] = "index" },
+    fzf_opts = {
+      ["--no-hscroll"] = true,
+      ["--tiebreak"] = "index",
+    },
   })
 end, { silent = true })
 -- vim/tmux pane navigation
