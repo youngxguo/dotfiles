@@ -65,7 +65,7 @@ vec2 getRectangleCenter(vec4 rectangle) {
 const float DURATION = 0.20; // IN SECONDS — keep short for a snappy feel
 const float EASE_POWER = 2.0; // higher = snappier trail collapse
 const float GLOW_RADIUS = 0.02; // halo falloff width in normalized units (bump for more bloom)
-const float GLOW_STRENGTH = 0.15; // brightness of the additive glow halo
+const float GLOW_STRENGTH = 0.25; // brightness of the additive glow halo
 // --------------------------------------------------------------------------
 
 float ease(float x) {
