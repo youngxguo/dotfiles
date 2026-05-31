@@ -30,6 +30,7 @@
 #   ensure-all                  backfill every window (config load / server start)
 #   reset-all                   normalize every window to one correct rail (repair)
 #   switch <n>                  switch to the Nth session (Cmd-1..9)
+#   refresh                     wake sidebar panes so they redraw immediately
 #   render                      the redraw loop (runs *inside* the rail pane)
 #   fix <window>                pin the rail to SIDEBAR_WIDTH; tidy @has_sidebar
 #   rebalance <win> [h|v]       spread the panes evenly; with a rail present keep
@@ -320,7 +321,7 @@ cmd_switch() {
   local n="$1" name
   case "$n" in *[!0-9]*|'') return 0 ;; esac
   name="$("$TMUX_BIN" list-sessions -F '#{session_name}' 2>/dev/null | sed -n "${n}p")"
-  [ -n "$name" ] && "$TMUX_BIN" switch-client -t "$name" 2>/dev/null || true
+  [ -n "$name" ] && "$TMUX_BIN" switch-client -t "$name" 2>/dev/null && cmd_refresh || true
 }
 
 ### Rendering ###
@@ -334,6 +335,10 @@ IDLE="${ESC}[1;38;2;238;232;213;48;2;220;50;47m"  # base2 on red
 THINK="${ESC}[1;38;2;0;43;54;48;2;255;215;0m"     # base03 on gold
 BLUE="${ESC}[38;2;38;139;210m"      # attached marker
 YELLOW="${ESC}[38;2;181;137;0m"     # git branch
+
+sidebar_wake_dir() {
+  printf '%s/tmux-sidebar-%s\n' "${TMPDIR:-/tmp}" "${UID:-$(id -u)}"
+}
 
 # Truncate a string to N display columns, appending … when cut.
 truncate() {
@@ -412,18 +417,45 @@ render_once() {
   printf '\n%s ⌘1-9 · prefix s%s\n' "$GREY" "$RESET"
 }
 
+cmd_refresh() {
+  local pane sb fifo wake_dir
+  wake_dir="$(sidebar_wake_dir)"
+  while read -r pane sb; do
+    [ "$sb" = "1" ] || continue
+    fifo="$wake_dir/${pane#%}.fifo"
+    [ -p "$fifo" ] || continue
+    perl -e \
+      'use Fcntl qw(O_WRONLY O_NONBLOCK); if (sysopen(my $fh, $ARGV[0], O_WRONLY|O_NONBLOCK)) { print {$fh} "\n" }' \
+      "$fifo" 2>/dev/null || true
+  done < <("$TMUX_BIN" list-panes -a -F '#{pane_id} #{@sidebar}' 2>/dev/null)
+}
+
 cmd_render() {
+  local wake_dir wake_fifo wake_fd_open=0
+  wake_dir="$(sidebar_wake_dir)"
+  wake_fifo="$wake_dir/${TMUX_PANE#%}.fifo"
+  mkdir -p "$wake_dir" 2>/dev/null || true
+  rm -f "$wake_fifo"
+  if mkfifo "$wake_fifo" 2>/dev/null && exec 3<>"$wake_fifo"; then
+    wake_fd_open=1
+  else
+    rm -f "$wake_fifo"
+  fi
+
   printf '%s' "${ESC}[?25l"                       # hide cursor
-  trap 'printf "%s" "${ESC}[?25h"' EXIT INT TERM  # restore on exit
+  trap 'printf "%s" "${ESC}[?25h"; rm -f "$wake_fifo"' EXIT INT TERM
   local out prev="" active
   # Draw once up front so a window that's never been visible still has content
   # the instant you switch to it, rather than a blank pane for a tick.
   prev="$(render_once)"; printf '%s%s' "${ESC}[H${ESC}[2J" "$prev"
   while :; do
-    sleep 2
-    # Every window has its own sidebar now, so only the visible one does work.
-    # window_active is 1 when this is its session's current window.
-    active="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{window_active}' 2>/dev/null)"
+    if [ "$wake_fd_open" = "1" ]; then
+      IFS= read -r -t "${SIDEBAR_REFRESH_INTERVAL:-2}" -u 3 _ || true
+    else
+      sleep "${SIDEBAR_REFRESH_INTERVAL:-2}"
+    fi
+    # Every window has its own sidebar now, so only attached current windows work.
+    active="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)"
     [ "$active" = "1" ] || continue
     out="$(render_once)"
     if [ "$out" != "$prev" ]; then
@@ -439,9 +471,10 @@ case "${1:-toggle}" in
   ensure-all)  cmd_ensure_all ;;
   reset-all)   cmd_reset_all ;;
   switch)      cmd_switch "${2:-}" ;;
+  refresh)     cmd_refresh ;;
   render)      cmd_render ;;
   fix)         cmd_fix "${2:-}" ;;
   rebalance)   cmd_rebalance "${2:-}" "${3:-}" ;;
   layout-hook) cmd_layout_hook "${2:-}" "${3:-}" "${4:-0}" ;;
-  *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>}\n' "${0##*/}" >&2; exit 2 ;;
+  *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|refresh|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>}\n' "${0##*/}" >&2; exit 2 ;;
 esac
