@@ -12,8 +12,6 @@ from pathlib import Path
 
 
 IDLE_THRESHOLD = 15
-IDLE_COLORS = ("#[fg=#eee8d5,bg=#dc322f,bold]", "#[fg=#eee8d5,bg=#ff6961,bold]")
-THINKING_COLORS = ("#[fg=#002b36,bg=#ffd700,bold]", "#[fg=#002b36,bg=#f0ad4e,bold]")
 # Canonical agent CLIs. The bash scripts share TMUX_AGENT_COMMANDS via
 # ~/.tmux-lib.sh; this Python can't source bash, so keep these two in sync (the
 # pre-push hook fails if they drift).
@@ -105,22 +103,11 @@ def git_branch(path):
     return ""
 
 
-def set_window_option(window_id, option, value=None):
-    if value is None:
-        run_tmux("set-window-option", "-q", "-u", "-t", window_id, option)
-    else:
-        run_tmux("set-window-option", "-q", "-t", window_id, option, value)
-
-
 def set_session_option(session_id, option, value=None):
     if value is None:
         run_tmux("set-option", "-q", "-u", "-t", session_id, option)
     else:
         run_tmux("set-option", "-q", "-t", session_id, option, value)
-
-
-def sort_by_session_idx(window_ids, window_to_session, session_display_idx):
-    return sorted(window_ids, key=lambda wid: session_display_idx.get(window_to_session[wid].lstrip("$"), 0))
 
 
 def main():
@@ -141,18 +128,19 @@ def main():
     idle_windows = {}
     thinking_windows = {}
     idle_paths = {}
-    all_windows = {}
-    all_windows_think = {}
     active_states = set()
+    prev_idle_sessions = set()
+    for line in tmux_lines("list-sessions", "-F", "#{session_id}|#{?#{@session_ai_idle},1,0}"):
+        sid, _, flag = line.partition("|")
+        if flag == "1":
+            prev_idle_sessions.add(sid)
 
-    pane_format = "#{window_id}|#{session_id}|#{pane_id}|#{pane_current_command}|#{pane_tty}|#{pane_current_path}|#{@ai_idle}|#{@ai_thinking}"
+    pane_format = "#{window_id}|#{session_id}|#{pane_id}|#{pane_current_command}|#{pane_tty}|#{pane_current_path}"
     for line in tmux_lines("list-panes", "-a", "-F", pane_format):
-        parts = line.split("|", 7)
-        if len(parts) != 8:
+        parts = line.split("|", 5)
+        if len(parts) != 6:
             continue
-        window_id, session_id, pane_id, cmd, tty, pane_path, ai_idle, ai_thinking = parts
-        all_windows[window_id] = ai_idle
-        all_windows_think[window_id] = ai_thinking
+        window_id, session_id, pane_id, cmd, tty, pane_path = parts
         if window_id in idle_windows or window_id in thinking_windows:
             continue
         if not is_ai_window(cmd, tty):
@@ -185,25 +173,6 @@ def main():
             except FileNotFoundError:
                 pass
 
-    newly_idle = {}
-    for window_id in all_windows:
-        if window_id in idle_windows:
-            if all_windows[window_id] != "1":
-                set_window_option(window_id, "@ai_idle", "1")
-                newly_idle[window_id] = True
-            if all_windows_think.get(window_id) == "1":
-                set_window_option(window_id, "@ai_thinking")
-        elif window_id in thinking_windows:
-            if all_windows_think.get(window_id) != "1":
-                set_window_option(window_id, "@ai_thinking", "1")
-            if all_windows.get(window_id) == "1":
-                set_window_option(window_id, "@ai_idle")
-        else:
-            if all_windows.get(window_id) == "1":
-                set_window_option(window_id, "@ai_idle")
-            if all_windows_think.get(window_id) == "1":
-                set_window_option(window_id, "@ai_thinking")
-
     idle_sessions = set(idle_windows.values())
     thinking_sessions = set(thinking_windows.values())
     for sid_num in session_display_idx:
@@ -211,24 +180,22 @@ def main():
         set_session_option(sid, "@session_ai_idle", "1" if sid in idle_sessions else None)
         set_session_option(sid, "@session_ai_thinking", "1" if sid in thinking_sessions else None)
 
-    idle_labels = {}
-    idle_short_labels = {}
-    for window_id, session_id in idle_windows.items():
-        sid_num = session_id.lstrip("$")
-        display_idx = session_display_idx.get(sid_num, sid_num)
-        name = session_names.get(sid_num, "")
-        branch = git_branch(idle_paths[window_id])
-        idle_labels[window_id] = f"({display_idx}) {name}{(' ' + branch) if branch else ''}"
-        idle_short_labels[window_id] = f"({display_idx})"
-
-    thinking_labels = {}
-    for window_id, session_id in thinking_windows.items():
-        sid_num = session_id.lstrip("$")
-        thinking_labels[window_id] = f"({session_display_idx.get(sid_num, sid_num)})"
-
+    newly_idle = idle_sessions - prev_idle_sessions
     if newly_idle:
-        notif_lines = ["❕ AI Idle"]
-        notif_lines.extend(f" • {idle_labels[window_id]}" for window_id in newly_idle)
+        idle_labels = []
+        seen_sessions = set()
+        for window_id, session_id in idle_windows.items():
+            if session_id not in newly_idle or session_id in seen_sessions:
+                continue
+            seen_sessions.add(session_id)
+            sid_num = session_id.lstrip("$")
+            display_idx = session_display_idx.get(sid_num, sid_num)
+            name = session_names.get(sid_num, "")
+            branch = git_branch(idle_paths[window_id])
+            label = f"({display_idx}) {name}{(' ' + branch) if branch else ''}"
+            idle_labels.append(label)
+
+        notif_lines = ["❕ AI Idle", *(f" • {label}" for label in idle_labels)]
         notif_msg = "\n".join(notif_lines)
         for ctty in tmux_lines("list-clients", "-F", "#{client_tty}"):
             try:
@@ -236,39 +203,6 @@ def main():
             except OSError:
                 pass
 
-    if not idle_windows and not thinking_windows:
-        return 0
-
-    thinking_out = ""
-    for idx, window_id in enumerate(sort_by_session_idx(thinking_windows, thinking_windows, session_display_idx)):
-        thinking_out += f"{THINKING_COLORS[idx % len(THINKING_COLORS)]} 💭 {thinking_labels[window_id]} "
-
-    long_out = ""
-    short_out = ""
-    long_width = 0
-    for idx, window_id in enumerate(sort_by_session_idx(idle_windows, idle_windows, session_display_idx)):
-        color = IDLE_COLORS[idx % len(IDLE_COLORS)]
-        label = idle_labels[window_id]
-        long_out += f"{color} ! {label} "
-        short_out += f"{color} ! {idle_short_labels[window_id]} "
-        long_width += len(label) + 5
-
-    if not idle_windows:
-        print(f" {thinking_out} ", end="")
-        return 0
-
-    width_result = run_tmux("display", "-p", "#{client_width}")
-    try:
-        client_width = int(width_result.stdout.strip())
-    except ValueError:
-        client_width = 200
-    win_list_width = sum(len(name) + 5 for name in tmux_lines("list-windows", "-F", "#{window_name}"))
-    available = client_width - 48 - win_list_width - 25
-
-    if long_width <= available:
-        print(f" {thinking_out}{long_out} ", end="")
-    else:
-        print(f" {thinking_out}{short_out} ", end="")
     return 0
 
 

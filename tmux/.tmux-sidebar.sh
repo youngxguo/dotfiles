@@ -3,8 +3,8 @@
 # to the leftmost column of EVERY window, so it reads as one global sidebar that
 # the windows live to the right of, rather than a per-window pane.
 #
-# It live-renders every session with the same AI idle (!) / thinking (💭) badges
-# and git branch as the status line, fzf picker, and choose-tree. Sessions stay
+# It live-renders every session with AI idle (!) / thinking (💭) badges and git
+# branch. Sessions stay
 # in tmux list order and always show their list-order number, so Cmd-1..9 maps
 # directly to the visible rail labels.
 #
@@ -21,8 +21,10 @@
 # once — the shown/hidden state is one global flag (@sidebar_enabled), not per
 # window, so it stays consistent across every window and session.
 #
-# AI-state and @git_branch session options are populated by ~/.tmux-ai-idle.sh
-# and ~/.tmux-update-branches.sh.
+# AI-state session options (@session_ai_*) are populated by ~/.tmux-ai-idle.sh,
+# which this rail runs on its own refresh tick (ai_idle_tick) rather than from
+# the tmux status line; the rail reads the git branch directly from each
+# session's pane path.
 #
 # Subcommands:
 #   toggle                      hide/show the rail everywhere (global state)
@@ -45,6 +47,11 @@ SCRIPT_PATH="$SCRIPT_DIR/${BASH_SOURCE[0]##*/}"
 source "$SCRIPT_DIR/.tmux-lib.sh"
 
 TMUX_BIN="$(tmux_resolve_bin)"
+
+# The AI idle/thinking detector. The rail drives it from its refresh tick (see
+# ai_idle_tick) instead of the tmux status line, so all AI-state bookkeeping
+# lives next to the rail that renders it.
+AI_IDLE_SCRIPT="$SCRIPT_DIR/.tmux-ai-idle.sh"
 
 # Sidebar width in columns. Override with SIDEBAR_WIDTH in the environment.
 WIDTH="${SIDEBAR_WIDTH:-26}"
@@ -315,7 +322,7 @@ cmd_reset_all() {
 }
 
 # switch <n> [client]: jump to the Nth session in list-sessions order — the same
-# ordering the `prefix s` picker uses for hotkeys. Bound to Cmd-1..9 via Ghostty
+# ordering shown in the sidebar rail. Bound to Cmd-1..9 via Ghostty
 # user-keys → User1..User9 (see .tmux.conf and ghostty/config). Passing the
 # triggering client lets us refresh just the visible rails touched by the switch,
 # instead of waking every sidebar pane in the server on every rapid keypress.
@@ -344,8 +351,8 @@ RESET="${ESC}[0m"
 GREY="${ESC}[38;2;88;110;117m"      # base01  – index numbers, rules
 HDR="${ESC}[1;38;2;147;161;161m"    # base1   – header
 NAME="${ESC}[38;2;131;148;150m"     # base0   – session names
-IDLE="${ESC}[1;38;2;238;232;213;48;2;220;50;47m"  # base2 on red
-THINK="${ESC}[1;38;2;0;43;54;48;2;255;215;0m"     # base03 on gold
+IDLE="$TMUX_AI_IDLE_ANSI"
+THINK="$TMUX_AI_THINK_ANSI"
 SELECT="${ESC}[1;38;2;253;246;227;48;2;38;139;210m" # base3 on blue
 BLUE="${ESC}[38;2;38;139;210m"      # attached marker
 YELLOW="${ESC}[38;2;181;137;0m"     # git branch
@@ -395,19 +402,20 @@ render_once() {
   [ -n "$width" ] || width="$WIDTH"
   current_session="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null)"
 
-  # A tab in read's IFS is whitespace, so an empty field collapses and shifts
-  # every later column. The branch is the only field that's normally empty, so it
-  # goes LAST: a trailing empty field is simply trimmed, leaving the rest intact.
-  # (tmux escapes raw control-byte separators to literal text, so US/NUL are out.)
+  # The branch is read straight from each session's pane path (tmux_git_branch)
+  # rather than the @git_branch option, so the rail is always current without
+  # depending on ~/.tmux-update-branches.sh; folder_label_for_path already forks
+  # git per session, so this adds no meaningful cost. pane_current_path is the
+  # last field and never empty, so the tab split stays aligned.
   local -a names idle think branch folder
-  local n id th path br count=0 base
-  while IFS=$'\t' read -r n id th path br; do
+  local n id th path count=0 base
+  while IFS=$'\t' read -r n id th path; do
     base="$(folder_label_for_path "$path" "$n")"
     names[count]="$n"; folder[count]="$base"; idle[count]="$id"; think[count]="$th"
-    branch[count]="$br"
+    branch[count]="$(tmux_git_branch "$path")"
     count=$((count + 1))
   done < <("$TMUX_BIN" list-sessions -F \
-'#{session_name}'$'\t''#{?#{@session_ai_idle},1,0}'$'\t''#{?#{@session_ai_thinking},1,0}'$'\t''#{pane_current_path}'$'\t''#{@git_branch}' 2>/dev/null)
+'#{session_name}'$'\t''#{?#{@session_ai_idle},1,0}'$'\t''#{?#{@session_ai_thinking},1,0}'$'\t''#{pane_current_path}' 2>/dev/null)
 
   local j nm br badge pad prefix prefix_cols branch_part name_budget branch_budget selected label_width label
   local i=0
@@ -487,6 +495,20 @@ cmd_refresh() {
   done < <("$TMUX_BIN" list-panes -a -F '#{pane_id} #{@sidebar}' 2>/dev/null)
 }
 
+# Run the AI idle/thinking detector in the background so a slow pane scan never
+# stalls the redraw. A non-blocking flock keeps ticks from stacking up: if the
+# previous run is still going, this tick is simply skipped. It publishes
+# @session_ai_* (and fires idle notifications), which the next render reads.
+ai_idle_tick() {
+  [ -e "$AI_IDLE_SCRIPT" ] || return 0
+  local lock="${TMPDIR:-/tmp}/tmux-ai-idle-${UID:-$(id -u 2>/dev/null || echo user)}.lock"
+  if command -v flock >/dev/null 2>&1; then
+    ( flock -n 9 || exit 0; "$AI_IDLE_SCRIPT" >/dev/null 2>&1 ) 9>"$lock" &
+  else
+    "$AI_IDLE_SCRIPT" >/dev/null 2>&1 &
+  fi
+}
+
 cmd_render() {
   local wake_dir wake_fifo wake_fd_open=0
   wake_dir="$(sidebar_wake_dir)"
@@ -514,6 +536,7 @@ cmd_render() {
     # Every window has its own sidebar now, so only attached current windows work.
     active="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)"
     [ "$active" = "1" ] || continue
+    ai_idle_tick
     out="$(render_once)"
     if [ "$out" != "$prev" ]; then
       printf '%s%s' "${ESC}[H${ESC}[2J" "$out"  # home + clear, then redraw

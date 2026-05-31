@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish each session's current git branch as the @git_branch session option,
-# consumed by the status line, the choose-tree binding, and the fzf picker.
+# consumed by the sidebar and choose-tree binding.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/.tmux-lib.sh"
 

@@ -12,6 +12,12 @@
 # Canonical set of agent CLIs we treat specially (idle detection, split mirror).
 TMUX_AGENT_COMMANDS=(claude codex agent cursor-agent)
 
+# AI idle/thinking badge colors (Solarized: base2 on red, base03 on gold). Bash
+# scripts source these; ~/.tmux-ai-idle.sh (Python) can't source bash.
+TMUX_AI_IDLE_ANSI=$'\033'"[1;38;2;238;232;213;48;2;220;50;47m"
+TMUX_AI_THINK_ANSI=$'\033'"[1;38;2;0;43;54;48;2;255;215;0m"
+TMUX_AI_RESET=$'\033'"[0m"
+
 # Resolve the tmux binary. On Linux, prefer the exact binary backing the running
 # server (exposed at /proc/<pid>/exe) so we never drive the server with a since-
 # replaced binary, e.g. after a snap update. macOS has no /proc, so fall back to
