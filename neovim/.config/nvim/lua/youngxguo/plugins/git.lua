@@ -76,11 +76,6 @@ return {
     },
     opts = {
       use_icons = true,
-      file_panel = {
-        win_config = {
-          width = 60,
-        },
-      },
       hooks = {
         diff_buf_read = function(bufnr)
           vim.schedule(function()
