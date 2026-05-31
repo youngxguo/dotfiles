@@ -6,7 +6,8 @@
 #
 # The status-line script (~/.tmux-ai-idle.sh) is Python and can't source this, so
 # it reimplements tmux_resolve_bin / tmux_recreate_socket_dir and keeps its own
-# copy of TMUX_AGENT_COMMANDS. Keep that copy in sync with the list below.
+# copy of TMUX_AGENT_COMMANDS. Keep that copy in sync with the list below; the
+# pre-push hook fails if the two agent-command lists drift.
 
 # Canonical set of agent CLIs we treat specially (idle detection, split mirror).
 TMUX_AGENT_COMMANDS=(claude codex agent cursor-agent)

@@ -15,7 +15,8 @@ IDLE_THRESHOLD = 15
 IDLE_COLORS = ("#[fg=#eee8d5,bg=#dc322f,bold]", "#[fg=#eee8d5,bg=#ff6961,bold]")
 THINKING_COLORS = ("#[fg=#002b36,bg=#ffd700,bold]", "#[fg=#002b36,bg=#f0ad4e,bold]")
 # Canonical agent CLIs. The bash scripts share TMUX_AGENT_COMMANDS via
-# ~/.tmux-lib.sh; this Python can't source bash, so keep these two in sync.
+# ~/.tmux-lib.sh; this Python can't source bash, so keep these two in sync (the
+# pre-push hook fails if they drift).
 AGENT_COMMANDS = ("claude", "codex", "agent", "cursor-agent")
 AI_COMMAND_RE = re.compile(
     r"(^|[\s/])(" + "|".join(AGENT_COMMANDS) + r")([\s/]|$)", re.IGNORECASE
