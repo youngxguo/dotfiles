@@ -111,7 +111,7 @@ The binding calls `~/.tmux-setup-sessions.sh` (see `tmux/.tmux-setup-sessions.sh
 ```
 
 ## Tmux Sessions Sidebar
-A persistent read-only rail appears on the left of every tmux window. It shows sessions with the same AI idle (`!`) / thinking (`💭`) badges and git branch labels used by the picker/status line. Idle sessions float to the top, but the printed number remains the session's list-order index, matching the `1`-`9` hotkeys.
+A persistent read-only rail appears on the left of every tmux window. It shows sessions with the same AI idle (`!`) / thinking (`💭`) badges and inline git branch labels used by the picker/status line. Idle sessions float to the top; Cmd-`1`-`9` still follows tmux's session list order without printing shortcut labels in the rail.
 
 It's enabled automatically for existing and new windows. Press `Ctrl+Space` then `b` to hide/show it globally via `@sidebar_enabled`; new windows respect that state.
 

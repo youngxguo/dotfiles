@@ -5,8 +5,8 @@
 #
 # It live-renders every session with the same AI idle (!) / thinking (💭) badges
 # and git branch as the status line, fzf picker, and choose-tree. Idle sessions
-# float to the top; the number shown stays each session's list-order index, so it
-# matches the 1-9 hotkeys in the `prefix s` picker (and the `switch` subcommand).
+# float to the top; Cmd-1..9 still follows tmux's list-order index without
+# printing shortcut labels in the rail.
 #
 # Always-on: every new window gets a rail via the window-linked hook, and
 # ensure-all backfills existing windows at config load. The rail is created with
@@ -311,9 +311,9 @@ cmd_reset_all() {
     < <("$TMUX_BIN" list-windows -a -F '#{window_id}')
 }
 
-# switch <n>: jump to the Nth session in list-sessions order — the same 1-based
-# numbering the sidebar prints and the `prefix s` picker uses as hotkeys. Bound
-# to Cmd-1..9 via Ghostty user-keys → User1..User9 (see .tmux.conf and
+# switch <n>: jump to the Nth session in list-sessions order — the same ordering
+# the `prefix s` picker uses for hotkeys. Bound to Cmd-1..9 via Ghostty user-keys
+# → User1..User9 (see .tmux.conf and
 # ghostty/config). switch-client with no -c targets the client that pressed the
 # key, so this follows whichever client triggered it.
 cmd_switch() {
@@ -382,34 +382,48 @@ render_once() {
     [ "${idle[j]}" != "1" ] && [ "${think[j]}" != "1" ] && order+=("$j")
   done
 
-  local idx num nm badge body pad
+  local nm br badge pad prefix prefix_cols branch_part attached_part name_budget branch_budget
   for j in "${order[@]}"; do
-    num=$((j + 1))
     if [ "${idle[j]}" = "1" ]; then badge="! "; elif [ "${think[j]}" = "1" ]; then badge="💭 "; else badge="  "; fi
-    # Budget: leading space + badge(2) + number + space, leave 1 trailing.
-    nm="$(truncate "${names[j]}" $((width - 5 - ${#num})))"
+    prefix=" ${badge}"
+    prefix_cols=${#prefix}
+    [ "${think[j]}" = "1" ] && prefix_cols=$((prefix_cols + 1))
+
+    attached_part=""
+    [ "${att[j]}" = "1" ] && [ "${idle[j]}" != "1" ] && [ "${think[j]}" != "1" ] && attached_part=" *"
+
+    branch_part=""
+    branch_budget=$((width / 3))
+    if [ -n "${branch[j]}" ] && [ "$width" -ge 14 ] && [ "$branch_budget" -ge 3 ]; then
+      br="$(truncate "${branch[j]}" "$branch_budget")"
+      branch_part=" [${br}]"
+    fi
+
+    name_budget=$((width - prefix_cols - ${#branch_part} - ${#attached_part}))
+    if [ "$name_budget" -lt 3 ]; then
+      branch_part=""
+      name_budget=$((width - prefix_cols - ${#attached_part}))
+    fi
+    nm="$(truncate "${names[j]}" "$name_budget")"
+
     if [ "${idle[j]}" = "1" ] || [ "${think[j]}" = "1" ]; then
-      body=" ${badge}${num} ${nm}"
-      # 💭 counts as one character but renders two columns wide, so the thinking
-      # badge needs one less pad space than ${#body} implies.
-      local cols=${#body}
-      [ "${think[j]}" = "1" ] && cols=$((cols + 1))
+      local cols=$((prefix_cols + ${#nm} + ${#branch_part}))
       pad=""
       i=$cols; while [ "$i" -lt "$width" ]; do pad="${pad} "; i=$((i + 1)); done
-      [ "${idle[j]}" = "1" ] && printf '%s%s%s%s\n' "$IDLE" "$body" "$pad" "$RESET" \
-        || printf '%s%s%s%s\n' "$THINK" "$body" "$pad" "$RESET"
+      if [ "${idle[j]}" = "1" ]; then
+        printf '%s%s%s%s%s%s\n' "$IDLE" "${prefix}${nm}" "$YELLOW" "$branch_part" "$IDLE" "${pad}${RESET}"
+      else
+        printf '%s%s%s%s%s%s\n' "$THINK" "${prefix}${nm}" "$YELLOW" "$branch_part" "$THINK" "${pad}${RESET}"
+      fi
     else
-      printf ' %s%s%d%s %s%s%s' "$GREY" "$badge" "$num" "$RESET" "$NAME" "$nm" "$RESET"
+      printf '%s%s%s%s' "$prefix" "$NAME" "$nm" "$RESET"
+      [ -n "$branch_part" ] && printf ' %s%s%s' "$YELLOW" "${branch_part# }" "$RESET"
       [ "${att[j]}" = "1" ] && printf ' %s*%s' "$BLUE" "$RESET"
       printf '\n'
     fi
-    # Git branch on an indented dim line when present and there's room.
-    if [ -n "${branch[j]}" ] && [ "$width" -ge 14 ]; then
-      printf '   %s⎇ %s%s\n' "$YELLOW" "$(truncate "${branch[j]}" $((width - 5)))" "$RESET"
-    fi
   done
 
-  printf '\n%s ⌘1-9 · prefix s%s\n' "$GREY" "$RESET"
+  printf '\n'
 }
 
 cmd_render() {
