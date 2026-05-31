@@ -19,6 +19,8 @@ cwd=$(q '.workspace.current_dir')
 ctx_pct=$(q '.context_window.used_percentage')
 five_h=$(q '.rate_limits.five_hour.used_percentage')
 seven_d=$(q '.rate_limits.seven_day.used_percentage')
+five_h_reset=$(q '.rate_limits.five_hour.resets_at')
+seven_d_reset=$(q '.rate_limits.seven_day.resets_at')
 worktree_branch=$(q '.worktree.branch')
 
 RESET=$'\e[0m'
@@ -32,6 +34,23 @@ TRACK=$'\e[48;5;236m'   # dark-gray background behind the bar interior
 
 round_pct() {
   awk -v x="${1:-0}" 'BEGIN { if (x=="") x=0; printf "%d", x + 0.5 }'
+}
+
+# countdown EPOCH — compact time-until-reset like 45m, 2h14m, 3d6h.
+# Prints nothing when the timestamp is missing or already past.
+countdown() {
+  local target=${1:-}
+  [ -z "$target" ] && return
+  awk -v t="$target" -v now="$(date +%s)" 'BEGIN {
+    d = t - now
+    if (d <= 0) exit
+    days = int(d / 86400); d -= days * 86400
+    hrs  = int(d / 3600);  d -= hrs * 3600
+    mins = int(d / 60)
+    if (days > 0)     printf "%dd%dh", days, hrs
+    else if (hrs > 0) printf "%dh%dm", hrs, mins
+    else              printf "%dm", mins
+  }'
 }
 
 # bar PCT [WIDTH=8] — render a fixed-width progress bar with eighth-step fill.
@@ -102,10 +121,16 @@ if [ -n "$ctx_pct" ]; then
   parts+=("${DIM}ctx${RESET} $(bar "$ctx_pct" 8) $(round_pct "$ctx_pct")%")
 fi
 if [ -n "$five_h" ]; then
-  parts+=("${DIM}5h${RESET} $(bar "$five_h" 8) $(round_pct "$five_h")%")
+  seg="${DIM}5h${RESET} $(bar "$five_h" 8) $(round_pct "$five_h")%"
+  reset=$(countdown "$five_h_reset")
+  [ -n "$reset" ] && seg+=" ${DIM}${reset}${RESET}"
+  parts+=("$seg")
 fi
 if [ -n "$seven_d" ]; then
-  parts+=("${DIM}7d${RESET} $(bar "$seven_d" 8) $(round_pct "$seven_d")%")
+  seg="${DIM}7d${RESET} $(bar "$seven_d" 8) $(round_pct "$seven_d")%"
+  reset=$(countdown "$seven_d_reset")
+  [ -n "$reset" ] && seg+=" ${DIM}${reset}${RESET}"
+  parts+=("$seg")
 fi
 
 out=""
