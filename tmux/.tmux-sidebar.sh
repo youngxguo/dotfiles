@@ -250,6 +250,10 @@ open_in() {
   new="$("$TMUX_BIN" split-window -hbdf -l "$WIDTH" -c "$path" -t "$win" \
     -P -F '#{pane_id}' "exec '$SCRIPT_PATH' render")" || return 0
   "$TMUX_BIN" set-option -p -t "$new" @sidebar 1
+  # Inactive panes are dimmed globally (window-style in ~/.tmux.conf); pin the
+  # rail to the active (undimmed) background so it never reads as dimmed even
+  # though it never holds focus.
+  "$TMUX_BIN" set-option -p -t "$new" window-style "bg=#{@solarized_base03}"
   "$TMUX_BIN" set-window-option -t "$win" @has_sidebar 1
   # Carving the rail off the active pane only shrank that one pane; lift the rail
   # out and re-spread the rest so it reads as a column the whole window sits beside.
