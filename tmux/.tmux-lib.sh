@@ -52,3 +52,45 @@ tmux_is_agent_command() {
   done
   return 1
 }
+
+# Launch an agent CLI in a tmux target by typing it at the target's shell prompt
+# (not running it as the pane command), so quitting the agent drops back to a
+# shell. Shared by the split-mirror (.tmux-agent-split.sh) and the worktree
+# launcher (.tmux-worktree.sh) so "how we start an agent" — and the default of
+# claude — lives in one place.
+#
+# The tmux invocation is taken as the trailing arguments rather than a single
+# word, so a socket-qualified command (tmux -L sock) passes through intact.
+# Usage: tmux_launch_agent <target> <command|""> <tmux-bin> [tmux-args...]
+#   command "" selects the default (claude).
+tmux_launch_agent() {
+  local target="$1" cmd="${2:-}"
+  shift 2
+  [ -n "$cmd" ] || cmd=claude
+  "$@" send-keys -t "$target" "$cmd" Enter
+}
+
+# Print the git ref a new worktree branch should fork from: the repo's default
+# branch at its LOCAL tip. We fork from the local branch (not origin/...) so a
+# new worktree includes commits pushed straight to the default branch but not
+# yet re-fetched — the common case in personal repos that push directly to
+# master. origin/HEAD is consulted only to learn the default branch's *name*;
+# the tip is always taken locally. Falls back to a local main/master, then to
+# the remote-tracking tip if no local branch exists. Prints nothing and returns
+# 1 if none is found. Usage: <repo-dir>
+tmux_default_branch() {
+  local dir="$1" head ref defname=""
+  ref="$(git -C "$dir" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)"
+  [ -n "$ref" ] && defname="${ref##*/}"
+  for head in ${defname:+"$defname"} main master; do
+    if git -C "$dir" show-ref --verify -q "refs/heads/$head"; then
+      printf '%s\n' "$head"
+      return 0
+    fi
+  done
+  if [ -n "$defname" ] && git -C "$dir" show-ref --verify -q "refs/remotes/origin/$defname"; then
+    printf '%s\n' "origin/$defname"
+    return 0
+  fi
+  return 1
+}
