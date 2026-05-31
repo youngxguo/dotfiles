@@ -61,9 +61,9 @@ make_window() {
 }
 
 rail_ok() {       # rail pinned to WIDTH and full height?
-  local sess="$1"
+  local sess="$1" expect_h="${2:-$WIN_H}"
   t list-panes -t "$sess" -F '#{@sidebar} #{pane_width} #{pane_height}' \
-    | awk -v w="$WIDTH" -v h="$WIN_H" '$1=="1"{ exit !($2==w && $3==h) }'
+    | awk -v w="$WIDTH" -v h="$expect_h" '$1=="1"{ exit !($2==w && $3==h) }'
 }
 
 # Are the work (non-rail) panes even along DIM (width|height), within 1 cell?
@@ -112,6 +112,16 @@ rail_ok win1;            check "single work pane: rail still pinned" "$?"
 t resize-pane -t "$rail1" -x $((WIDTH + 20)) 2>/dev/null || true
 "$script" fix win1
 rail_ok win1;            check "fix re-pins a rail that drifted wider" "$?"
+
+# --- window shrink: work panes re-even around the pinned rail -----------------
+railw="$(make_window winw)"
+t split-window -h -t winw
+t split-window -h -t winw
+"$script" rebalance winw h
+t resize-window -t winw -x 120 -y 40
+"$script" layout-hook window-resize winw 0
+rail_ok winw 40;         check "window-resize: rail pinned after shrink" "$?"
+rest_even winw width;    check "window-resize: work panes re-even after shrink" "$?"
 
 # --- pure helper: folder_label_for_path (sidebar labels) ------------------------
 # The dispatch guard lets us source the script for its functions without running

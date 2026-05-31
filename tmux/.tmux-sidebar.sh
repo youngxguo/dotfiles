@@ -35,8 +35,8 @@
 #   fix <window>                pin the rail to SIDEBAR_WIDTH; tidy @has_sidebar
 #   rebalance <win> [h|v]       spread the panes evenly; with a rail present keep
 #                               it lifted out and only spread the rest
-#   layout-hook <ev> <win> <z>  hook entrypoint: rebalance normally, but lift the
-#                               rail out of the spread when one is present
+#   layout-hook <ev> <win> <z>  hook entrypoint: window-resize re-spreads work
+#                               panes; resize re-pins the rail; exit rebalances
 #
 # install.py symlinks this to ~/.tmux-sidebar.sh via its `.tmux-*.sh` glob.
 set -u
@@ -204,22 +204,29 @@ cmd_rebalance() {
   cmd_fix "$win"
 }
 
-# Hook entrypoint for after-resize-pane / pane-exited. With a rail present a
-# terminal resize only re-pins it (cheap, and avoids a resize-hook feedback loop),
-# while a pane exiting re-spreads the survivors around the rail. Without one,
-# behave exactly like the old bare select-layout -E.
+# Hook entrypoint for window-resized / after-resize-pane / pane-exited. With a
+# rail present a whole-window resize re-spreads work panes around the fixed rail
+# (window-resize), a manual pane resize only re-pins the rail (resize — cheap,
+# and avoids fighting the user's drag), and a pane exiting re-spreads survivors.
+# Without a rail, behave like the old bare select-layout -E.
 cmd_layout_hook() {
   local event="$1" win="$2" zoomed="${3:-0}"
   if [ "$("$TMUX_BIN" show-options -wqv -t "$win" @has_sidebar 2>/dev/null)" = "1" ]; then
     case "$event" in
+      window-resize)
+        cmd_rebalance "$win"
+        cmd_refresh_window "$win"
+        ;;
       resize) cmd_fix "$win" ;;
       *)      cmd_rebalance "$win" ;;
     esac
     return 0
   fi
   case "$event" in
-    resize) [ "$zoomed" = "0" ] && "$TMUX_BIN" select-layout -t "$win" -E 2>/dev/null || true ;;
-    *)      "$TMUX_BIN" select-layout -t "$win" -E 2>/dev/null || true ;;
+    resize|window-resize)
+      [ "$zoomed" = "0" ] && "$TMUX_BIN" select-layout -t "$win" -E 2>/dev/null || true
+      ;;
+    *) "$TMUX_BIN" select-layout -t "$win" -E 2>/dev/null || true ;;
   esac
 }
 
