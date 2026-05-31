@@ -17,7 +17,7 @@
 # (even-*/-E) would flatten it into an equal-width sibling, so on a rail window we
 # instead hand-build a layout that keeps the rail a fixed-width, full-height left
 # column and spreads only the OTHER panes evenly across the rest of the window
-# (cmd_rebalance / build_sidebar_layout). `prefix b` hides/shows it everywhere at
+# (cmd_rebalance / spread_around_sidebar). `prefix b` hides/shows it everywhere at
 # once — the shown/hidden state is one global flag (@sidebar_enabled), not per
 # window, so it stays consistent across every window and session.
 #
@@ -78,23 +78,10 @@ cmd_fix() {
   [ "$w" != "$WIDTH" ] && "$TMUX_BIN" resize-pane -t "$pid" -x "$WIDTH" 2>/dev/null || true
 }
 
-# Compute tmux's 16-bit layout checksum over a layout body (everything after the
-# leading "csum," prefix). Mirrors layout_checksum() in tmux's layout-custom.c so
-# we can hand select-layout a custom layout string we built ourselves.
-layout_checksum() {
-  local s="$1" csum=0 i c
-  for (( i=0; i<${#s}; i++ )); do
-    printf -v c '%d' "'${s:i:1}"
-    csum=$(( (csum >> 1) + ((csum & 1) << 15) ))
-    csum=$(( (csum + c) & 0xffff ))
-  done
-  printf '%04x' "$csum"
-}
-
-# select-layout fills layout cells by the window's *pane order*, ignoring the pane
-# ids embedded in a custom layout string — so to keep the rail pinned leftmost it
-# must be the first pane. Bubble it to the front with adjacent swap-panes, which
-# slides it left one slot at a time and preserves every other pane's order.
+# even-horizontal fills the row by the window's *pane order*, so to keep the rail
+# pinned leftmost it must be the first pane. Bubble it to the front with adjacent
+# swap-panes, which slides it left one slot at a time and preserves every other
+# pane's order.
 move_sidebar_front() {
   local win="$1" sid="$2" guard=0 idx i left
   local -a order
@@ -131,55 +118,63 @@ detect_rest_orientation() {
   fi
 }
 
-# Hand-build and apply a layout that pins the rail as a fixed-width, full-height
-# column on the far left and spreads the remaining panes evenly across the rest of
-# the window. orientation: h = rest side-by-side, v = rest stacked. Returns
-# nonzero (caller falls back to just pinning) when the window is too narrow to
-# honour the rail width or there is nothing else to spread.
-build_sidebar_layout() {
+# Spread the non-rail panes evenly while keeping the rail a fixed-width, full-
+# height left column. orientation: h = rest side-by-side, v = rest stacked. Uses
+# only public tmux commands (select-layout / resize-pane), so it isn't coupled to
+# tmux's internal layout-string format the way a hand-built layout would be.
+#
+#   h: lay every pane out in one row (even-horizontal fills by pane order, so the
+#      rail must be leftmost first — move_sidebar_front), shrink the rail back to
+#      WIDTH, then re-even the work panes by width so the columns reclaimed from
+#      the rail are shared evenly instead of dumped on the rail's neighbour.
+#   v: the rail is already a full-height left column with the work panes stacked
+#      to its right — it was carved off with split-window -bdf and work splits
+#      only ever target work panes — so just pin the rail and even their heights.
+#
+# Returns nonzero (caller falls back to just pinning) when the window geometry is
+# unreadable. With 0 or 1 work pane there is nothing to even, so it only pins.
+spread_around_sidebar() {
   local win="$1" orientation="$2" sid="$3" W H
   read -r W H < <("$TMUX_BIN" display-message -p -t "$win" \
                    '#{window_width} #{window_height}' 2>/dev/null)
   [ -n "${W:-}" ] && [ -n "${H:-}" ] || return 1
 
-  move_sidebar_front "$win" "$sid"
-  local -a order=()
-  local id
-  while IFS= read -r id; do order+=("$id"); done \
-    < <("$TMUX_BIN" list-panes -t "$win" -F '#{pane_id}' 2>/dev/null)
-  [ "${order[0]:-}" = "$sid" ] || return 1
-  local -a rest=("${order[@]:1}")
-  local M=${#rest[@]}
-  [ "$M" -ge 1 ] || return 1
-
-  # WIDTH cols for the rail + 1 col border leaves R cols for the M other panes.
-  local sep=1 restx=$((WIDTH + 1)) R=$((W - WIDTH - 1))
-  [ "$R" -ge "$M" ] || return 1
-
-  local sidebar_leaf="${WIDTH}x${H},0,0,${sid#%}" rest_str i base rem inner
-  if [ "$M" -eq 1 ]; then
-    rest_str="${R}x${H},${restx},0,${rest[0]#%}"
-  elif [ "$orientation" = "v" ]; then
-    [ "$H" -ge "$M" ] || return 1
-    inner=$((H - (M - 1))); base=$((inner / M)); rem=$((inner % M))
-    local y=0 h; local -a kids=()
-    for (( i=0; i<M; i++ )); do
-      h=$base; [ "$i" -lt "$rem" ] && h=$((base + 1))
-      kids+=("${R}x${h},${restx},${y},${rest[i]#%}"); y=$((y + h + sep))
-    done
-    local IFS=,; rest_str="${R}x${H},${restx},0[${kids[*]}]"
-  else
-    inner=$((R - (M - 1))); base=$((inner / M)); rem=$((inner % M))
-    local x=$restx w; local -a kids=()
-    for (( i=0; i<M; i++ )); do
-      w=$base; [ "$i" -lt "$rem" ] && w=$((base + 1))
-      kids+=("${w}x${H},${x},0,${rest[i]#%}"); x=$((x + w + sep))
-    done
-    local IFS=,; rest_str="${R}x${H},${restx},0{${kids[*]}}"
+  if [ "$orientation" = "h" ]; then
+    move_sidebar_front "$win" "$sid"
+    "$TMUX_BIN" select-layout -t "$win" even-horizontal 2>/dev/null || return 1
   fi
+  "$TMUX_BIN" resize-pane -t "$sid" -x "$WIDTH" 2>/dev/null || true
 
-  local body="${W}x${H},0,0{${sidebar_leaf},${rest_str}}"
-  "$TMUX_BIN" select-layout -t "$win" "$(layout_checksum "$body"),${body}" 2>/dev/null
+  # Collect the work panes in visual order (top-to-bottom for v, left-to-right
+  # for h). @sidebar is empty for work panes, "1" for the rail.
+  local sort_key
+  [ "$orientation" = "v" ] && sort_key='#{pane_top}' || sort_key='#{pane_left}'
+  local -a rest=()
+  local pos id sb
+  while read -r pos id sb; do
+    [ "$sb" = "1" ] || rest+=("$id")
+  done < <("$TMUX_BIN" list-panes -t "$win" \
+            -F "$sort_key"' #{pane_id} #{@sidebar}' 2>/dev/null | sort -n)
+  local M=${#rest[@]}
+  [ "$M" -ge 2 ] || return 0
+
+  # Size the first M-1 work panes to an even slice; the last absorbs the
+  # remainder. resize-pane steals from the adjacent pane, so left-to-right /
+  # top-to-bottom keeps every slice equal.
+  local span base i
+  if [ "$orientation" = "v" ]; then
+    span=$(( H - (M - 1) )); base=$(( span / M ))
+    [ "$base" -ge 1 ] || return 0
+    for (( i=0; i<M-1; i++ )); do
+      "$TMUX_BIN" resize-pane -t "${rest[i]}" -y "$base" 2>/dev/null || true
+    done
+  else
+    span=$(( W - WIDTH - 1 - (M - 1) )); base=$(( span / M ))
+    [ "$base" -ge 1 ] || return 0
+    for (( i=0; i<M-1; i++ )); do
+      "$TMUX_BIN" resize-pane -t "${rest[i]}" -x "$base" 2>/dev/null || true
+    done
+  fi
 }
 
 # Rebalance a window's panes. With no rail this is the plain even-spread the split
@@ -205,7 +200,7 @@ cmd_rebalance() {
   if [ "$zoomed" = "1" ]; then cmd_fix "$win"; return 0; fi
   [ -n "$orientation" ] || orientation="$(detect_rest_orientation "$win")"
   if [ -z "$orientation" ]; then cmd_fix "$win"; return 0; fi
-  build_sidebar_layout "$win" "$orientation" "$sid" || true
+  spread_around_sidebar "$win" "$orientation" "$sid" || true
   cmd_fix "$win"
 }
 
@@ -462,9 +457,10 @@ wake_sidebar_pane() {
   wake_dir="$(sidebar_wake_dir)"
   fifo="$wake_dir/${pane#%}.fifo"
   [ -p "$fifo" ] || return 0
-  perl -e \
-    'use Fcntl qw(O_WRONLY O_NONBLOCK); if (sysopen(my $fh, $ARGV[0], O_WRONLY|O_NONBLOCK)) { print {$fh} "\n" }' \
-    "$fifo" 2>/dev/null || true
+  # Open the fifo read+write so the open never blocks even if the render loop
+  # isn't reading this tick, write one byte to wake it, then close. The render
+  # loop holds its own read fd, so this just drops a token into the buffer.
+  { exec 4<>"$fifo" && printf '\n' >&4 && exec 4>&-; } 2>/dev/null || true
 }
 
 cmd_refresh_window() {
@@ -519,16 +515,20 @@ cmd_render() {
   done
 }
 
-case "${1:-toggle}" in
-  toggle)      cmd_toggle ;;
-  ensure)      cmd_ensure "${2:-}" ;;
-  ensure-all)  cmd_ensure_all ;;
-  reset-all)   cmd_reset_all ;;
-  switch)      cmd_switch "${2:-}" "${3:-}" ;;
-  refresh)     cmd_refresh ;;
-  render)      cmd_render ;;
-  fix)         cmd_fix "${2:-}" ;;
-  rebalance)   cmd_rebalance "${2:-}" "${3:-}" ;;
-  layout-hook) cmd_layout_hook "${2:-}" "${3:-}" "${4:-0}" ;;
-  *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|refresh|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>}\n' "${0##*/}" >&2; exit 2 ;;
-esac
+# Only dispatch when executed directly; sourcing (e.g. from tests) just defines
+# the functions above without running a subcommand.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  case "${1:-toggle}" in
+    toggle)      cmd_toggle ;;
+    ensure)      cmd_ensure "${2:-}" ;;
+    ensure-all)  cmd_ensure_all ;;
+    reset-all)   cmd_reset_all ;;
+    switch)      cmd_switch "${2:-}" "${3:-}" ;;
+    refresh)     cmd_refresh ;;
+    render)      cmd_render ;;
+    fix)         cmd_fix "${2:-}" ;;
+    rebalance)   cmd_rebalance "${2:-}" "${3:-}" ;;
+    layout-hook) cmd_layout_hook "${2:-}" "${3:-}" "${4:-0}" ;;
+    *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|refresh|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>}\n' "${0##*/}" >&2; exit 2 ;;
+  esac
+fi
