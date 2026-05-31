@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-default_windows="agents vim git"
+default_windows="agents vim"
 
 dir=""
 name="${TMUX_SETUP_NAME:-}"
@@ -15,7 +15,7 @@ usage() {
   cat <<'EOF'
 Usage: .tmux-setup-sessions.sh [options] [directory]
 
-Ensure three windows exist for one directory: agents vim git
+Ensure agents and vim windows exist for one directory
 
 Two modes:
   In-place (--session NAME): add any missing windows to an existing session,

@@ -67,7 +67,7 @@ check "session is created" "$?"
 check "session git branch label is seeded" "$?"
 
 got="$(tmux_t list-windows -t feature-x -F '#{window_name}' | tr '\n' ' ' | sed 's/ $//')"
-[ "$got" = "agents vim git" ]
+[ "$got" = "agents vim" ]
 check "session seeds the default windows" "$?"
 
 # Every window is *spawned* in the worktree. We check pane_start_path, not

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Create a git worktree and a matching tmux session in one step, seeded with the
-# same agents/vim/git windows as `prefix t`, with an agent launched and ready.
+# same agents/vim windows as `prefix t`, with an agent launched and ready.
 #
 # `prefix W` prompts for a NAME, then this script:
 #   1. resolves the primary repo root from the pane's directory (errors if not a
@@ -39,7 +39,7 @@ usage() {
 Usage: .tmux-worktree.sh --name NAME [--path DIR]
 
 Create a git worktree (branch NAME, forked from the repo default branch) at
-../<repo>-worktrees/NAME, then a tmux session NAME with agents/vim/git windows
+../<repo>-worktrees/NAME, then a tmux session NAME with agents/vim windows
 and an agent launched in the agents window.
 
 Options:
