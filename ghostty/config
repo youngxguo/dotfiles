@@ -11,3 +11,19 @@ desktop-notifications = true
 
 # Send Option-Enter as Meta-Enter so tmux can distinguish it from Ctrl-J.
 keybind = alt+enter=text:\x1b\x0d
+
+# Cmd 1-9: jump to the Nth tmux session. macOS/Ghostty owns Cmd, so we forward
+# these as private "ESC [ n z" sequences that tmux picks up as user-keys and
+# routes to the session-switch helper (see tmux/.tmux.conf, tmux/.tmux-sidebar.sh).
+# These MUST use the physical key (digit_N): Ghostty's built-in goto_tab defaults
+# bind super+digit_N, and physical binds win over the translated "cmd+one" form,
+# so the translated form never fires. Binding digit_N overrides goto_tab outright.
+keybind = cmd+digit_1=text:\x1b[1z
+keybind = cmd+digit_2=text:\x1b[2z
+keybind = cmd+digit_3=text:\x1b[3z
+keybind = cmd+digit_4=text:\x1b[4z
+keybind = cmd+digit_5=text:\x1b[5z
+keybind = cmd+digit_6=text:\x1b[6z
+keybind = cmd+digit_7=text:\x1b[7z
+keybind = cmd+digit_8=text:\x1b[8z
+keybind = cmd+digit_9=text:\x1b[9z

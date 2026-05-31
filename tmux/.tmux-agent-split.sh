@@ -8,7 +8,8 @@
 #   orientation: h (horizontal split) | v (vertical split)
 #   pane_id:     tmux pane id of the pane being split (e.g. %3)
 set -u
-source "$HOME/.tmux-lib.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/.tmux-lib.sh"
 
 TMUX_BIN="$(tmux_resolve_bin)"
 
@@ -16,8 +17,8 @@ orientation="${1:-h}"
 pane_id="${2:-}"
 
 case "$orientation" in
-  v) split_flag="-v"; layout="even-vertical" ;;
-  *) split_flag="-h"; layout="even-horizontal" ;;
+  v) split_flag="-v"; orientation="v" ;;
+  *) split_flag="-h"; orientation="h" ;;
 esac
 
 # Window/pane that should be the source of the agent command we mirror, named
@@ -52,8 +53,15 @@ detect_agent() {
 agent_cmd="$(detect_agent "$pane_pid" || true)"
 
 new_pane="$("$TMUX_BIN" split-window "$split_flag" -c "$pane_path" "${target[@]}" -P -F '#{pane_id}')"
-"$TMUX_BIN" select-layout "${target[@]}" "$layout"
+split_window_id="$("$TMUX_BIN" display-message -p -t "$new_pane" '#{window_id}')"
+
+# Rebalance the window evenly. The sidebar helper handles both cases: with a
+# sessions rail present it lifts the rail out — pinning it as a fixed-width left
+# column and spreading only the other panes — instead of letting the even-spread
+# flatten it into an equal-width sibling; with no rail it's the plain even-*
+# spread the split bindings have always done. See ~/.tmux-sidebar.sh.
+"$SCRIPT_DIR/.tmux-sidebar.sh" rebalance "$split_window_id" "$orientation" 2>/dev/null || true
 
 if [ -n "$agent_cmd" ]; then
-  "$TMUX_BIN" send-keys -t "$new_pane" "$agent_cmd" Enter
+  tmux_launch_agent "$new_pane" "$agent_cmd" "$TMUX_BIN"
 fi

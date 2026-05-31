@@ -110,6 +110,13 @@ The binding calls `~/.tmux-setup-sessions.sh` (see `tmux/.tmux-setup-sessions.sh
 ~/.tmux-setup-sessions.sh --windows "agents vim git logs"
 ```
 
+## Tmux Sessions Sidebar
+A persistent read-only rail appears on the left of every tmux window. It shows sessions with the same AI idle (`!`) / thinking (`💭`) badges and git branch labels used by the picker/status line. Idle sessions float to the top, but the printed number remains the session's list-order index, matching the `1`-`9` hotkeys.
+
+It's enabled automatically for existing and new windows. Press `Ctrl+Space` then `b` to hide/show it globally via `@sidebar_enabled`; new windows respect that state.
+
+The rail is pinned to 26 columns by default (`SIDEBAR_WIDTH` overrides it). Split/rebalance hooks keep the rail fixed while spreading only the work panes. If it ever looks wrong, run `~/.tmux-sidebar.sh reset-all`.
+
 ## Commit Message Rules (Codex/AI)
 Commit message guidance for Codex lives in `codex/COMMIT_RULES.md`.
 These are style rules only (no Git hook/template enforcement).
