@@ -3,7 +3,8 @@
 # same agents/vim/git windows as `prefix t`, with an agent launched and ready.
 #
 # `prefix W` prompts for a NAME, then this script:
-#   1. resolves the repo root from the pane's directory (errors if not a repo),
+#   1. resolves the primary repo root from the pane's directory (errors if not a
+#      repo),
 #   2. adds a worktree at ../<repo>-worktrees/<NAME> on a new branch <NAME>,
 #      forked from the local tip of the repo's default branch (main/master),
 #   3. delegates session + window creation to .tmux-setup-sessions.sh and the
@@ -67,8 +68,11 @@ fail() {
 
 [ -n "$name" ] || fail "a name is required"
 
-repo_root="$(git -C "$src_path" rev-parse --show-toplevel 2>/dev/null)" \
+current_repo_root="$(git -C "$src_path" rev-parse --show-toplevel 2>/dev/null)" \
   || fail "$src_path is not a git repository"
+repo_root="$(git -C "$src_path" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')" \
+  || fail "could not resolve the main worktree"
+[ -n "$repo_root" ] || repo_root="$current_repo_root"
 
 worktree_path="$(dirname "$repo_root")/$(basename "$repo_root")$worktree_root_suffix/$name"
 
@@ -105,5 +109,6 @@ fi
 # tmux folds "." and ":" in session names; mirror setup-sessions so we target the
 # right session.
 session="${name//[.:]/_}"
+"${tmux_bin[@]}" set-option -qt "$session" @git_branch "$name" 2>/dev/null || true
 tmux_launch_agent "$session:agents" "" "${tmux_bin[@]}"
 "${tmux_bin[@]}" switch-client -t "$session" 2>/dev/null || true

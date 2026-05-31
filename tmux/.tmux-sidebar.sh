@@ -4,9 +4,9 @@
 # the windows live to the right of, rather than a per-window pane.
 #
 # It live-renders every session with the same AI idle (!) / thinking (💭) badges
-# and git branch as the status line, fzf picker, and choose-tree. Idle sessions
-# float to the top; Cmd-1..9 still follows tmux's list-order index without
-# printing shortcut labels in the rail.
+# and git branch as the status line, fzf picker, and choose-tree. Sessions stay
+# in tmux list order and always show their list-order number, so Cmd-1..9 maps
+# directly to the visible rail labels.
 #
 # Always-on: every new window gets a rail via the window-linked hook, and
 # ensure-all backfills existing windows at config load. The rail is created with
@@ -312,16 +312,27 @@ cmd_reset_all() {
     < <("$TMUX_BIN" list-windows -a -F '#{window_id}')
 }
 
-# switch <n>: jump to the Nth session in list-sessions order — the same ordering
-# the `prefix s` picker uses for hotkeys. Bound to Cmd-1..9 via Ghostty user-keys
-# → User1..User9 (see .tmux.conf and
-# ghostty/config). switch-client with no -c targets the client that pressed the
-# key, so this follows whichever client triggered it.
+# switch <n> [client]: jump to the Nth session in list-sessions order — the same
+# ordering the `prefix s` picker uses for hotkeys. Bound to Cmd-1..9 via Ghostty
+# user-keys → User1..User9 (see .tmux.conf and ghostty/config). Passing the
+# triggering client lets us refresh just the visible rails touched by the switch,
+# instead of waking every sidebar pane in the server on every rapid keypress.
 cmd_switch() {
-  local n="$1" name
+  local n="$1" client="${2:-}" name old_win new_win
   case "$n" in *[!0-9]*|'') return 0 ;; esac
   name="$("$TMUX_BIN" list-sessions -F '#{session_name}' 2>/dev/null | sed -n "${n}p")"
-  [ -n "$name" ] && "$TMUX_BIN" switch-client -t "$name" 2>/dev/null && cmd_refresh || true
+  [ -n "$name" ] || return 0
+
+  if [ -n "$client" ]; then
+    old_win="$("$TMUX_BIN" display-message -p -c "$client" '#{window_id}' 2>/dev/null || true)"
+    "$TMUX_BIN" switch-client -c "$client" -t "$name" 2>/dev/null || return 0
+    new_win="$("$TMUX_BIN" display-message -p -c "$client" '#{window_id}' 2>/dev/null || true)"
+    cmd_refresh_window "$old_win"
+    [ "$new_win" != "$old_win" ] && cmd_refresh_window "$new_win"
+    return 0
+  fi
+
+  "$TMUX_BIN" switch-client -t "$name" 2>/dev/null && cmd_refresh || true
 }
 
 ### Rendering ###
@@ -333,6 +344,7 @@ HDR="${ESC}[1;38;2;147;161;161m"    # base1   – header
 NAME="${ESC}[38;2;131;148;150m"     # base0   – session names
 IDLE="${ESC}[1;38;2;238;232;213;48;2;220;50;47m"  # base2 on red
 THINK="${ESC}[1;38;2;0;43;54;48;2;255;215;0m"     # base03 on gold
+SELECT="${ESC}[1;38;2;253;246;227;48;2;38;139;210m" # base3 on blue
 BLUE="${ESC}[38;2;38;139;210m"      # attached marker
 YELLOW="${ESC}[38;2;181;137;0m"     # git branch
 
@@ -350,52 +362,60 @@ truncate() {
   fi
 }
 
+folder_label_for_path() {
+  local path="$1" fallback="$2" root dir parent parent_base repo base
+  root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "$root" ] && path="$root"
+
+  # Worktrees created by prefix-W live under ../<repo>-worktrees/<name>. Show the
+  # original repo folder, leaving the worktree/branch name for the bracketed ref.
+  dir="${path%/}"
+  while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "." ]; do
+    parent="${dir%/*}"
+    [ "$parent" = "$dir" ] && break
+    parent_base="${parent##*/}"
+    case "$parent_base" in
+      *-worktrees)
+        repo="${parent_base%-worktrees}"
+        [ -n "$repo" ] && { printf '%s\n' "$repo"; return 0; }
+        ;;
+    esac
+    dir="$parent"
+  done
+
+  base="${path%/}"; base="${base##*/}"
+  printf '%s\n' "${base:-$fallback}"
+}
+
 render_once() {
-  local width
+  local width current_session
   width="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{pane_width}' 2>/dev/null)"
   [ -n "$width" ] || width="$WIDTH"
+  current_session="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null)"
 
   # A tab in read's IFS is whitespace, so an empty field collapses and shifts
-  # every later column. The branch is the only field that's ever empty, so it
+  # every later column. The branch is the only field that's normally empty, so it
   # goes LAST: a trailing empty field is simply trimmed, leaving the rest intact.
   # (tmux escapes raw control-byte separators to literal text, so US/NUL are out.)
-  local -a names idle think branch att
-  local n id th at br count=0
-  while IFS=$'\t' read -r n id th at br; do
-    names[count]="$n"; idle[count]="$id"; think[count]="$th"
-    att[count]="$at"; branch[count]="$br"
+  local -a names idle think branch folder
+  local n id th path br count=0 base
+  while IFS=$'\t' read -r n id th path br; do
+    base="$(folder_label_for_path "$path" "$n")"
+    names[count]="$n"; folder[count]="$base"; idle[count]="$id"; think[count]="$th"
+    branch[count]="$br"
     count=$((count + 1))
   done < <("$TMUX_BIN" list-sessions -F \
-'#{session_name}'$'\t''#{?#{@session_ai_idle},1,0}'$'\t''#{?#{@session_ai_thinking},1,0}'$'\t''#{?session_attached,1,0}'$'\t''#{@git_branch}' 2>/dev/null)
+'#{session_name}'$'\t''#{?#{@session_ai_idle},1,0}'$'\t''#{?#{@session_ai_thinking},1,0}'$'\t''#{pane_current_path}'$'\t''#{@git_branch}' 2>/dev/null)
 
-  # Header + rule.
-  printf '%s SESSIONS%s\n' "$HDR" "$RESET"
-  local rule i=0
-  rule=""
-  while [ "$i" -lt "$width" ]; do rule="${rule}─"; i=$((i + 1)); done
-  printf '%s%s%s\n' "$GREY" "$rule" "$RESET"
-
-  # Float idle to the top, then thinking, then the rest — order within each
-  # group is preserved, and the printed number stays the list-order index.
-  local -a order=()
-  local j
-  for j in $(seq 0 $((count - 1))); do [ "${idle[j]}" = "1" ] && order+=("$j"); done
+  local j nm br badge pad prefix prefix_cols branch_part name_budget branch_budget selected label_width label
+  local i=0
+  label_width=${#count}
   for j in $(seq 0 $((count - 1))); do
-    [ "${idle[j]}" != "1" ] && [ "${think[j]}" = "1" ] && order+=("$j")
-  done
-  for j in $(seq 0 $((count - 1))); do
-    [ "${idle[j]}" != "1" ] && [ "${think[j]}" != "1" ] && order+=("$j")
-  done
-
-  local nm br badge pad prefix prefix_cols branch_part attached_part name_budget branch_budget
-  for j in "${order[@]}"; do
     if [ "${idle[j]}" = "1" ]; then badge="! "; elif [ "${think[j]}" = "1" ]; then badge="💭 "; else badge="  "; fi
-    prefix=" ${badge}"
+    printf -v label "%${label_width}d" "$((j + 1))"
+    prefix=" ${label} ${badge}"
     prefix_cols=${#prefix}
     [ "${think[j]}" = "1" ] && prefix_cols=$((prefix_cols + 1))
-
-    attached_part=""
-    [ "${att[j]}" = "1" ] && [ "${idle[j]}" != "1" ] && [ "${think[j]}" != "1" ] && attached_part=" *"
 
     branch_part=""
     branch_budget=$((width / 3))
@@ -404,14 +424,21 @@ render_once() {
       branch_part=" [${br}]"
     fi
 
-    name_budget=$((width - prefix_cols - ${#branch_part} - ${#attached_part}))
+    name_budget=$((width - prefix_cols - ${#branch_part}))
     if [ "$name_budget" -lt 3 ]; then
       branch_part=""
-      name_budget=$((width - prefix_cols - ${#attached_part}))
+      name_budget=$((width - prefix_cols))
     fi
-    nm="$(truncate "${names[j]}" "$name_budget")"
+    nm="$(truncate "${folder[j]}" "$name_budget")"
 
-    if [ "${idle[j]}" = "1" ] || [ "${think[j]}" = "1" ]; then
+    selected=0
+    [ "${names[j]}" = "$current_session" ] && selected=1
+    if [ "$selected" = "1" ]; then
+      local cols=$((prefix_cols + ${#nm} + ${#branch_part}))
+      pad=""
+      i=$cols; while [ "$i" -lt "$width" ]; do pad="${pad} "; i=$((i + 1)); done
+      printf '%s%s%s%s%s\n' "$SELECT" "$prefix" "$nm" "$branch_part" "${pad}${RESET}"
+    elif [ "${idle[j]}" = "1" ] || [ "${think[j]}" = "1" ]; then
       local cols=$((prefix_cols + ${#nm} + ${#branch_part}))
       pad=""
       i=$cols; while [ "$i" -lt "$width" ]; do pad="${pad} "; i=$((i + 1)); done
@@ -423,7 +450,6 @@ render_once() {
     else
       printf '%s%s%s%s' "$prefix" "$NAME" "$nm" "$RESET"
       [ -n "$branch_part" ] && printf ' %s%s%s' "$YELLOW" "${branch_part# }" "$RESET"
-      [ "${att[j]}" = "1" ] && printf ' %s*%s' "$BLUE" "$RESET"
       printf '\n'
     fi
   done
@@ -431,16 +457,30 @@ render_once() {
   printf '\n'
 }
 
-cmd_refresh() {
-  local pane sb fifo wake_dir
+wake_sidebar_pane() {
+  local pane="$1" fifo wake_dir
   wake_dir="$(sidebar_wake_dir)"
+  fifo="$wake_dir/${pane#%}.fifo"
+  [ -p "$fifo" ] || return 0
+  perl -e \
+    'use Fcntl qw(O_WRONLY O_NONBLOCK); if (sysopen(my $fh, $ARGV[0], O_WRONLY|O_NONBLOCK)) { print {$fh} "\n" }' \
+    "$fifo" 2>/dev/null || true
+}
+
+cmd_refresh_window() {
+  local win="$1" pane sb
+  [ -n "$win" ] || return 0
   while read -r pane sb; do
     [ "$sb" = "1" ] || continue
-    fifo="$wake_dir/${pane#%}.fifo"
-    [ -p "$fifo" ] || continue
-    perl -e \
-      'use Fcntl qw(O_WRONLY O_NONBLOCK); if (sysopen(my $fh, $ARGV[0], O_WRONLY|O_NONBLOCK)) { print {$fh} "\n" }' \
-      "$fifo" 2>/dev/null || true
+    wake_sidebar_pane "$pane"
+  done < <("$TMUX_BIN" list-panes -t "$win" -F '#{pane_id} #{@sidebar}' 2>/dev/null)
+}
+
+cmd_refresh() {
+  local pane sb
+  while read -r pane sb; do
+    [ "$sb" = "1" ] || continue
+    wake_sidebar_pane "$pane"
   done < <("$TMUX_BIN" list-panes -a -F '#{pane_id} #{@sidebar}' 2>/dev/null)
 }
 
@@ -484,7 +524,7 @@ case "${1:-toggle}" in
   ensure)      cmd_ensure "${2:-}" ;;
   ensure-all)  cmd_ensure_all ;;
   reset-all)   cmd_reset_all ;;
-  switch)      cmd_switch "${2:-}" ;;
+  switch)      cmd_switch "${2:-}" "${3:-}" ;;
   refresh)     cmd_refresh ;;
   render)      cmd_render ;;
   fix)         cmd_fix "${2:-}" ;;

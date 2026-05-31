@@ -63,6 +63,9 @@ check "worktree is on a new branch named after the worktree" "$?"
 tmux_t has-session -t feature-x 2>/dev/null
 check "session is created" "$?"
 
+[ "$(tmux_t show-options -qv -t feature-x @git_branch)" = "feature-x" ]
+check "session git branch label is seeded" "$?"
+
 got="$(tmux_t list-windows -t feature-x -F '#{window_name}' | tr '\n' ' ' | sed 's/ $//')"
 [ "$got" = "agents vim git" ]
 check "session seeds the default windows" "$?"
@@ -104,6 +107,11 @@ run --name feature-x --path "$repo" >/dev/null 2>&1 || true
 after="$(git -C "$repo" worktree list | wc -l | tr -d ' ')"
 [ "$before" = "$after" ]
 check "re-running reuses the worktree (idempotent)" "$?"
+
+# --- nested source: creating from a worktree still targets the main repo layout ---
+run --name feature-y --path "$wt_dir/feature-x" >/dev/null 2>&1 || true
+[ -d "$wt_dir/feature-y" ] && [ ! -d "$wt_dir/feature-x-worktrees/feature-y" ]
+check "creating from inside a worktree uses the main repo sibling dir" "$?"
 
 # --- existing branch, no worktree dir: attaches a worktree to that branch ---
 git -C "$repo" branch hotfix main >/dev/null 2>&1
