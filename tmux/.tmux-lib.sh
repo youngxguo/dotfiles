@@ -12,11 +12,20 @@
 # Canonical set of agent CLIs we treat specially (idle detection, split mirror).
 TMUX_AGENT_COMMANDS=(claude codex agent cursor-agent)
 
-# AI idle/thinking badge colors (Solarized: base2 on red, base03 on gold). Bash
-# scripts source these; ~/.tmux-ai-idle.sh (Python) can't source bash.
-TMUX_AI_IDLE_ANSI=$'\033'"[1;38;2;238;232;213;48;2;220;50;47m"
-TMUX_AI_THINK_ANSI=$'\033'"[1;38;2;0;43;54;48;2;255;215;0m"
-TMUX_AI_RESET=$'\033'"[0m"
+_palette_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$_palette_dir/.tmux-palette.sh"
+
+TMUX_ESC=$'\033'
+TMUX_RESET="${TMUX_ESC}[0m"
+TMUX_FG_BASE01_ANSI="${TMUX_ESC}[38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BASE01")m"
+TMUX_BOLD_FG_BASE1_ANSI="${TMUX_ESC}[1;38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BASE1")m"
+TMUX_FG_BASE00_ANSI="${TMUX_ESC}[38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BASE00")m"
+TMUX_YELLOW_ANSI="${TMUX_ESC}[38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_YELLOW")m"
+TMUX_BLUE_FG_ANSI="${TMUX_ESC}[38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BLUE")m"
+TMUX_SELECT_ANSI="${TMUX_ESC}[1;38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BASE3");48;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BLUE")m"
+TMUX_AI_IDLE_ANSI="${TMUX_ESC}[1;38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BASE3");48;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_RED")m"
+TMUX_AI_THINK_ANSI="${TMUX_ESC}[1;38;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_BASE03");48;2;$(tmux_hex_to_rgb "$TMUX_PALETTE_YELLOW")m"
 
 # Resolve the tmux binary. On Linux, prefer the exact binary backing the running
 # server (exposed at /proc/<pid>/exe) so we never drive the server with a since-

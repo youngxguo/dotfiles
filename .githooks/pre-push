@@ -29,6 +29,9 @@ if [ "$bash_agents" != "$py_agents" ]; then
   exit 1
 fi
 
+echo "Checking tmux palette covers all @solarized_* uses in conf..."
+bash tests/tmux-colors-sync.test.sh
+
 if command -v shellcheck >/dev/null 2>&1; then
   echo "Running shellcheck on tmux scripts..."
   # .tmux-ai-idle.sh is Python despite the .sh name (matched by install.py's glob); skip it.

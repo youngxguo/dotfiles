@@ -348,14 +348,14 @@ cmd_switch() {
 
 ESC=$'\033'
 RESET="${ESC}[0m"
-GREY="${ESC}[38;2;88;110;117m"      # base01  – index numbers, rules
-HDR="${ESC}[1;38;2;147;161;161m"    # base1   – header
-NAME="${ESC}[38;2;131;148;150m"     # base0   – session names
+GREY="$TMUX_FG_BASE01_ANSI"    # index numbers, rules
+HDR="$TMUX_BOLD_FG_BASE1_ANSI" # header
+NAME="$TMUX_FG_BASE00_ANSI"     # session names
 IDLE="$TMUX_AI_IDLE_ANSI"
 THINK="$TMUX_AI_THINK_ANSI"
-SELECT="${ESC}[1;38;2;253;246;227;48;2;38;139;210m" # base3 on blue
-BLUE="${ESC}[38;2;38;139;210m"      # attached marker
-YELLOW="${ESC}[38;2;181;137;0m"     # git branch
+SELECT="$TMUX_SELECT_ANSI"     # base3 on blue
+BLUE="$TMUX_BLUE_FG_ANSI"      # attached marker
+YELLOW="$TMUX_YELLOW_ANSI"     # git branch (same yellow as status)
 
 sidebar_wake_dir() {
   printf '%s/tmux-sidebar-%s\n' "${TMPDIR:-/tmp}" "${UID:-$(id -u)}"
@@ -453,7 +453,7 @@ render_once() {
       pad=""
       i=$cols; while [ "$i" -lt "$width" ]; do pad="${pad} "; i=$((i + 1)); done
       if [ "${idle[j]}" = "1" ]; then
-        printf '%s%s%s%s%s%s\n' "$IDLE" "${prefix}${nm}" "$YELLOW" "$branch_part" "$IDLE" "${pad}${RESET}"
+        printf '%s%s%s%s%s\n' "$IDLE" "$prefix" "$nm" "$branch_part" "${pad}${RESET}"
       else
         printf '%s%s%s%s%s%s\n' "$THINK" "${prefix}${nm}" "$YELLOW" "$branch_part" "$THINK" "${pad}${RESET}"
       fi
