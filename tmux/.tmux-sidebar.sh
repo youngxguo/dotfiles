@@ -13,13 +13,15 @@
 # `prefix b` toggles it everywhere via one global flag (@sidebar_enabled).
 #
 # Nothing polls. AI state is pushed onto each agent's own pane (@ai_state) by
-# ~/.tmux-ai-state.sh; the branch onto @git_branch by the shell hook. The rail
-# aggregates those per session as it renders (so a dead agent can't leave a stale
-# badge) and redraws on a wake event plus a slow backstop tick.
+# ~/.tmux-ai-state.sh; the branch onto @git_branch by the shell hook — and by
+# ~/.tmux-ai-state.sh too, so it tracks a checkout made while an agent holds the
+# pane and no shell prompt fires. The rail aggregates those per session as it
+# renders (so a dead agent can't leave a stale badge) and redraws on a wake event
+# plus a slow backstop tick.
 #
 # Subcommands: toggle | ensure [win] | ensure-all | reset-all | switch <n> |
-# refresh | render | fix <win> | rebalance <win> [h|v] | layout-hook <ev> <win> <z>.
-# render runs inside the rail pane and self-closes when it's the last pane left.
+# refresh | render | fix <win> | rebalance <win> [h|v] | layout-hook <ev> <win> <z> |
+# install-hooks. render runs inside the rail pane and self-closes when it's last.
 #
 # install.py symlinks this to ~/.tmux-sidebar.sh via its `.tmux-*.sh` glob.
 set -u
@@ -31,6 +33,65 @@ TMUX_BIN="$(tmux_resolve_bin)"
 
 # Sidebar width in columns. Override with SIDEBAR_WIDTH in the environment.
 WIDTH="${SIDEBAR_WIDTH:-26}"
+
+# Quiet the layout hooks while we do our own structural churn (toggle on/off
+# everywhere, reset on reload, backfill). Every resize/kill we issue fires
+# after-resize-pane / window-resized / pane-exited, and each of those would re-run the
+# very layout we're already doing synchronously — a fan-out of forked shells that
+# jitters the screen for seconds (a 4-window toggle fired ~12, ~0.2s each as run-shell
+# serializes them through tmux's queue). So the hooks (installed by install_layout_hooks
+# below) are wrapped in `if-shell -F #{@sidebar_busy}`, a pure FORMAT check tmux makes
+# without spawning a shell: while a bulk op holds @sidebar_busy the gate is false and
+# the hook never even forks. We stamp the flag around the bulk work; the work lays
+# everything out itself. The stamp is a timestamp, and layout_is_busy honors it only
+# briefly, so a stray hook that slips past the gate (one already queued before the flag
+# was set) still stands down — and a process killed mid-op (SIGKILL skips traps) can't
+# wedge it set for long. A leaked flag also clears on the next bulk op (any new window
+# runs `ensure`), so the gate re-arms on its own.
+SIDEBAR_BUSY_TTL=10
+layout_quiet_begin() {
+  local now; printf -v now '%(%s)T' -1
+  "$TMUX_BIN" set-option -g @sidebar_busy "$now" 2>/dev/null || true
+}
+layout_quiet_end() { "$TMUX_BIN" set-option -gqu @sidebar_busy 2>/dev/null || true; }
+layout_is_busy() {
+  local since now
+  since="$("$TMUX_BIN" show-options -gqv @sidebar_busy 2>/dev/null)"
+  [ -n "$since" ] || return 1
+  printf -v now '%(%s)T' -1
+  [ "$((now - since))" -lt "$SIDEBAR_BUSY_TTL" ]
+}
+# Run a bulk layout change with the hooks quiet, clearing the flag even on error so a
+# later genuine resize/exit isn't ignored.
+run_quiet() {
+  layout_quiet_begin
+  trap layout_quiet_end EXIT INT TERM
+  "$@"
+  local rc=$?
+  layout_quiet_end
+  trap - EXIT INT TERM
+  return "$rc"
+}
+
+# Install the four layout hooks. They live here, not inline in .tmux.conf, so they can
+# carry the busy gate (see above) in one place: each runs only when @sidebar_busy is
+# unset. The condition `#{?#{@sidebar_busy},,1}` expands to "1" (gate open) when the
+# flag is empty and "" (gate shut) when set. .tmux.conf calls this once at load via the
+# `install-hooks` subcommand. Idempotent — re-running just re-sets the same hooks.
+install_layout_hooks() {
+  local p="$SCRIPT_PATH" gate="if-shell -F '#{?#{@sidebar_busy},,1}'"
+  # window-resized re-spreads the work panes; after-resize-pane only re-pins the rail
+  # (so a manual pane drag isn't overwritten); pane-exited / after-kill-pane wake the
+  # rail so it re-spreads survivors or self-closes promptly however a pane went away.
+  "$TMUX_BIN" set-hook -g window-resized \
+    "$gate \"run-shell '$p layout-hook window-resize #{window_id} #{window_zoomed_flag}'\""
+  "$TMUX_BIN" set-hook -g after-resize-pane \
+    "$gate \"run-shell '$p layout-hook resize #{window_id} #{window_zoomed_flag}'\""
+  "$TMUX_BIN" set-hook -g pane-exited \
+    "$gate \"run-shell '$p layout-hook exit #{window_id}'\""
+  "$TMUX_BIN" set-hook -g after-kill-pane \
+    "$gate \"run-shell '$p layout-hook exit #{window_id}'\""
+}
 
 # Shown unless the global @sidebar_enabled is explicitly "0" (flipped by prefix b).
 # It's global, not per-window, so the rail stays consistent everywhere; unset means
@@ -183,6 +244,8 @@ cmd_rebalance() {
 # re-spreads the survivors and wakes the rail (exit). No rail: a bare select-layout -E.
 cmd_layout_hook() {
   local event="$1" win="$2" zoomed="${3:-0}"
+  # A bulk op is mid-flight and lays out everything itself; skip the redundant re-run.
+  layout_is_busy && return 0
   if [ "$("$TMUX_BIN" show-options -wqv -t "$win" @has_sidebar 2>/dev/null)" = "1" ]; then
     # Rail alone: nothing to rebalance, and pinning a sole pane to WIDTH can't shrink
     # it (no neighbour to cede columns) — the failed resize just re-fires
@@ -507,16 +570,17 @@ cmd_render() {
 # functions above.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-toggle}" in
-    toggle)      cmd_toggle ;;
-    ensure)      cmd_ensure "${2:-}" ;;
-    ensure-all)  cmd_ensure_all ;;
-    reset-all)   cmd_reset_all ;;
+    toggle)      run_quiet cmd_toggle ;;
+    ensure)      run_quiet cmd_ensure "${2:-}" ;;
+    ensure-all)  run_quiet cmd_ensure_all ;;
+    reset-all)   run_quiet cmd_reset_all ;;
     switch)      cmd_switch "${2:-}" "${3:-}" ;;
     refresh)     cmd_refresh ;;
     render)      cmd_render ;;
     fix)         cmd_fix "${2:-}" ;;
     rebalance)   cmd_rebalance "${2:-}" "${3:-}" ;;
     layout-hook) cmd_layout_hook "${2:-}" "${3:-}" "${4:-0}" ;;
-    *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|refresh|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>}\n' "${0##*/}" >&2; exit 2 ;;
+    install-hooks) install_layout_hooks ;;
+    *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|refresh|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>|install-hooks}\n' "${0##*/}" >&2; exit 2 ;;
   esac
 fi
