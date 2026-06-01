@@ -109,8 +109,9 @@ sidebar_pane() {
     | awk '$3 == "1" { print $1, $2; exit }'
 }
 
-# Pin the rail back to WIDTH, or tidy @has_sidebar if it's gone. Resizing only when
-# the width differs keeps the after-resize-pane hook from ping-ponging.
+# Pin the rail back to WIDTH, or tidy @has_sidebar if it's gone, then wake the rail so
+# it redraws at its settled geometry. Resizing only when the width differs keeps the
+# after-resize-pane hook from ping-ponging.
 cmd_fix() {
   local win="$1" pid w
   read -r pid w < <(sidebar_pane "$win")
@@ -120,6 +121,14 @@ cmd_fix() {
     return 0
   fi
   [ "$w" != "$WIDTH" ] && "$TMUX_BIN" resize-pane -t "$pid" -x "$WIDTH" 2>/dev/null || true
+  # cmd_fix is the last step of every settle (each cmd_rebalance path, plus the resize
+  # hook), so wake the rail here. A split/close/resize pins it back to WIDTH but leaves
+  # its content identical, and tmux only repaints cells it sees change — so once the
+  # surrounding panes reshuffle, the client's copy of the rail can drift stale even
+  # though tmux's grid is intact. The wake makes the render loop force a full redraw
+  # (see cmd_render), re-dirtying every cell so the client snaps back in sync. It's a
+  # no-op when no render loop owns the fifo (e.g. a rail created but not yet drawing).
+  wake_sidebar_pane "$pid"
 }
 
 # even-horizontal fills by pane order, so the rail must be the first pane to stay
@@ -261,11 +270,10 @@ cmd_layout_hook() {
       return 0
     fi
     case "$event" in
-      window-resize|exit)
-        cmd_rebalance "$win"
-        cmd_refresh_window "$win"
-        ;;
-      resize) cmd_fix "$win" ;;
+      # cmd_rebalance settles through cmd_fix, which wakes the rail, so the redraw
+      # rides along — no separate refresh needed here.
+      window-resize|exit) cmd_rebalance "$win" ;;
+      resize) cmd_fix "$win" ;;   # re-pin only (don't fight a manual drag); fix wakes
       *)      cmd_rebalance "$win" ;;
     esac
     return 0
@@ -546,14 +554,22 @@ cmd_render() {
 
   printf '%s' "${ESC}[?25l"                       # hide cursor
   trap 'printf "%s" "${ESC}[?25h"; rm -f "$wake_fifo"' EXIT INT TERM
-  local out prev="" active
+  local out prev="" active woke
   # Draw once up front so a freshly-shown window isn't blank for a tick.
   prev="$(render_once)"; printf '%s%s' "${ESC}[H${ESC}[2J" "$prev"
   while :; do
-    # Block on the wake fifo (AI/branch pushes, session/window changes, pane exits)
-    # and only fall through on the slow backstop — redraws are event-driven now.
+    # Block on the wake fifo (AI/branch pushes, session/window/layout changes, pane
+    # exits) and only fall through on the slow backstop — redraws are event-driven.
+    # Track WHY we woke: a fifo byte (woke=1) means something happened that may have
+    # disturbed our cells. A split/close/resize reshuffles the window and can leave
+    # the client's copy of the rail stale even though tmux's grid is intact, so on any
+    # wake we force a full clear+redraw — re-dirtying every cell pulls the client back
+    # in sync regardless of whether the rendered text changed. The content-diff guard
+    # stays only for the silent backstop (woke=0), so an idle tick with nothing new
+    # doesn't repaint.
+    woke=0
     if [ "$wake_fd_open" = "1" ]; then
-      IFS= read -r -t "${SIDEBAR_REFRESH_INTERVAL:-30}" -u 3 _ || true
+      IFS= read -r -t "${SIDEBAR_REFRESH_INTERVAL:-30}" -u 3 _ && woke=1
     else
       sleep "${SIDEBAR_REFRESH_INTERVAL:-30}"
     fi
@@ -562,7 +578,7 @@ cmd_render() {
     active="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)"
     [ "$active" = "1" ] || continue
     out="$(render_once)"
-    if [ "$out" != "$prev" ]; then
+    if [ "$woke" = "1" ] || [ "$out" != "$prev" ]; then
       printf '%s%s' "${ESC}[H${ESC}[2J" "$out"  # home + clear, then redraw
       prev="$out"
     fi

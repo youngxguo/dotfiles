@@ -280,6 +280,35 @@ check "rail_is_alone: true once the rail is the only pane" "$r"
 if cmd_refresh; then r=0; else r=1; fi
 check "refresh: exits 0 even when work panes trail the rail" "$r"
 
+# --- a settled layout wakes the rail so the client redraw can't drift -----------
+# A split/close/resize pins the rail back to WIDTH but leaves its content identical;
+# the rail must still be woken so its render loop forces a full redraw and the
+# client's copy can't drift stale (the regression behind "the sidebar looks wrong
+# after I change the layout"). cmd_fix is the last step of every settle, so it owns
+# the wake. The render loop normally owns the wake fifo; here we stand in for it —
+# make the fifo and hold it open so the write never blocks, then assert a byte lands.
+make_window winwake >/dev/null
+wakerail="$(t list-panes -t winwake -F '#{pane_id} #{@sidebar}' | awk '$2=="1"{print $1; exit}')"
+wdir="$(sidebar_wake_dir)"; mkdir -p "$wdir"
+wfifo="$wdir/${wakerail#%}.fifo"; rm -f "$wfifo"; mkfifo "$wfifo"
+exec 7<>"$wfifo"
+cmd_fix winwake                              # rail already at WIDTH: no resize, but still wakes
+if IFS= read -r -t 2 -u 7 _; then r=0; else r=1; fi
+check "layout-wake: cmd_fix wakes the rail even when the width is unchanged" "$r"
+exec 7>&-; rm -f "$wfifo"
+
+# The split path (agent-split -> cmd_rebalance) settles through cmd_fix, so it wakes
+# too — guard that a spread after a split drops a byte on the rail's wake fifo.
+make_window winwake2 >/dev/null
+t split-window -h -t winwake2
+wakerail2="$(t list-panes -t winwake2 -F '#{pane_id} #{@sidebar}' | awk '$2=="1"{print $1; exit}')"
+wfifo2="$wdir/${wakerail2#%}.fifo"; rm -f "$wfifo2"; mkfifo "$wfifo2"
+exec 7<>"$wfifo2"
+cmd_rebalance winwake2 h
+if IFS= read -r -t 2 -u 7 _; then r=0; else r=1; fi
+check "layout-wake: cmd_rebalance wakes the rail after a split-driven spread" "$r"
+exec 7>&-; rm -f "$wfifo2"
+
 # --- render: a session's badge is the live aggregate of its pane @ai_state ------
 # State lives on the agent's pane; the rail derives the badge from the live pane
 # states each render, so a killed/exited agent can't leave a stale badge behind.
