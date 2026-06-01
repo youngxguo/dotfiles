@@ -80,6 +80,18 @@ rest_even() {
       }'
 }
 
+# Do the work panes form a 2-D grid (>=2 distinct lefts AND >=2 distinct tops)?
+# A grid means a mixed split's layout survived instead of being flattened into a
+# single row/column by a 1-D even-spread. @sidebar goes LAST: it's empty on work
+# panes, and as a leading field its empty value collapses under awk's whitespace
+# splitting and shifts every later column (the same hazard render_once documents).
+is_grid() {
+  local sess="$1"
+  t list-panes -t "$sess" -F '#{pane_left} #{pane_top} #{@sidebar}' \
+    | awk '$3!="1"{ L[$1]=1; T[$2]=1 }
+           END{ nl=0; for(k in L)nl++; nt=0; for(k in T)nt++; exit !(nl>=2 && nt>=2) }'
+}
+
 # --- horizontal rest: three side-by-side work panes spread evenly ---------------
 railh="$(make_window winh)"
 t split-window -h -t winh
@@ -123,6 +135,37 @@ t resize-window -t winw -x 120 -y 40
 "$script" layout-hook window-resize winw 0
 rail_ok winw 40;         check "window-resize: rail pinned after shrink" "$?"
 rest_even winw width;    check "window-resize: work panes re-even after shrink" "$?"
+
+# --- mixed split makes a 2-D grid: the rail stays pinned and the grid survives ---
+# A row whose right pane is split vertically (or a column whose bottom pane is split
+# horizontally) is a grid no single orientation can even. An explicit h/v hint from
+# the split binding must NOT force a 1-D spread there — that flattens the layout. The
+# rebalance has to defer to the actual arrangement and leave the grid alone.
+# @sidebar goes last in every pane selector below, for the column-shift reason in
+# is_grid's comment.
+railg="$(make_window wing)"
+gwork="$(t list-panes -t wing -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+t split-window -h -t "$gwork"                 # rail + two work panes in a row
+"$script" rebalance wing h
+gright="$(t list-panes -t wing -F '#{pane_left} #{pane_id} #{@sidebar}' \
+  | awk '$3!="1"{print $1, $2}' | sort -n | tail -1 | awk '{print $2}')"
+t split-window -v -t "$gright"                # split the right pane -> 2-D grid
+"$script" rebalance wing v                    # the v hint must not mangle the grid
+rail_ok wing;            check "grid (v hint): rail stays pinned through a mixed split" "$?"
+is_grid wing;            check "grid (v hint): the 2-D layout survives, not flattened" "$?"
+
+# The mirror case: a column whose bottom pane is split horizontally, rebalanced with
+# an h hint — guards specifically against even-horizontal collapsing it to one row.
+railg2="$(make_window wing2)"
+g2work="$(t list-panes -t wing2 -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+t split-window -v -t "$g2work"                # rail + two work panes stacked
+"$script" rebalance wing2 v
+g2bottom="$(t list-panes -t wing2 -F '#{pane_top} #{pane_id} #{@sidebar}' \
+  | awk '$3!="1"{print $1, $2}' | sort -n | tail -1 | awk '{print $2}')"
+t split-window -h -t "$g2bottom"              # split the bottom pane -> 2-D grid
+"$script" rebalance wing2 h                    # the h hint must not even-horizontal it
+rail_ok wing2;           check "grid (h hint): rail stays pinned through a mixed split" "$?"
+is_grid wing2;           check "grid (h hint): the 2-D layout survives, not flattened" "$?"
 
 # --- self-close: a rail running the render loop deletes itself once alone --------
 # Drives the *real* render loop (fast tick) so we exercise the actual self-detect,

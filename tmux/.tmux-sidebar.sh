@@ -146,11 +146,13 @@ spread_around_sidebar() {
 }
 
 # Rebalance a window. No rail: the plain even-spread (h/v) or a bare select-layout
-# -E. With a rail: keep it a fixed-width column and spread only the rest; the
-# orientation defaults to the rest's current arrangement, and an ambiguous grid is
-# left as-is (just re-pin the rail).
+# -E. With a rail: keep it a fixed-width column and spread only the rest. The
+# orientation comes from the work panes' current arrangement; an explicit h/v hint
+# (from a split binding) is honored only for a clean row/column. A 2-D grid detects
+# as neither and is left as-is (just re-pin the rail), even when a hint was passed —
+# forcing a 1-D spread onto a grid flattens the other axis and mangles the layout.
 cmd_rebalance() {
-  local win="$1" orientation="${2:-}" sid _w zoomed
+  local win="$1" orientation="${2:-}" sid _w zoomed detected
   read -r sid _w < <(sidebar_pane "$win")
   if [ -z "${sid:-}" ]; then
     "$TMUX_BIN" set-window-option -t "$win" -qu @has_sidebar 2>/dev/null
@@ -165,8 +167,12 @@ cmd_rebalance() {
   # unzoomed event re-spread.
   zoomed="$("$TMUX_BIN" display-message -p -t "$win" '#{window_zoomed_flag}' 2>/dev/null)"
   if [ "$zoomed" = "1" ]; then cmd_fix "$win"; return 0; fi
-  [ -n "$orientation" ] || orientation="$(detect_rest_orientation "$win")"
-  if [ -z "$orientation" ]; then cmd_fix "$win"; return 0; fi
+  # A grid (no single orientation) vetoes the spread even when a binding passed an
+  # explicit h/v — a clean row/column detects as h/v and agrees with any hint, so
+  # this only bites the mixed-split case that used to get flattened.
+  detected="$(detect_rest_orientation "$win")"
+  if [ -z "$detected" ]; then cmd_fix "$win"; return 0; fi
+  [ -n "$orientation" ] || orientation="$detected"
   spread_around_sidebar "$win" "$orientation" "$sid" || true
   cmd_fix "$win"
 }
