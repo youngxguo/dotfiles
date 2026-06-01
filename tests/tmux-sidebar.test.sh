@@ -32,6 +32,10 @@ export HOME="$work/home"          # empty HOME => no ~/.tmux.conf side effects
 export SIDEBAR_WIDTH="$WIDTH"
 unset TMUX TMUX_PANE 2>/dev/null || true
 mkdir -p "$HOME"
+# An empty .zshrc marks the throwaway HOME as configured so an interactive zsh
+# work pane skips the newuser-install wizard -- otherwise the wizard swallows the
+# typed `exit` and the pane-exited close test never sees the pane go away.
+: > "$HOME/.zshrc"
 
 t() { tmux "$@"; }   # uses the shim
 
