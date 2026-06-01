@@ -33,12 +33,14 @@
 #   reset-all                   normalize every window to one correct rail (repair)
 #   switch <n>                  switch to the Nth session (Cmd-1..9)
 #   refresh                     wake sidebar panes so they redraw immediately
-#   render                      the redraw loop (runs *inside* the rail pane)
+#   render                      the redraw loop (runs *inside* the rail pane);
+#                               also self-closes when it's the last pane left
 #   fix <window>                pin the rail to SIDEBAR_WIDTH; tidy @has_sidebar
 #   rebalance <win> [h|v]       spread the panes evenly; with a rail present keep
 #                               it lifted out and only spread the rest
 #   layout-hook <ev> <win> <z>  hook entrypoint: window-resize re-spreads work
 #                               panes; resize re-pins the rail; exit rebalances
+#                               survivors and wakes the rail to self-close
 #
 # install.py symlinks this to ~/.tmux-sidebar.sh via its `.tmux-*.sh` glob.
 set -u
@@ -214,13 +216,15 @@ cmd_rebalance() {
 # Hook entrypoint for window-resized / after-resize-pane / pane-exited. With a
 # rail present a whole-window resize re-spreads work panes around the fixed rail
 # (window-resize), a manual pane resize only re-pins the rail (resize — cheap,
-# and avoids fighting the user's drag), and a pane exiting re-spreads survivors.
-# Without a rail, behave like the old bare select-layout -E.
+# and avoids fighting the user's drag), and a pane exiting re-spreads the
+# survivors and wakes the rail (exit) — which then closes itself if it's now the
+# only pane left (see rail_is_alone). Without a rail, behave like the old bare
+# select-layout -E.
 cmd_layout_hook() {
   local event="$1" win="$2" zoomed="${3:-0}"
   if [ "$("$TMUX_BIN" show-options -wqv -t "$win" @has_sidebar 2>/dev/null)" = "1" ]; then
     case "$event" in
-      window-resize)
+      window-resize|exit)
         cmd_rebalance "$win"
         cmd_refresh_window "$win"
         ;;
@@ -513,6 +517,16 @@ ai_idle_tick() {
   fi
 }
 
+# True when the rail is the only pane left in its window — every work pane it sat
+# beside is gone. The render loop checks this each tick and exits when it's true:
+# ending its own process closes the pane, and with it the now-empty window (and
+# the session, if it was the last). One rule retires a stranded empty sidebar no
+# matter how the last work pane went away — exit, prefix x, mouse, kill — so we
+# don't have to enumerate and hook each of those paths.
+rail_is_alone() {
+  [ "$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{window_panes}' 2>/dev/null)" = "1" ]
+}
+
 cmd_render() {
   local wake_dir wake_fifo wake_fd_open=0
   wake_dir="$(sidebar_wake_dir)"
@@ -537,6 +551,10 @@ cmd_render() {
     else
       sleep "${SIDEBAR_REFRESH_INTERVAL:-2}"
     fi
+    # Nothing left to sit beside — delete ourselves and let the window close. The
+    # pane-exited hook wakes us, so a process ending closes the rail near-instantly;
+    # an explicit kill we'd otherwise miss is still caught by the next tick.
+    rail_is_alone && break
     # Every window has its own sidebar now, so only attached current windows work.
     active="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)"
     [ "$active" = "1" ] || continue

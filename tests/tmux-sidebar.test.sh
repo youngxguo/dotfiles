@@ -123,12 +123,56 @@ t resize-window -t winw -x 120 -y 40
 rail_ok winw 40;         check "window-resize: rail pinned after shrink" "$?"
 rest_even winw width;    check "window-resize: work panes re-even after shrink" "$?"
 
+# --- self-close: a rail running the render loop deletes itself once alone --------
+# Drives the *real* render loop (fast tick) so we exercise the actual self-detect,
+# not a stand-in. No pane-exited hook here, so this is the pure next-tick path —
+# the same backstop any explicit kill (prefix x, mouse) relies on.
+make_render_window() {           # like make_window, but the rail runs `render`
+  local name="$1" rail
+  t new-session -d -s "$name" -x "$WIN_W" -y "$WIN_H"
+  rail="$(t split-window -hbdf -l "$WIDTH" -e SIDEBAR_REFRESH_INTERVAL=1 \
+            -P -F '#{pane_id}' -t "$name" "exec '$script' render")"
+  t set-option -p -t "$rail" @sidebar 1
+  t set-window-option -t "$name" @has_sidebar 1
+}
+
+make_render_window winself
+selfwork="$(t list-panes -t winself -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+t kill-pane -t "$selfwork"       # rail is now the only pane in winself
+gone=1
+for _ in $(seq 1 8); do
+  t has-session -t winself 2>/dev/null || { gone=0; break; }
+  sleep 0.5
+done
+check "self-close: a lone rail running the loop deletes itself" "$gone"
+
+# --- a work pane survives: the rail keeps running, the window stays --------------
+make_render_window winself2
+t split-window -h -t winself2 >/dev/null     # rail + two work panes
+self2victim="$(t list-panes -t winself2 -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+t kill-pane -t "$self2victim"                # one work pane left beside the rail
+sleep 1.5                                     # a couple of render ticks
+if t has-session -t winself2 2>/dev/null; then self2_alive=0; else self2_alive=1; fi
+check "self-close: rail stays while a work pane remains" "$self2_alive"
+
 # --- pure helper: folder_label_for_path (sidebar labels) ------------------------
 # The dispatch guard lets us source the script for its functions without running
 # a subcommand. These paths don't exist as git repos, so the label falls through
 # to the path-walking logic we want to exercise.
 # shellcheck source=/dev/null
 source "$script"
+
+# --- pure helper: rail_is_alone -------------------------------------------------
+# The predicate the render loop self-closes on. Drive it directly by pointing
+# TMUX_PANE at a rail (no render loop needed), so it's deterministic.
+make_window winalone >/dev/null
+alonerail="$(t list-panes -t winalone -F '#{pane_id} #{@sidebar}' | awk '$2=="1"{print $1; exit}')"
+alonework="$(t list-panes -t winalone -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+if TMUX_PANE="$alonerail" rail_is_alone; then r=1; else r=0; fi
+check "rail_is_alone: false while a work pane is present" "$r"
+t kill-pane -t "$alonework"          # rail (a plain shell here) is now the only pane
+if TMUX_PANE="$alonerail" rail_is_alone; then r=0; else r=1; fi
+check "rail_is_alone: true once the rail is the only pane" "$r"
 
 [ "$(folder_label_for_path "$work/proj/sub" fallback)" = "sub" ]
 check "label: plain path uses its basename" "$?"
