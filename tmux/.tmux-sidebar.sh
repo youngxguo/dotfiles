@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Persistent sessions sidebar for tmux: a fixed-width, full-height rail pinned to
 # the left of EVERY window, so it reads as one global sidebar the windows sit
-# beside. It lists every session in tmux order (so Cmd-1..9 maps to the visible
-# numbers) with AI idle (!) / thinking (💭) badges and the git branch.
+# beside. It lists every session by name in tmux order (so Cmd-1..9 maps to the
+# visible numbers) with AI idle (!) / thinking (💭) badges and the session's git
+# branch indented on a second line beneath it.
 #
 # A new window gets its rail from the window-linked hook; ensure-all backfills at
 # config load. The rail is split with -bdf (before, no focus, full height) so it
@@ -332,32 +333,6 @@ truncate() {
   fi
 }
 
-# The folder label for a session: the git repo root's basename, or for prefix-W
-# worktrees (../<repo>-worktrees/<name>) the original repo's name, leaving the
-# worktree/branch for the bracketed ref.
-folder_label_for_path() {
-  local path="$1" fallback="$2" root dir parent parent_base repo base
-  root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
-  [ -n "$root" ] && path="$root"
-
-  dir="${path%/}"
-  while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "." ]; do
-    parent="${dir%/*}"
-    [ "$parent" = "$dir" ] && break
-    parent_base="${parent##*/}"
-    case "$parent_base" in
-      *-worktrees)
-        repo="${parent_base%-worktrees}"
-        [ -n "$repo" ] && { printf '%s\n' "$repo"; return 0; }
-        ;;
-    esac
-    dir="$parent"
-  done
-
-  base="${path%/}"; base="${base##*/}"
-  printf '%s\n' "${base:-$fallback}"
-}
-
 render_once() {
   local width current_session
   width="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{pane_width}' 2>/dev/null)"
@@ -378,24 +353,30 @@ render_once() {
     esac
   done < <("$TMUX_BIN" list-panes -a -F '#{session_name}'$'\t''#{@ai_state}' 2>/dev/null)
 
-  # Branch comes from @git_branch (pushed by the shell hook, backfilled by
-  # ~/.tmux-update-branches.sh) so we don't fork git per session each redraw. It's
-  # the empty-able field, so it goes last too (see the tab note above).
-  local -a names idle think branch folder
-  local n br path count=0 base st
-  while IFS=$'\t' read -r n path br; do
-    base="$(folder_label_for_path "$path" "$n")"
+  # One row per session: its name on top, the git branch indented beneath. Branch
+  # comes from @git_branch (pushed by the shell hook and the agent state hook,
+  # backfilled by ~/.tmux-update-branches.sh) so we don't fork git per session each
+  # redraw. It's the empty-able field, so it goes last too (see the tab note above).
+  local -a names idle think branch
+  local n br count=0 st
+  while IFS=$'\t' read -r n br; do
     st="${ai_state[$n]:-}"
-    names[count]="$n"; folder[count]="$base"
+    names[count]="$n"
     idle[count]=0; think[count]=0
     case "$st" in idle) idle[count]=1 ;; thinking) think[count]=1 ;; esac
     branch[count]="$br"
     count=$((count + 1))
   done < <("$TMUX_BIN" list-sessions -F \
-'#{session_name}'$'\t''#{pane_current_path}'$'\t''#{@git_branch}' 2>/dev/null)
+'#{session_name}'$'\t''#{@git_branch}' 2>/dev/null)
 
-  local j nm badge pad prefix prefix_cols branch_part name_budget branch_budget selected cols label_width label color
+  local j nm badge pad prefix prefix_cols name_budget selected cols label_width label color indent brname rule divider
   label_width=${#count}
+  # A thin grey rule between every session, so the list always reads as separate
+  # blocks — consistent whatever the state, and it keeps adjacent colour bars (e.g.
+  # several sessions thinking at once) from merging into one indistinguishable slab.
+  # A full-width run of ─ (built once): base01 on the rail's bg.
+  printf -v rule '%*s' "$width" ''
+  divider="${GREY}${rule// /─}${RESET}"
   for j in $(seq 0 $((count - 1))); do
     if [ "${idle[j]}" = "1" ]; then badge="! "; elif [ "${think[j]}" = "1" ]; then badge="💭 "; else badge="  "; fi
     printf -v label "%${label_width}d" "$((j + 1))"
@@ -403,35 +384,44 @@ render_once() {
     prefix_cols=${#prefix}
     [ "${think[j]}" = "1" ] && prefix_cols=$((prefix_cols + 1))   # 💭 is 2 cols, 1 char
 
-    branch_part=""
-    branch_budget=$((width / 3))
-    if [ -n "${branch[j]}" ] && [ "$width" -ge 14 ] && [ "$branch_budget" -ge 3 ]; then
-      branch_part=" [$(truncate "${branch[j]}" "$branch_budget")]"
-    fi
-
-    name_budget=$((width - prefix_cols - ${#branch_part}))
-    if [ "$name_budget" -lt 3 ]; then
-      branch_part=""
-      name_budget=$((width - prefix_cols))
-    fi
-    nm="$(truncate "${folder[j]}" "$name_budget")"
-
+    name_budget=$((width - prefix_cols))
+    nm="$(truncate "${names[j]}" "$name_budget")"
     selected=0
     [ "${names[j]}" = "$current_session" ] && selected=1
-    cols=$((prefix_cols + ${#nm} + ${#branch_part}))
-    printf -v pad '%*s' "$(( width - cols > 0 ? width - cols : 0 ))" ''
 
-    # Selected and idle rows fill the whole line in one colour; thinking is the same
-    # but with a yellow branch; a plain row only colours its name and branch.
-    if [ "$selected" = "1" ] || [ "${idle[j]}" = "1" ]; then
-      color="$IDLE"; [ "$selected" = "1" ] && color="$SELECT"
-      printf '%s%s%s%s%s\n' "$color" "$prefix" "$nm" "$branch_part" "${pad}${RESET}"
-    elif [ "${think[j]}" = "1" ]; then
-      printf '%s%s%s%s%s%s\n' "$THINK" "${prefix}${nm}" "$YELLOW" "$branch_part" "$THINK" "${pad}${RESET}"
+    # Row colour: selected / idle / thinking fill the whole row — the name line and
+    # the branch line both — with one solid-bar colour, selected winning the tie. A
+    # plain row has no fill.
+    color=""
+    [ "${idle[j]}" = "1" ] && color="$IDLE"
+    [ "${think[j]}" = "1" ] && color="$THINK"
+    [ "$selected" = "1" ] && color="$SELECT"
+
+    # Rule above every row but the first, so sessions stay visually separate.
+    [ "$j" -gt 0 ] && printf '%s\n' "$divider"
+
+    # Name line: index, AI badge, session name.
+    cols=$((prefix_cols + ${#nm}))
+    printf -v pad '%*s' "$(( width - cols > 0 ? width - cols : 0 ))" ''
+    if [ -n "$color" ]; then
+      printf '%s%s%s%s\n' "$color" "$prefix" "$nm" "${pad}${RESET}"
     else
-      printf '%s%s%s%s' "$prefix" "$NAME" "$nm" "$RESET"
-      [ -n "$branch_part" ] && printf ' %s%s%s' "$YELLOW" "${branch_part# }" "$RESET"
-      printf '\n'
+      printf '%s%s%s%s\n' "$prefix" "$NAME" "$nm" "$RESET"
+    fi
+
+    # Branch line: indented to sit under the name. A highlighted row carries the
+    # same solid bar across it; a plain row shows the branch in yellow. Skipped when
+    # the session has no branch or the rail is too narrow (rows are 1 or 2 tall).
+    indent=$prefix_cols
+    if [ -n "${branch[j]}" ] && [ "$((width - indent))" -ge 3 ]; then
+      brname="$(truncate "${branch[j]}" "$((width - indent))")"
+      cols=$((indent + ${#brname}))
+      printf -v pad '%*s' "$(( width - cols > 0 ? width - cols : 0 ))" ''
+      if [ -n "$color" ]; then
+        printf '%s%*s%s%s\n' "$color" "$indent" '' "$brname" "${pad}${RESET}"
+      else
+        printf '%*s%s%s%s\n' "$indent" '' "$YELLOW" "$brname" "$RESET"
+      fi
     fi
   done
 

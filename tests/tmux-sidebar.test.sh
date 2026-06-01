@@ -212,10 +212,9 @@ t set-hook -gu after-resize-pane 2>/dev/null || true
 t set-hook -gu pane-exited 2>/dev/null || true
 t set-hook -gu after-kill-pane 2>/dev/null || true
 
-# --- pure helper: folder_label_for_path (sidebar labels) ------------------------
-# The dispatch guard lets us source the script for its functions without running
-# a subcommand. These paths don't exist as git repos, so the label falls through
-# to the path-walking logic we want to exercise.
+# --- pure helpers: source the script for its functions -------------------------
+# The dispatch guard lets us source the script for its functions (render_once,
+# rail_is_alone, cmd_refresh) without running a subcommand.
 # shellcheck source=/dev/null
 source "$script"
 
@@ -238,23 +237,18 @@ check "rail_is_alone: true once the rail is the only pane" "$r"
 if cmd_refresh; then r=0; else r=1; fi
 check "refresh: exits 0 even when work panes trail the rail" "$r"
 
-[ "$(folder_label_for_path "$work/proj/sub" fallback)" = "sub" ]
-check "label: plain path uses its basename" "$?"
-
-[ "$(folder_label_for_path "$work/myrepo-worktrees/feature-x" fallback)" = "myrepo" ]
-check "label: a path under <repo>-worktrees shows the repo name" "$?"
-
 # --- render: a session's badge is the live aggregate of its pane @ai_state ------
 # State lives on the agent's pane; the rail derives the badge from the live pane
 # states each render, so a killed/exited agent can't leave a stale badge behind.
-aidir="$work/aiproj"; mkdir -p "$aidir"          # unique folder label to grep for
-t new-session -d -s winai -x "$WIN_W" -y "$WIN_H" -c "$aidir"
-airail="$(t split-window -hbdf -l "$WIDTH" -c "$aidir" -P -F '#{pane_id}' -t winai)"
+# The rail labels each row by session name, so grep for the unique session name.
+t new-session -d -s winai -x "$WIN_W" -y "$WIN_H"
+airail="$(t split-window -hbdf -l "$WIDTH" -P -F '#{pane_id}' -t winai)"
 t set-option -p -t "$airail" @sidebar 1
 aiwork="$(t list-panes -t winai -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
 # render_once uses `[ … ] && …` lines that go non-zero on the false branch; the
 # live loop runs without errexit, so disable it here to drive it the same way.
-ai_line() { ( set +e; TMUX_PANE="$airail" render_once 2>/dev/null ) | grep -F aiproj; }
+render() { ( set +e; TMUX_PANE="$airail" render_once 2>/dev/null ); }
+ai_line() { render | grep -F winai; }              # the winai name row
 has_badge() { ai_line | grep -q "$1"; }            # $1: ! or 💭
 
 t set-option -p -t "$aiwork" @ai_state idle
@@ -271,6 +265,53 @@ t kill-pane -t "$aiwork2"
 t kill-pane -t "$aiwork"                          # the agent's pane goes away
 if ai_line | grep -qe '!' -e '💭'; then r=1; else r=0; fi
 check "render: badge clears when the agent's pane dies (self-heal)" "$r"
+
+# --- render: the git branch sits on its own indented line under the name --------
+# @git_branch is a session option; the rail prints it on a second, indented row
+# rather than inline with the session name. winai is the rendered pane's session,
+# so it's the selected row — its highlight bar should cover the branch line too.
+strip_ansi() { sed -r 's/\x1b\[[0-9;]*m//g'; }
+t set-option -t winai @git_branch feature-xyz
+brline="$(render | strip_ansi | grep -F feature-xyz)"
+if printf '%s' "$brline" | grep -q winai; then r=1; else r=0; fi
+check "render: branch is on its own line, not the name row" "$r"
+if printf '%s' "$brline" | grep -qE '^ +'; then r=0; else r=1; fi
+check "render: branch line is indented under the name" "$r"
+# 48;2;… is a truecolor background — only a highlighted bar carries one, so its
+# presence on the branch line proves the bar spans both rows of the selected row.
+if render | grep -F feature-xyz | grep -q '48;2'; then r=0; else r=1; fi
+check "render: the highlight bar covers the branch line of a selected row" "$r"
+t set-option -t winai -u @git_branch
+
+# --- render: a rule sits between EVERY pair of adjacent sessions ----------------
+# The rule is always present so the list reads consistently, whatever the state —
+# it isn't gated on a row being highlighted. zdiv1/zdiv2 are thinking, zdiv3 is
+# plain: a rule sits directly above zdiv2 (predecessor zdiv1) AND above zdiv3
+# (predecessor zdiv2, a plain row), but never above the very first session. Names
+# are 'z'-prefixed so they sort last and adjacent; none carry a branch, so each row
+# is one line and the line directly above a row is its separator. A rule line is all
+# ─ (plus any padding); tr -d strips ─ and spaces, so an emptied line was a rule.
+t new-session -d -s zdiv1 -x "$WIN_W" -y "$WIN_H"
+t new-session -d -s zdiv2 -x "$WIN_W" -y "$WIN_H"
+t new-session -d -s zdiv3 -x "$WIN_W" -y "$WIN_H"   # left plain (no @ai_state)
+t set-option -p -t "$(t list-panes -t zdiv1 -F '#{pane_id}' | head -1)" @ai_state thinking
+t set-option -p -t "$(t list-panes -t zdiv2 -F '#{pane_id}' | head -1)" @ai_state thinking
+is_rule() { [ -n "$1" ] && [ -z "$(printf '%s' "$1" | tr -d '─ ')" ]; }
+# awk reads to EOF (capturing the line above the match in END) rather than exiting
+# at the match — an early exit SIGPIPEs the upstream sed, which pipefail then turns
+# into a nonzero pipeline and trips the suite's set -e.
+divsep="$(render | strip_ansi | awk '/zdiv2/{r=prev} {prev=$0} END{print r}')"
+if is_rule "$divsep"; then r=0; else r=1; fi
+check "render: a rule separates adjacent sessions" "$r"
+plainsep="$(render | strip_ansi | awk '/zdiv3/{r=prev} {prev=$0} END{print r}')"
+if is_rule "$plainsep"; then r=0; else r=1; fi
+check "render: the rule is always present, even next to a plain row" "$r"
+firstline="$(render | strip_ansi | sed -n '1p')"
+if is_rule "$firstline"; then r=1; else r=0; fi
+check "render: no rule above the first session row" "$r"
+t kill-session -t zdiv1 2>/dev/null || true
+t kill-session -t zdiv2 2>/dev/null || true
+t kill-session -t zdiv3 2>/dev/null || true
 
 # --- ai-state script: sets the pane and mirrors it onto the session ------------
 make_window winsync >/dev/null
