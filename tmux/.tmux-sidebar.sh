@@ -97,7 +97,10 @@ install_layout_hooks() {
 # It's global, not per-window, so the rail stays consistent everywhere; unset means
 # on, and it resets to on at server start.
 sidebar_enabled() {
-  [ "$("$TMUX_BIN" show-options -gv @sidebar_enabled 2>/dev/null)" != "0" ]
+  # -q so an unset @sidebar_enabled (the default — only set once prefix-b toggles
+  # it) reads as empty instead of erroring "invalid option", which the server would
+  # otherwise flash onto every attached client's status line on reload.
+  [ "$("$TMUX_BIN" show-options -gqv @sidebar_enabled 2>/dev/null)" != "0" ]
 }
 
 # The rail pane in a window (it carries @sidebar=1). Prints "<id> <width>" or nothing.
