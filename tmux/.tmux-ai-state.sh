@@ -2,7 +2,7 @@
 # Push-based AI idle/thinking state for the sessions sidebar. Agent CLIs call this
 # from their own hooks instead of the sidebar polling pane contents:
 #   - Claude Code: UserPromptSubmit -> thinking, Stop -> idle, SessionEnd -> clear
-#                  (see claude/settings.json)
+#                  (see claude/ai-state-hooks.json, merged in by install.py)
 #   - Codex:       notify (turn complete) -> idle (see codex/config.toml)
 #
 # State lives on the PANE the agent runs in (@ai_state = thinking|idle, unset when
