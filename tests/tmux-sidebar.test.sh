@@ -231,6 +231,13 @@ t kill-pane -t "$alonework"          # rail (a plain shell here) is now the only
 if TMUX_PANE="$alonerail" rail_is_alone; then r=0; else r=1; fi
 check "rail_is_alone: true once the rail is the only pane" "$r"
 
+# --- refresh exits 0 even when the last pane isn't a rail -----------------------
+# wake_rails' loop ends on `[ "$sb" = "1" ]`, which is false for a work pane and
+# would leak as a nonzero exit — tmux's run-shell then reports `refresh returned 1`
+# on every new pane. Guard that the wake stays fire-and-forget (exit 0).
+if cmd_refresh; then r=0; else r=1; fi
+check "refresh: exits 0 even when work panes trail the rail" "$r"
+
 [ "$(folder_label_for_path "$work/proj/sub" fallback)" = "sub" ]
 check "label: plain path uses its basename" "$?"
 

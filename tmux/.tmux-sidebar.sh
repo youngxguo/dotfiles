@@ -448,11 +448,15 @@ wake_sidebar_pane() {
 }
 
 # Wake the rail panes among the given list-panes targets (-a for all, -t <win>).
+# return 0 so we don't leak the loop's exit status: when the last pane isn't a rail
+# the trailing `[ "$sb" = "1" ]` test is false, which would otherwise bubble up as a
+# nonzero exit that tmux's run-shell reports as `… refresh returned 1`.
 wake_rails() {
   local pane sb
   while read -r pane sb; do
     [ "$sb" = "1" ] && wake_sidebar_pane "$pane"
   done < <("$TMUX_BIN" list-panes "$@" -F '#{pane_id} #{@sidebar}' 2>/dev/null)
+  return 0
 }
 
 cmd_refresh_window() { [ -n "${1:-}" ] && wake_rails -t "$1" || true; }
