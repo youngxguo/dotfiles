@@ -18,26 +18,13 @@ if grep -E 'send-keys|capture-pane|gt status|git status|shell-timeout|wait_for_s
   exit 1
 fi
 
-echo "Checking tmux agent-command lists stay in sync (bash vs python)..."
-bash_agents=$(sed -n 's/^TMUX_AGENT_COMMANDS=(\(.*\))/\1/p' tmux/.tmux-lib.sh | tr ' ' '\n' | sort | tr '\n' ' ')
-py_agents=$(sed -n 's/^AGENT_COMMANDS = (\(.*\))/\1/p' tmux/.tmux-ai-idle.sh | tr ',' '\n' | tr -d ' "' | sort | tr '\n' ' ')
-if [ "$bash_agents" != "$py_agents" ]; then
-  echo "agent command lists differ:" >&2
-  echo "  bash   (TMUX_AGENT_COMMANDS in .tmux-lib.sh): [$bash_agents]" >&2
-  echo "  python (AGENT_COMMANDS in .tmux-ai-idle.sh):  [$py_agents]" >&2
-  echo "Keep the two lists identical; the Python idle detector can't source the bash lib." >&2
-  exit 1
-fi
-
 echo "Checking tmux palette covers all @solarized_* uses in conf..."
 bash tests/tmux-colors-sync.test.sh
 
 if command -v shellcheck >/dev/null 2>&1; then
   echo "Running shellcheck on tmux scripts..."
-  # .tmux-ai-idle.sh is Python despite the .sh name (matched by install.py's glob); skip it.
   shellcheck tmux/.tmux.conf 2>/dev/null || true
   for script in tmux/.tmux-*.sh tests/*.sh; do
-    [ "$script" = "tmux/.tmux-ai-idle.sh" ] && continue
     shellcheck "$script"
   done
 else

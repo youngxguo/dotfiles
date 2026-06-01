@@ -30,7 +30,7 @@ pane_path="$("$TMUX_BIN" display-message -p "${target[@]}" '#{pane_current_path}
 pane_pid="$("$TMUX_BIN" display-message -p "${target[@]}" '#{pane_pid}')"
 
 # Walk the pane's process subtree and return the first known agent CLI found
-# (TMUX_AGENT_COMMANDS, shared with the idle detector). Matches on `comm` (the
+# (TMUX_AGENT_COMMANDS, from ~/.tmux-lib.sh). Matches on `comm` (the
 # executable basename), which reports `claude`/`codex` reliably even when the app
 # rewrites its process title (claude shows its version string in
 # pane_current_command, but comm stays `claude`).

@@ -13,5 +13,16 @@
   "skipDangerousModePermissionPrompt": true,
   "enabledPlugins": {
     "typescript-lsp@claude-plugins-official": true
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "~/.tmux-ai-state.sh thinking" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "~/.tmux-ai-state.sh idle" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "~/.tmux-ai-state.sh clear" }] }
+    ]
   }
 }

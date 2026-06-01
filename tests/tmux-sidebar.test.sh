@@ -8,6 +8,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 script="$here/../tmux/.tmux-sidebar.sh"
+ai_script="$here/../tmux/.tmux-ai-state.sh"
 real_tmux="$(command -v tmux)"
 
 WIDTH=26
@@ -179,6 +180,48 @@ check "label: plain path uses its basename" "$?"
 
 [ "$(folder_label_for_path "$work/myrepo-worktrees/feature-x" fallback)" = "myrepo" ]
 check "label: a path under <repo>-worktrees shows the repo name" "$?"
+
+# --- render: a session's badge is the live aggregate of its pane @ai_state ------
+# State lives on the agent's pane; the rail derives the badge from the live pane
+# states each render, so a killed/exited agent can't leave a stale badge behind.
+aidir="$work/aiproj"; mkdir -p "$aidir"          # unique folder label to grep for
+t new-session -d -s winai -x "$WIN_W" -y "$WIN_H" -c "$aidir"
+airail="$(t split-window -hbdf -l "$WIDTH" -c "$aidir" -P -F '#{pane_id}' -t winai)"
+t set-option -p -t "$airail" @sidebar 1
+aiwork="$(t list-panes -t winai -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+# render_once uses `[ … ] && …` lines that go non-zero on the false branch; the
+# live loop runs without errexit, so disable it here to drive it the same way.
+ai_line() { ( set +e; TMUX_PANE="$airail" render_once 2>/dev/null ) | grep -F aiproj; }
+has_badge() { ai_line | grep -q "$1"; }            # $1: ! or 💭
+
+t set-option -p -t "$aiwork" @ai_state idle
+has_badge '!'; check "render: an idle pane shows the ! badge" "$?"
+
+t set-option -p -t "$aiwork" @ai_state thinking
+has_badge '💭'; check "render: a thinking pane shows the 💭 badge" "$?"
+
+aiwork2="$(t split-window -hdf -t winai -P -F '#{pane_id}')"
+t set-option -p -t "$aiwork2" @ai_state idle    # one thinking, one idle
+has_badge '💭'; check "render: thinking outranks idle across panes" "$?"
+t kill-pane -t "$aiwork2"
+
+t kill-pane -t "$aiwork"                          # the agent's pane goes away
+if ai_line | grep -qe '!' -e '💭'; then r=1; else r=0; fi
+check "render: badge clears when the agent's pane dies (self-heal)" "$r"
+
+# --- ai-state script: sets the pane and mirrors it onto the session ------------
+make_window winsync >/dev/null
+syncwork="$(t list-panes -t winsync -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+TMUX_PANE="$syncwork" bash "$ai_script" idle
+[ "$(t show-options -pqv -t "$syncwork" @ai_state)" = idle ]
+check "ai-state: idle sets the pane @ai_state" "$?"
+[ "$(t show-options -qv -t winsync @session_ai_idle)" = 1 ]
+check "ai-state: idle mirrors @session_ai_idle for the prefix-s tree" "$?"
+TMUX_PANE="$syncwork" bash "$ai_script" clear
+[ -z "$(t show-options -pqv -t "$syncwork" @ai_state)" ]
+check "ai-state: clear unsets the pane @ai_state" "$?"
+[ -z "$(t show-options -qv -t winsync @session_ai_idle)" ]
+check "ai-state: clear re-syncs the session mirror off" "$?"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

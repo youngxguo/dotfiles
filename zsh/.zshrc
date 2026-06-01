@@ -74,6 +74,42 @@ alias gcoma="git commit --amend"
 alias vim="nvim"
 alias fep='docker port "$(cat "$(git rev-parse --show-toplevel)/.dev_docker_name")" 8080/tcp | sed -n "s/.*://p" | head -n1'
 
+# tmux: push the current git branch into the session's @git_branch option so the
+# sessions sidebar and status line read it instead of forking git on a timer.
+# Only fires when the branch changes (cheap next to starship's own per-prompt git
+# check); chpwd covers `cd`, precmd catches an in-place `git checkout`.
+if [[ -n ${TMUX_PANE:-} ]]; then
+  autoload -Uz add-zsh-hook
+  _tmux_push_branch() {
+    emulate -L zsh
+    local branch
+    branch=$(command git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    [[ $branch == ${_tmux_last_branch-__unset__} ]] && return
+    _tmux_last_branch=$branch
+    if [[ -n $branch ]]; then
+      command tmux set-option -qt "$TMUX_PANE" @git_branch "$branch"
+    else
+      command tmux set-option -qut "$TMUX_PANE" @git_branch
+    fi
+    command tmux run-shell -b "~/.tmux-sidebar.sh refresh" 2>/dev/null
+  }
+  add-zsh-hook chpwd _tmux_push_branch
+  add-zsh-hook precmd _tmux_push_branch
+
+  # When a shell prompt reappears in this pane, any agent that was running here is
+  # gone, so retire its AI badge. This is the self-heal for agents whose own hooks
+  # can't (Codex has no exit hook) or didn't fire (a crash/kill mid-turn): the
+  # pane's @ai_state would otherwise sit there idle forever. The show-options guard
+  # keeps the normal case — a shell that never ran an agent — to a single cheap
+  # query with no extra work; only a leftover state pays for the clear + redraw.
+  _tmux_clear_ai_state() {
+    emulate -L zsh
+    [[ -n $(command tmux show-options -pqv -t "$TMUX_PANE" @ai_state 2>/dev/null) ]] || return
+    command ~/.tmux-ai-state.sh clear 2>/dev/null
+  }
+  add-zsh-hook precmd _tmux_clear_ai_state
+fi
+
 # nvm — lazy-loaded to keep shell startup fast. The default node version stays
 # on PATH immediately (so node/npm work in scripts and subshells); the full nvm
 # machinery loads on first use of nvm/node/npm/npx.

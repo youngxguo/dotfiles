@@ -21,10 +21,13 @@
 # once — the shown/hidden state is one global flag (@sidebar_enabled), not per
 # window, so it stays consistent across every window and session.
 #
-# AI-state session options (@session_ai_*) are populated by ~/.tmux-ai-idle.sh,
-# which this rail runs on its own refresh tick (ai_idle_tick) rather than from
-# the tmux status line; the rail reads the git branch directly from each
-# session's pane path.
+# AI state is PUSHED by the agent CLIs onto their own pane (@ai_state) from their
+# hooks via ~/.tmux-ai-state.sh (Claude Code Stop/UserPromptSubmit, Codex notify),
+# which also wakes the rail to redraw. The rail aggregates those pane states per
+# session as it renders, so a killed or exited agent never leaves a stale badge —
+# the pane carries the truth and loses it when the agent does. The git branch
+# comes from the @git_branch option, pushed by the shell's chpwd/precmd hook.
+# Nothing here polls — the rail redraws on those events plus a slow backstop tick.
 #
 # Subcommands:
 #   toggle                      hide/show the rail everywhere (global state)
@@ -50,10 +53,6 @@ source "$SCRIPT_DIR/.tmux-lib.sh"
 
 TMUX_BIN="$(tmux_resolve_bin)"
 
-# The AI idle/thinking detector. The rail drives it from its refresh tick (see
-# ai_idle_tick) instead of the tmux status line, so all AI-state bookkeeping
-# lives next to the rail that renders it.
-AI_IDLE_SCRIPT="$SCRIPT_DIR/.tmux-ai-idle.sh"
 
 # Sidebar width in columns. Override with SIDEBAR_WIDTH in the environment.
 WIDTH="${SIDEBAR_WIDTH:-26}"
@@ -410,20 +409,41 @@ render_once() {
   [ -n "$width" ] || width="$WIDTH"
   current_session="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null)"
 
-  # The branch is read straight from each session's pane path (tmux_git_branch)
-  # rather than the @git_branch option, so the rail is always current without
-  # depending on ~/.tmux-update-branches.sh; folder_label_for_path already forks
-  # git per session, so this adds no meaningful cost. pane_current_path is the
-  # last field and never empty, so the tab split stays aligned.
+  # AI state is the live aggregate of each session's pane-level @ai_state, pushed
+  # by the agent hooks via ~/.tmux-ai-state.sh: thinking outranks idle, neither
+  # shows no badge. Reading it straight from the panes means a killed agent's pane
+  # takes its badge with it and a shell returning clears its own — the rail can't
+  # show a badge the agent has outlived, with nothing polling.
+  # Tab-split, but the empty-able field always goes LAST: a tab is whitespace-IFS,
+  # so `read` collapses runs of it and drops empty fields — a blank @ai_state /
+  # @git_branch in the middle would shift every later column. Trailing, an empty
+  # field just leaves its var unset, which is what we want.
+  local -A ai_state=()
+  local sn ps
+  while IFS=$'\t' read -r sn ps; do
+    case "$ps" in
+      thinking) ai_state[$sn]=thinking ;;
+      idle)     [ "${ai_state[$sn]:-}" = thinking ] || ai_state[$sn]=idle ;;
+    esac
+  done < <("$TMUX_BIN" list-panes -a -F '#{session_name}'$'\t''#{@ai_state}' 2>/dev/null)
+
+  # The branch comes from each session's @git_branch option — pushed by the shell's
+  # chpwd/precmd hook in ~/.zshrc, with ~/.tmux-update-branches.sh as backfill — so
+  # the rail reads it instead of forking git per session on every redraw. @git_branch
+  # is the field that can be empty, so it goes LAST (see the tab note above);
+  # pane_current_path (never empty) sits in the middle to keep the split aligned.
   local -a names idle think branch folder
-  local n id th path count=0 base
-  while IFS=$'\t' read -r n id th path; do
+  local n br path count=0 base st
+  while IFS=$'\t' read -r n path br; do
     base="$(folder_label_for_path "$path" "$n")"
-    names[count]="$n"; folder[count]="$base"; idle[count]="$id"; think[count]="$th"
-    branch[count]="$(tmux_git_branch "$path")"
+    st="${ai_state[$n]:-}"
+    names[count]="$n"; folder[count]="$base"
+    idle[count]=0; think[count]=0
+    case "$st" in idle) idle[count]=1 ;; thinking) think[count]=1 ;; esac
+    branch[count]="$br"
     count=$((count + 1))
   done < <("$TMUX_BIN" list-sessions -F \
-'#{session_name}'$'\t''#{?#{@session_ai_idle},1,0}'$'\t''#{?#{@session_ai_thinking},1,0}'$'\t''#{pane_current_path}' 2>/dev/null)
+'#{session_name}'$'\t''#{pane_current_path}'$'\t''#{@git_branch}' 2>/dev/null)
 
   local j nm br badge pad prefix prefix_cols branch_part name_budget branch_budget selected label_width label
   local i=0
@@ -503,20 +523,6 @@ cmd_refresh() {
   done < <("$TMUX_BIN" list-panes -a -F '#{pane_id} #{@sidebar}' 2>/dev/null)
 }
 
-# Run the AI idle/thinking detector in the background so a slow pane scan never
-# stalls the redraw. A non-blocking flock keeps ticks from stacking up: if the
-# previous run is still going, this tick is simply skipped. It publishes
-# @session_ai_* (and fires idle notifications), which the next render reads.
-ai_idle_tick() {
-  [ -e "$AI_IDLE_SCRIPT" ] || return 0
-  local lock="${TMPDIR:-/tmp}/tmux-ai-idle-${UID:-$(id -u 2>/dev/null || echo user)}.lock"
-  if command -v flock >/dev/null 2>&1; then
-    ( flock -n 9 || exit 0; "$AI_IDLE_SCRIPT" >/dev/null 2>&1 ) 9>"$lock" &
-  else
-    "$AI_IDLE_SCRIPT" >/dev/null 2>&1 &
-  fi
-}
-
 # True when the rail is the only pane left in its window — every work pane it sat
 # beside is gone. The render loop checks this each tick and exits when it's true:
 # ending its own process closes the pane, and with it the now-empty window (and
@@ -546,10 +552,13 @@ cmd_render() {
   # the instant you switch to it, rather than a blank pane for a tick.
   prev="$(render_once)"; printf '%s%s' "${ESC}[H${ESC}[2J" "$prev"
   while :; do
+    # Block on the wake fifo (events: AI-state push, branch push, session/window
+    # changes, pane-exit) and only fall through on the long backstop timeout —
+    # redraws are event-driven now, so this tick rarely fires on its own.
     if [ "$wake_fd_open" = "1" ]; then
-      IFS= read -r -t "${SIDEBAR_REFRESH_INTERVAL:-2}" -u 3 _ || true
+      IFS= read -r -t "${SIDEBAR_REFRESH_INTERVAL:-30}" -u 3 _ || true
     else
-      sleep "${SIDEBAR_REFRESH_INTERVAL:-2}"
+      sleep "${SIDEBAR_REFRESH_INTERVAL:-30}"
     fi
     # Nothing left to sit beside — delete ourselves and let the window close. The
     # pane-exited hook wakes us, so a process ending closes the rail near-instantly;
@@ -558,7 +567,6 @@ cmd_render() {
     # Every window has its own sidebar now, so only attached current windows work.
     active="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)"
     [ "$active" = "1" ] || continue
-    ai_idle_tick
     out="$(render_once)"
     if [ "$out" != "$prev" ]; then
       printf '%s%s' "${ESC}[H${ESC}[2J" "$out"  # home + clear, then redraw

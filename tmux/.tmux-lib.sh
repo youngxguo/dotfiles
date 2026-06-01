@@ -4,12 +4,9 @@
 # install.py symlinks this to ~/.tmux-lib.sh via its `.tmux-*.sh` glob, alongside
 # the scripts that source it.
 #
-# The status-line script (~/.tmux-ai-idle.sh) is Python and can't source this, so
-# it reimplements tmux_resolve_bin / tmux_recreate_socket_dir and keeps its own
-# copy of TMUX_AGENT_COMMANDS. Keep that copy in sync with the list below; the
-# pre-push hook fails if the two agent-command lists drift.
-
-# Canonical set of agent CLIs we treat specially (idle detection, split mirror).
+# Canonical set of agent CLIs we treat specially: the split mirror
+# (~/.tmux-agent-split.sh) and the worktree launcher (~/.tmux-worktree.sh) match a
+# pane's command against this list (see tmux_is_agent_command below).
 TMUX_AGENT_COMMANDS=(claude codex agent cursor-agent)
 
 _palette_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
