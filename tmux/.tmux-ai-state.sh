@@ -20,6 +20,11 @@
 # `idle` also fires a desktop notification, so finishing a turn pings you — but
 # only for a session you're NOT currently watching.
 #
+# Every invocation also republishes the session's @git_branch from the agent
+# pane's directory, so a branch the agent checks out mid-turn reaches the sidebar:
+# the shell precmd hook that normally pushes it can't fire while an agent holds
+# the pane (see sync_branch).
+#
 # This replaces the old capture-pane poller entirely: agents the hooks can't reach
 # (e.g. one running an ssh hop past the host the tmux server lives on) simply show
 # no badge rather than being scraped.
@@ -70,6 +75,24 @@ sync_session() {
   fi
 }
 
+# Republish the session's @git_branch from the agent pane's working directory, so
+# the sidebar's branch label follows a checkout made while the agent held the pane.
+# The shell precmd hook (~/.zshrc) that normally pushes the branch can't fire here
+# — no shell prompt is drawn while the agent runs — so we re-derive it on each turn
+# boundary instead. Mirrors that hook's set/unset of the same session option; a
+# path that isn't a repo clears it.
+sync_branch() {
+  local path branch
+  path="$("$TMUX_BIN" display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null)"
+  [ -n "$path" ] || return 0
+  branch="$(tmux_git_branch "$path")"
+  if [ -n "$branch" ]; then
+    "$TMUX_BIN" set-option -qt "$session" @git_branch "$branch"
+  else
+    "$TMUX_BIN" set-option -qut "$session" @git_branch
+  fi
+}
+
 # Mirror the old poller's idle ping: "❕ AI Idle / • (N) name branch" via OSC 9 to
 # every client tty, so it surfaces on the attached terminal (incl. over ssh).
 # Skip it when the just-idled session is the one you're already attached to —
@@ -96,7 +119,8 @@ case "${1:-}" in
   *) printf 'usage: %s {thinking|idle|clear}\n' "${0##*/}" >&2; exit 2 ;;
 esac
 
-# Refresh the session mirror and wake the visible rail(s) so the badge change
-# shows immediately.
+# Refresh the session mirror and git branch, then wake the visible rail(s) so the
+# change shows immediately.
 sync_session
+sync_branch
 "$SIDEBAR" refresh >/dev/null 2>&1 || true

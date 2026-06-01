@@ -286,5 +286,26 @@ check "ai-state: clear unsets the pane @ai_state" "$?"
 [ -z "$(t show-options -qv -t winsync @session_ai_idle)" ]
 check "ai-state: clear re-syncs the session mirror off" "$?"
 
+# --- ai-state: republishes the agent pane's git branch onto @git_branch ---------
+# A branch switched while an agent (not a shell) holds the pane has no precmd to
+# push it, so the hook re-derives it from the pane's cwd. The work pane is cwd'd
+# into a repo on a known branch; running the hook must publish that branch — and a
+# pane in a non-repo dir must clear a stale value.
+brrepo="$work/brrepo"; mkdir -p "$brrepo"
+git -C "$brrepo" init -q -b on-feature
+git -C "$brrepo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+t new-session -d -s winbr -x "$WIN_W" -y "$WIN_H" -c "$brrepo"
+brwork="$(t list-panes -t winbr -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+TMUX_PANE="$brwork" bash "$ai_script" thinking
+[ "$(t show-options -qv -t winbr @git_branch)" = on-feature ]
+check "ai-state: publishes the agent pane's branch onto @git_branch" "$?"
+
+t new-session -d -s winbr2 -x "$WIN_W" -y "$WIN_H" -c "$work"   # $work is no repo
+t set-option -t winbr2 @git_branch stale                        # the hook must clear it
+br2work="$(t list-panes -t winbr2 -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+TMUX_PANE="$br2work" bash "$ai_script" thinking
+[ -z "$(t show-options -qv -t winbr2 @git_branch)" ]
+check "ai-state: clears @git_branch when the pane is not in a repo" "$?"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
