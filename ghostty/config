@@ -15,15 +15,25 @@ keybind = alt+enter=text:\x1b\x0d
 # Cmd 1-9: jump to the Nth tmux session. macOS/Ghostty owns Cmd, so we forward
 # these as private "ESC [ n z" sequences that tmux picks up as user-keys and
 # routes to the session-switch helper (see tmux/.tmux.conf, tmux/.tmux-sidebar.sh).
-# These MUST use the physical key (digit_N): Ghostty's built-in goto_tab defaults
-# bind super+digit_N, and physical binds win over the translated "cmd+one" form,
-# so the translated form never fires. Binding digit_N overrides goto_tab outright.
-keybind = cmd+digit_1=text:\x1b[1z
-keybind = cmd+digit_2=text:\x1b[2z
-keybind = cmd+digit_3=text:\x1b[3z
-keybind = cmd+digit_4=text:\x1b[4z
-keybind = cmd+digit_5=text:\x1b[5z
-keybind = cmd+digit_6=text:\x1b[6z
-keybind = cmd+digit_7=text:\x1b[7z
-keybind = cmd+digit_8=text:\x1b[8z
-keybind = cmd+digit_9=text:\x1b[9z
+# Ghostty's goto_tab default binds BOTH trigger forms for each digit: the physical
+# key (super+digit_N) and the translated char (super+N). A Cmd-N press can resolve
+# to either, so we MUST override both — leaving one as the default lets goto_tab
+# (a no-op with a single tab) swallow the press and nothing reaches tmux.
+keybind = super+digit_1=text:\x1b[1z
+keybind = super+1=text:\x1b[1z
+keybind = super+digit_2=text:\x1b[2z
+keybind = super+2=text:\x1b[2z
+keybind = super+digit_3=text:\x1b[3z
+keybind = super+3=text:\x1b[3z
+keybind = super+digit_4=text:\x1b[4z
+keybind = super+4=text:\x1b[4z
+keybind = super+digit_5=text:\x1b[5z
+keybind = super+5=text:\x1b[5z
+keybind = super+digit_6=text:\x1b[6z
+keybind = super+6=text:\x1b[6z
+keybind = super+digit_7=text:\x1b[7z
+keybind = super+7=text:\x1b[7z
+keybind = super+digit_8=text:\x1b[8z
+keybind = super+8=text:\x1b[8z
+keybind = super+digit_9=text:\x1b[9z
+keybind = super+9=text:\x1b[9z
