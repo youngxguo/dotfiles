@@ -38,3 +38,13 @@ tmux_apply_literal_colours() {
   "${tmux[@]}" set-option -g display-panes-colour "$TMUX_PALETTE_BASE00"
   "${tmux[@]}" set-window-option -g clock-mode-colour "$TMUX_PALETTE_YELLOW"
 }
+
+# Run directly (not sourced) to push the palette into the tmux server — this is how
+# ~/.tmux.conf loads it. The conf can't `source` this: tmux's run-shell executes
+# under /bin/sh (dash on Debian/Ubuntu), which has no `source` and can't parse the
+# array/substring helpers above, so it returned 127 and left every @solarized_*
+# unset — the status bar then drew with empty colours. The bash shebang makes the
+# kernel run this under bash when it's invoked as a command, so the helpers work.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  tmux_load_palette tmux && tmux_apply_literal_colours tmux
+fi
