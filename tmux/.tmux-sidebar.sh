@@ -222,6 +222,16 @@ cmd_rebalance() {
 cmd_layout_hook() {
   local event="$1" win="$2" zoomed="${3:-0}"
   if [ "$("$TMUX_BIN" show-options -wqv -t "$win" @has_sidebar 2>/dev/null)" = "1" ]; then
+    # Rail alone: nothing to rebalance, and pinning a sole pane to WIDTH can't shrink
+    # it (no neighbour to cede columns) — the failed resize just re-fires
+    # after-resize-pane in a storm that jams tmux's command queue. So skip all of
+    # that and only wake the rail; its loop sees rail_is_alone and closes itself.
+    # Every strand-the-rail event lands here (a process exit fires pane-exited; a
+    # kill fires after-kill-pane), so the rail closes promptly however it happened.
+    if [ "$("$TMUX_BIN" display-message -p -t "$win" '#{window_panes}' 2>/dev/null)" = "1" ]; then
+      cmd_refresh_window "$win"
+      return 0
+    fi
     case "$event" in
       window-resize|exit)
         cmd_rebalance "$win"

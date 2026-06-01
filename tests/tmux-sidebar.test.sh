@@ -156,6 +156,62 @@ sleep 1.5                                     # a couple of render ticks
 if t has-session -t winself2 2>/dev/null; then self2_alive=0; else self2_alive=1; fi
 check "self-close: rail stays while a work pane remains" "$self2_alive"
 
+# --- hook-driven close: the rail wakes on the layout hook, NOT the backstop ------
+# Installs the real hooks and uses a LONG backstop, so the rail can only close in
+# time if a hook actually wakes it. This guards the regression where the exit/kill
+# hook called cmd_rebalance->cmd_fix on a lone rail: pinning a sole pane to WIDTH
+# can't shrink it, so after-resize-pane re-fires in a storm that jams the command
+# queue and the wake never lands — the rail then only closed on the slow backstop.
+# pane-exited covers a process ending; after-kill-pane covers an explicit kill.
+t set-hook -g after-resize-pane "run-shell '$script layout-hook resize #{window_id} #{window_zoomed_flag}'"
+t set-hook -g pane-exited       "run-shell '$script layout-hook exit #{window_id}'"
+t set-hook -g after-kill-pane   "run-shell '$script layout-hook exit #{window_id}'"
+
+make_hooked_render_window() {    # rail runs `render` with a LONG backstop tick
+  local name="$1" rail
+  t new-session -d -s "$name" -x "$WIN_W" -y "$WIN_H"
+  rail="$(t split-window -hbdf -l "$WIDTH" -e SIDEBAR_REFRESH_INTERVAL=60 \
+            -P -F '#{pane_id}' -t "$name" "exec '$script' render")"
+  t set-option -p -t "$rail" @sidebar 1
+  t set-window-option -t "$name" @has_sidebar 1
+}
+
+closed_fast() {                  # window gone within ~6s? (well under the 60s tick)
+  local name="$1" _
+  for _ in $(seq 1 24); do
+    t has-session -t "$name" 2>/dev/null || return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+# Explicit kill of the last work pane -> after-kill-pane wakes the rail.
+make_hooked_render_window winkill
+killwork="$(t list-panes -t winkill -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+t kill-pane -t "$killwork"
+if closed_fast winkill; then r=0; else r=1; fi
+check "hook-close: a killed last work pane closes the rail fast" "$r"
+
+# Process exit of the last work pane -> pane-exited wakes the rail.
+make_hooked_render_window winexit
+exitwork="$(t list-panes -t winexit -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+t send-keys -t "$exitwork" "exit" Enter
+if closed_fast winexit; then r=0; else r=1; fi
+check "hook-close: an exited last work pane closes the rail fast" "$r"
+
+# A surviving work pane keeps the rail; the hook re-spreads instead of closing.
+make_hooked_render_window winkeep
+t split-window -h -t winkeep >/dev/null
+keepvictim="$(t list-panes -t winkeep -F '#{pane_id} #{@sidebar}' | awk '$2!="1"{print $1; exit}')"
+t kill-pane -t "$keepvictim"
+sleep 1
+if t has-session -t winkeep 2>/dev/null; then keep_alive=0; else keep_alive=1; fi
+check "hook-close: rail survives a kill while a work pane remains" "$keep_alive"
+
+t set-hook -gu after-resize-pane 2>/dev/null || true
+t set-hook -gu pane-exited 2>/dev/null || true
+t set-hook -gu after-kill-pane 2>/dev/null || true
+
 # --- pure helper: folder_label_for_path (sidebar labels) ------------------------
 # The dispatch guard lets us source the script for its functions without running
 # a subcommand. These paths don't exist as git repos, so the label falls through
