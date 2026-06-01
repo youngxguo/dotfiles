@@ -1,49 +1,24 @@
 #!/usr/bin/env bash
-# Persistent sessions sidebar for tmux — a fixed-width, full-height rail pinned
-# to the leftmost column of EVERY window, so it reads as one global sidebar that
-# the windows live to the right of, rather than a per-window pane.
+# Persistent sessions sidebar for tmux: a fixed-width, full-height rail pinned to
+# the left of EVERY window, so it reads as one global sidebar the windows sit
+# beside. It lists every session in tmux order (so Cmd-1..9 maps to the visible
+# numbers) with AI idle (!) / thinking (💭) badges and the git branch.
 #
-# It live-renders every session with AI idle (!) / thinking (💭) badges and git
-# branch. Sessions stay
-# in tmux list order and always show their list-order number, so Cmd-1..9 maps
-# directly to the visible rail labels.
+# A new window gets its rail from the window-linked hook; ensure-all backfills at
+# config load. The rail is split with -bdf (before, no focus, full height) so it
+# spans the whole left edge even past content splits. It's lifted out of normal
+# rebalancing — an even spread would flatten it into an equal sibling — so
+# cmd_rebalance keeps it a fixed-width column and only spreads the other panes.
+# `prefix b` toggles it everywhere via one global flag (@sidebar_enabled).
 #
-# Always-on: every new window gets a rail via the window-linked hook, and
-# ensure-all backfills existing windows at config load. The rail is created with
-# split-window -bf (before + full height) so it spans the whole left edge even
-# when the window already has content splits. It never steals focus (-d).
+# Nothing polls. AI state is pushed onto each agent's own pane (@ai_state) by
+# ~/.tmux-ai-state.sh; the branch onto @git_branch by the shell hook. The rail
+# aggregates those per session as it renders (so a dead agent can't leave a stale
+# badge) and redraws on a wake event plus a slow backstop tick.
 #
-# The rail is lifted out of normal pane rebalancing: a whole-window even-spread
-# (even-*/-E) would flatten it into an equal-width sibling, so on a rail window we
-# instead hand-build a layout that keeps the rail a fixed-width, full-height left
-# column and spreads only the OTHER panes evenly across the rest of the window
-# (cmd_rebalance / spread_around_sidebar). `prefix b` hides/shows it everywhere at
-# once — the shown/hidden state is one global flag (@sidebar_enabled), not per
-# window, so it stays consistent across every window and session.
-#
-# AI state is PUSHED by the agent CLIs onto their own pane (@ai_state) from their
-# hooks via ~/.tmux-ai-state.sh (Claude Code Stop/UserPromptSubmit, Codex notify),
-# which also wakes the rail to redraw. The rail aggregates those pane states per
-# session as it renders, so a killed or exited agent never leaves a stale badge —
-# the pane carries the truth and loses it when the agent does. The git branch
-# comes from the @git_branch option, pushed by the shell's chpwd/precmd hook.
-# Nothing here polls — the rail redraws on those events plus a slow backstop tick.
-#
-# Subcommands:
-#   toggle                      hide/show the rail everywhere (global state)
-#   ensure [window]             create the rail in a window if absent (hook)
-#   ensure-all                  backfill every window (config load / server start)
-#   reset-all                   normalize every window to one correct rail (repair)
-#   switch <n>                  switch to the Nth session (Cmd-1..9)
-#   refresh                     wake sidebar panes so they redraw immediately
-#   render                      the redraw loop (runs *inside* the rail pane);
-#                               also self-closes when it's the last pane left
-#   fix <window>                pin the rail to SIDEBAR_WIDTH; tidy @has_sidebar
-#   rebalance <win> [h|v]       spread the panes evenly; with a rail present keep
-#                               it lifted out and only spread the rest
-#   layout-hook <ev> <win> <z>  hook entrypoint: window-resize re-spreads work
-#                               panes; resize re-pins the rail; exit rebalances
-#                               survivors and wakes the rail to self-close
+# Subcommands: toggle | ensure [win] | ensure-all | reset-all | switch <n> |
+# refresh | render | fix <win> | rebalance <win> [h|v] | layout-hook <ev> <win> <z>.
+# render runs inside the rail pane and self-closes when it's the last pane left.
 #
 # install.py symlinks this to ~/.tmux-sidebar.sh via its `.tmux-*.sh` glob.
 set -u
@@ -53,28 +28,24 @@ source "$SCRIPT_DIR/.tmux-lib.sh"
 
 TMUX_BIN="$(tmux_resolve_bin)"
 
-
 # Sidebar width in columns. Override with SIDEBAR_WIDTH in the environment.
 WIDTH="${SIDEBAR_WIDTH:-26}"
 
-# Whether the rail is shown. This is a single GLOBAL state (the server option
-# @sidebar_enabled), not per-window: toggling in one window shows/hides the rail
-# in every window of every session, so it reads as one sidebar. Unset means on,
-# matching the always-open default; only an explicit "0" turns it off. The state
-# survives config reloads (we never reset it) and resets to on at server start.
+# Shown unless the global @sidebar_enabled is explicitly "0" (flipped by prefix b).
+# It's global, not per-window, so the rail stays consistent everywhere; unset means
+# on, and it resets to on at server start.
 sidebar_enabled() {
   [ "$("$TMUX_BIN" show-options -gv @sidebar_enabled 2>/dev/null)" != "0" ]
 }
 
-# Find the sidebar pane in a window (panes carry @sidebar=1). Prints
-# "<pane_id> <pane_width>" or nothing.
+# The rail pane in a window (it carries @sidebar=1). Prints "<id> <width>" or nothing.
 sidebar_pane() {
   "$TMUX_BIN" list-panes -t "$1" -F '#{pane_id} #{pane_width} #{@sidebar}' 2>/dev/null \
     | awk '$3 == "1" { print $1, $2; exit }'
 }
 
-# Pin the sidebar back to WIDTH, or tidy up if it's gone. Resizing only when the
-# width actually differs keeps the after-resize-pane hook from ping-ponging.
+# Pin the rail back to WIDTH, or tidy @has_sidebar if it's gone. Resizing only when
+# the width differs keeps the after-resize-pane hook from ping-ponging.
 cmd_fix() {
   local win="$1" pid w
   read -r pid w < <(sidebar_pane "$win")
@@ -86,10 +57,9 @@ cmd_fix() {
   [ "$w" != "$WIDTH" ] && "$TMUX_BIN" resize-pane -t "$pid" -x "$WIDTH" 2>/dev/null || true
 }
 
-# even-horizontal fills the row by the window's *pane order*, so to keep the rail
-# pinned leftmost it must be the first pane. Bubble it to the front with adjacent
-# swap-panes, which slides it left one slot at a time and preserves every other
-# pane's order.
+# even-horizontal fills by pane order, so the rail must be the first pane to stay
+# leftmost. Bubble it to the front one adjacent swap at a time, preserving the
+# others' order.
 move_sidebar_front() {
   local win="$1" sid="$2" guard=0 idx i left
   local -a order
@@ -106,10 +76,9 @@ move_sidebar_front() {
   done
 }
 
-# Guess how the non-rail panes are arranged so a reflow can match it: all sharing
-# a top edge is a left-to-right row (h), all sharing a left edge is a stacked
-# column (v). Anything else (a grid) prints nothing, so the caller leaves the
-# structure alone and only re-pins the rail.
+# Guess the work panes' arrangement so a reflow can match it: a shared top edge is
+# a row (h), a shared left edge is a column (v). A grid prints nothing, so the
+# caller leaves the structure alone and only re-pins the rail.
 detect_rest_orientation() {
   local win="$1" id left top sb
   local -a tops=() lefts=()
@@ -126,21 +95,12 @@ detect_rest_orientation() {
   fi
 }
 
-# Spread the non-rail panes evenly while keeping the rail a fixed-width, full-
-# height left column. orientation: h = rest side-by-side, v = rest stacked. Uses
-# only public tmux commands (select-layout / resize-pane), so it isn't coupled to
-# tmux's internal layout-string format the way a hand-built layout would be.
-#
-#   h: lay every pane out in one row (even-horizontal fills by pane order, so the
-#      rail must be leftmost first — move_sidebar_front), shrink the rail back to
-#      WIDTH, then re-even the work panes by width so the columns reclaimed from
-#      the rail are shared evenly instead of dumped on the rail's neighbour.
-#   v: the rail is already a full-height left column with the work panes stacked
-#      to its right — it was carved off with split-window -bdf and work splits
-#      only ever target work panes — so just pin the rail and even their heights.
-#
-# Returns nonzero (caller falls back to just pinning) when the window geometry is
-# unreadable. With 0 or 1 work pane there is nothing to even, so it only pins.
+# Spread the work panes evenly while keeping the rail a fixed-width, full-height
+# left column, using only select-layout/resize-pane (no internal layout strings).
+# h: lay every pane in one row (even-horizontal fills by order, so move the rail
+# leftmost first), shrink the rail, then re-even the work widths. v: the rail is
+# already a left column, so just pin it and even the heights. Returns nonzero if
+# the geometry is unreadable; with <2 work panes there's nothing to even.
 spread_around_sidebar() {
   local win="$1" orientation="$2" sid="$3" W H
   read -r W H < <("$TMUX_BIN" display-message -p -t "$win" \
@@ -153,8 +113,8 @@ spread_around_sidebar() {
   fi
   "$TMUX_BIN" resize-pane -t "$sid" -x "$WIDTH" 2>/dev/null || true
 
-  # Collect the work panes in visual order (top-to-bottom for v, left-to-right
-  # for h). @sidebar is empty for work panes, "1" for the rail.
+  # Work panes in visual order (top-to-bottom for v, left-to-right for h); @sidebar
+  # is "1" on the rail, empty on work panes.
   local sort_key
   [ "$orientation" = "v" ] && sort_key='#{pane_top}' || sort_key='#{pane_left}'
   local -a rest=()
@@ -166,9 +126,8 @@ spread_around_sidebar() {
   local M=${#rest[@]}
   [ "$M" -ge 2 ] || return 0
 
-  # Size the first M-1 work panes to an even slice; the last absorbs the
-  # remainder. resize-pane steals from the adjacent pane, so left-to-right /
-  # top-to-bottom keeps every slice equal.
+  # Even slices for the first M-1; the last absorbs the remainder. resize-pane steals
+  # from the adjacent pane, so going in visual order keeps every slice equal.
   local span base i
   if [ "$orientation" = "v" ]; then
     span=$(( H - (M - 1) )); base=$(( span / M ))
@@ -185,11 +144,10 @@ spread_around_sidebar() {
   fi
 }
 
-# Rebalance a window's panes. With no rail this is the plain even-spread the split
-# bindings have always done (orientation h/v) or a bare select-layout -E (none).
-# With a rail present we lift it out: the rail stays a fixed-width left column and
-# only the other panes share the rest. orientation defaults to the rest's current
-# arrangement; an ambiguous grid is left as-is, just re-pinning the rail.
+# Rebalance a window. No rail: the plain even-spread (h/v) or a bare select-layout
+# -E. With a rail: keep it a fixed-width column and spread only the rest; the
+# orientation defaults to the rest's current arrangement, and an ambiguous grid is
+# left as-is (just re-pin the rail).
 cmd_rebalance() {
   local win="$1" orientation="${2:-}" sid _w zoomed
   read -r sid _w < <(sidebar_pane "$win")
@@ -202,8 +160,8 @@ cmd_rebalance() {
     esac
     return 0
   fi
-  # A zoomed pane overlays the layout; reshaping now would fight the zoom, so just
-  # keep the rail pinned and let the next unzoomed event re-spread.
+  # A zoomed pane overlays the layout, so just pin the rail and let the next
+  # unzoomed event re-spread.
   zoomed="$("$TMUX_BIN" display-message -p -t "$win" '#{window_zoomed_flag}' 2>/dev/null)"
   if [ "$zoomed" = "1" ]; then cmd_fix "$win"; return 0; fi
   [ -n "$orientation" ] || orientation="$(detect_rest_orientation "$win")"
@@ -212,13 +170,10 @@ cmd_rebalance() {
   cmd_fix "$win"
 }
 
-# Hook entrypoint for window-resized / after-resize-pane / pane-exited. With a
-# rail present a whole-window resize re-spreads work panes around the fixed rail
-# (window-resize), a manual pane resize only re-pins the rail (resize — cheap,
-# and avoids fighting the user's drag), and a pane exiting re-spreads the
-# survivors and wakes the rail (exit) — which then closes itself if it's now the
-# only pane left (see rail_is_alone). Without a rail, behave like the old bare
-# select-layout -E.
+# Hook entry for window-resized / after-resize-pane / pane-exited / after-kill-pane.
+# With a rail: a whole-window resize re-spreads work panes (window-resize), a manual
+# pane resize only re-pins it (resize, so a drag isn't fought), and a pane leaving
+# re-spreads the survivors and wakes the rail (exit). No rail: a bare select-layout -E.
 cmd_layout_hook() {
   local event="$1" win="$2" zoomed="${3:-0}"
   if [ "$("$TMUX_BIN" show-options -wqv -t "$win" @has_sidebar 2>/dev/null)" = "1" ]; then
@@ -250,44 +205,39 @@ cmd_layout_hook() {
   esac
 }
 
-# Open a sidebar in a specific window. Idempotent: a no-op if one's already
-# there, so it's safe to call from window-linked and ensure-all repeatedly.
+# Create the rail in a window, unless it already has one — so it's safe to call
+# repeatedly from window-linked / ensure-all.
 open_in() {
   local win="$1" pid path new
   read -r pid _ < <(sidebar_pane "$win")
   [ -n "${pid:-}" ] && return 0
   path="$("$TMUX_BIN" display-message -p -t "$win" '#{pane_current_path}')"
-  # -b: before (left). -d: keep focus on the work pane. -f: span the FULL window
-  # height, so the sidebar is a true left rail even when the window already has
-  # content splits — not just a column beside the active pane.
+  # -b before, -d no focus, -f full height: a true left rail even past content splits.
   new="$("$TMUX_BIN" split-window -hbdf -l "$WIDTH" -c "$path" -t "$win" \
     -P -F '#{pane_id}' "exec '$SCRIPT_PATH' render")" || return 0
   "$TMUX_BIN" set-option -p -t "$new" @sidebar 1
-  # Inactive panes are dimmed globally (window-style in ~/.tmux.conf); pin the
-  # rail to the active (undimmed) background so it never reads as dimmed even
-  # though it never holds focus.
+  # Pin to the active (undimmed) background: inactive panes are dimmed globally and
+  # the rail never holds focus, so this stops it reading as dimmed.
   "$TMUX_BIN" set-option -p -t "$new" window-style "bg=#{@solarized_base03}"
   "$TMUX_BIN" set-window-option -t "$win" @has_sidebar 1
-  # Carving the rail off the active pane only shrank that one pane; lift the rail
-  # out and re-spread the rest so it reads as a column the whole window sits beside.
+  # Carving the rail off only shrank the active pane; re-spread so the whole window
+  # sits beside it.
   cmd_rebalance "$win"
 }
 
-# Close the sidebar in a specific window, if present.
+# Close the rail in a window, if present.
 close_in() {
   local win="$1" pid
   read -r pid _ < <(sidebar_pane "$win")
   [ -z "${pid:-}" ] && return 0
-  # Drop the flag first so nothing tries to re-pin a now-dead pane, then close
-  # it. kill-pane doesn't fire pane-exited, so spread the survivors ourselves.
+  # Drop the flag before killing so nothing re-pins a dead pane; kill-pane doesn't
+  # fire pane-exited, so re-spread the survivors here.
   "$TMUX_BIN" set-window-option -t "$win" -qu @has_sidebar
   "$TMUX_BIN" kill-pane -t "$pid"
   "$TMUX_BIN" select-layout -t "$win" -E 2>/dev/null || true
 }
 
-# prefix b: hide/show the rail EVERYWHERE. It flips the global @sidebar_enabled
-# state and applies it to every window, so closing it in one window closes it in
-# all the others (and all sessions), and opening it brings it back everywhere.
+# prefix b: hide/show the rail in EVERY window at once via the global flag.
 cmd_toggle() {
   local w
   if sidebar_enabled; then
@@ -301,15 +251,13 @@ cmd_toggle() {
   fi
 }
 
-# ensure <window>: make sure one window has a sidebar (window-linked hook). Skips
-# when the rail is globally hidden, so new windows respect the current state.
+# window-linked hook: give a window a rail, unless globally hidden.
 cmd_ensure() {
   sidebar_enabled || return 0
   open_in "${1:-$("$TMUX_BIN" display-message -p '#{window_id}')}"
 }
 
-# ensure-all: backfill every existing window (run at config load / server start),
-# unless the rail is globally hidden.
+# Backfill every window at config load / server start, unless globally hidden.
 cmd_ensure_all() {
   local w
   sidebar_enabled || return 0
@@ -317,10 +265,8 @@ cmd_ensure_all() {
     < <("$TMUX_BIN" list-windows -a -F '#{window_id}')
 }
 
-# Normalize one window to exactly one full-height left rail: tear down every
-# @sidebar pane (handles duplicates or a rail left stranded off to the side),
-# then open a fresh one — unless the rail is globally hidden, in which case it
-# just clears them. Repair path for when layout churn corrupts the rail.
+# Normalize a window to exactly one rail: kill every @sidebar pane (clears
+# duplicates or a stranded rail), then re-open one. Repair path for layout churn.
 reset_in() {
   local win="$1" p
   for p in $("$TMUX_BIN" list-panes -t "$win" -F '#{pane_id} #{@sidebar}' 2>/dev/null | awk '$2 == "1" { print $1 }'); do
@@ -338,11 +284,9 @@ cmd_reset_all() {
     < <("$TMUX_BIN" list-windows -a -F '#{window_id}')
 }
 
-# switch <n> [client]: jump to the Nth session in list-sessions order — the same
-# ordering shown in the sidebar rail. Bound to Cmd-1..9 via Ghostty
-# user-keys → User1..User9 (see .tmux.conf and ghostty/config). Passing the
-# triggering client lets us refresh just the visible rails touched by the switch,
-# instead of waking every sidebar pane in the server on every rapid keypress.
+# switch <n> [client]: jump to the Nth session in list order — what the rail
+# numbers show (Cmd-1..9 via Ghostty user-keys → User1..User9). With a client,
+# refresh only the rails it touched instead of every pane in the server.
 cmd_switch() {
   local n="$1" client="${2:-}" name old_win new_win
   case "$n" in *[!0-9]*|'') return 0 ;; esac
@@ -388,13 +332,14 @@ truncate() {
   fi
 }
 
+# The folder label for a session: the git repo root's basename, or for prefix-W
+# worktrees (../<repo>-worktrees/<name>) the original repo's name, leaving the
+# worktree/branch for the bracketed ref.
 folder_label_for_path() {
   local path="$1" fallback="$2" root dir parent parent_base repo base
   root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
   [ -n "$root" ] && path="$root"
 
-  # Worktrees created by prefix-W live under ../<repo>-worktrees/<name>. Show the
-  # original repo folder, leaving the worktree/branch name for the bracketed ref.
   dir="${path%/}"
   while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "." ]; do
     parent="${dir%/*}"
@@ -419,15 +364,11 @@ render_once() {
   [ -n "$width" ] || width="$WIDTH"
   current_session="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null)"
 
-  # AI state is the live aggregate of each session's pane-level @ai_state, pushed
-  # by the agent hooks via ~/.tmux-ai-state.sh: thinking outranks idle, neither
-  # shows no badge. Reading it straight from the panes means a killed agent's pane
-  # takes its badge with it and a shell returning clears its own — the rail can't
-  # show a badge the agent has outlived, with nothing polling.
-  # Tab-split, but the empty-able field always goes LAST: a tab is whitespace-IFS,
-  # so `read` collapses runs of it and drops empty fields — a blank @ai_state /
-  # @git_branch in the middle would shift every later column. Trailing, an empty
-  # field just leaves its var unset, which is what we want.
+  # Each session's badge is the live aggregate of its panes' @ai_state (thinking
+  # outranks idle, neither shows nothing), pushed by the agent hooks — so a killed
+  # or exited agent's pane takes its badge with it. Tab-split with the empty-able
+  # field LAST: tab is whitespace-IFS, so `read` collapses empties and a blank
+  # field in the middle would shift every later column.
   local -A ai_state=()
   local sn ps
   while IFS=$'\t' read -r sn ps; do
@@ -437,11 +378,9 @@ render_once() {
     esac
   done < <("$TMUX_BIN" list-panes -a -F '#{session_name}'$'\t''#{@ai_state}' 2>/dev/null)
 
-  # The branch comes from each session's @git_branch option — pushed by the shell's
-  # chpwd/precmd hook in ~/.zshrc, with ~/.tmux-update-branches.sh as backfill — so
-  # the rail reads it instead of forking git per session on every redraw. @git_branch
-  # is the field that can be empty, so it goes LAST (see the tab note above);
-  # pane_current_path (never empty) sits in the middle to keep the split aligned.
+  # Branch comes from @git_branch (pushed by the shell hook, backfilled by
+  # ~/.tmux-update-branches.sh) so we don't fork git per session each redraw. It's
+  # the empty-able field, so it goes last too (see the tab note above).
   local -a names idle think branch folder
   local n br path count=0 base st
   while IFS=$'\t' read -r n path br; do
@@ -455,21 +394,19 @@ render_once() {
   done < <("$TMUX_BIN" list-sessions -F \
 '#{session_name}'$'\t''#{pane_current_path}'$'\t''#{@git_branch}' 2>/dev/null)
 
-  local j nm br badge pad prefix prefix_cols branch_part name_budget branch_budget selected label_width label
-  local i=0
+  local j nm badge pad prefix prefix_cols branch_part name_budget branch_budget selected cols label_width label color
   label_width=${#count}
   for j in $(seq 0 $((count - 1))); do
     if [ "${idle[j]}" = "1" ]; then badge="! "; elif [ "${think[j]}" = "1" ]; then badge="💭 "; else badge="  "; fi
     printf -v label "%${label_width}d" "$((j + 1))"
     prefix=" ${label} ${badge}"
     prefix_cols=${#prefix}
-    [ "${think[j]}" = "1" ] && prefix_cols=$((prefix_cols + 1))
+    [ "${think[j]}" = "1" ] && prefix_cols=$((prefix_cols + 1))   # 💭 is 2 cols, 1 char
 
     branch_part=""
     branch_budget=$((width / 3))
     if [ -n "${branch[j]}" ] && [ "$width" -ge 14 ] && [ "$branch_budget" -ge 3 ]; then
-      br="$(truncate "${branch[j]}" "$branch_budget")"
-      branch_part=" [${br}]"
+      branch_part=" [$(truncate "${branch[j]}" "$branch_budget")]"
     fi
 
     name_budget=$((width - prefix_cols - ${#branch_part}))
@@ -481,20 +418,16 @@ render_once() {
 
     selected=0
     [ "${names[j]}" = "$current_session" ] && selected=1
-    if [ "$selected" = "1" ]; then
-      local cols=$((prefix_cols + ${#nm} + ${#branch_part}))
-      pad=""
-      i=$cols; while [ "$i" -lt "$width" ]; do pad="${pad} "; i=$((i + 1)); done
-      printf '%s%s%s%s%s\n' "$SELECT" "$prefix" "$nm" "$branch_part" "${pad}${RESET}"
-    elif [ "${idle[j]}" = "1" ] || [ "${think[j]}" = "1" ]; then
-      local cols=$((prefix_cols + ${#nm} + ${#branch_part}))
-      pad=""
-      i=$cols; while [ "$i" -lt "$width" ]; do pad="${pad} "; i=$((i + 1)); done
-      if [ "${idle[j]}" = "1" ]; then
-        printf '%s%s%s%s%s\n' "$IDLE" "$prefix" "$nm" "$branch_part" "${pad}${RESET}"
-      else
-        printf '%s%s%s%s%s%s\n' "$THINK" "${prefix}${nm}" "$YELLOW" "$branch_part" "$THINK" "${pad}${RESET}"
-      fi
+    cols=$((prefix_cols + ${#nm} + ${#branch_part}))
+    printf -v pad '%*s' "$(( width - cols > 0 ? width - cols : 0 ))" ''
+
+    # Selected and idle rows fill the whole line in one colour; thinking is the same
+    # but with a yellow branch; a plain row only colours its name and branch.
+    if [ "$selected" = "1" ] || [ "${idle[j]}" = "1" ]; then
+      color="$IDLE"; [ "$selected" = "1" ] && color="$SELECT"
+      printf '%s%s%s%s%s\n' "$color" "$prefix" "$nm" "$branch_part" "${pad}${RESET}"
+    elif [ "${think[j]}" = "1" ]; then
+      printf '%s%s%s%s%s%s\n' "$THINK" "${prefix}${nm}" "$YELLOW" "$branch_part" "$THINK" "${pad}${RESET}"
     else
       printf '%s%s%s%s' "$prefix" "$NAME" "$nm" "$RESET"
       [ -n "$branch_part" ] && printf ' %s%s%s' "$YELLOW" "${branch_part# }" "$RESET"
@@ -505,40 +438,30 @@ render_once() {
   printf '\n'
 }
 
+# Wake a rail's render loop so it redraws now. Open the fifo read+write so the open
+# never blocks even when the loop isn't reading this tick, drop one byte, close.
 wake_sidebar_pane() {
-  local pane="$1" fifo wake_dir
-  wake_dir="$(sidebar_wake_dir)"
-  fifo="$wake_dir/${pane#%}.fifo"
+  local pane="$1" fifo
+  fifo="$(sidebar_wake_dir)/${pane#%}.fifo"
   [ -p "$fifo" ] || return 0
-  # Open the fifo read+write so the open never blocks even if the render loop
-  # isn't reading this tick, write one byte to wake it, then close. The render
-  # loop holds its own read fd, so this just drops a token into the buffer.
   { exec 4<>"$fifo" && printf '\n' >&4 && exec 4>&-; } 2>/dev/null || true
 }
 
-cmd_refresh_window() {
-  local win="$1" pane sb
-  [ -n "$win" ] || return 0
-  while read -r pane sb; do
-    [ "$sb" = "1" ] || continue
-    wake_sidebar_pane "$pane"
-  done < <("$TMUX_BIN" list-panes -t "$win" -F '#{pane_id} #{@sidebar}' 2>/dev/null)
-}
-
-cmd_refresh() {
+# Wake the rail panes among the given list-panes targets (-a for all, -t <win>).
+wake_rails() {
   local pane sb
   while read -r pane sb; do
-    [ "$sb" = "1" ] || continue
-    wake_sidebar_pane "$pane"
-  done < <("$TMUX_BIN" list-panes -a -F '#{pane_id} #{@sidebar}' 2>/dev/null)
+    [ "$sb" = "1" ] && wake_sidebar_pane "$pane"
+  done < <("$TMUX_BIN" list-panes "$@" -F '#{pane_id} #{@sidebar}' 2>/dev/null)
 }
 
-# True when the rail is the only pane left in its window — every work pane it sat
-# beside is gone. The render loop checks this each tick and exits when it's true:
-# ending its own process closes the pane, and with it the now-empty window (and
-# the session, if it was the last). One rule retires a stranded empty sidebar no
-# matter how the last work pane went away — exit, prefix x, mouse, kill — so we
-# don't have to enumerate and hook each of those paths.
+cmd_refresh_window() { [ -n "${1:-}" ] && wake_rails -t "$1" || true; }
+cmd_refresh() { wake_rails -a; }
+
+# True when the rail is the only pane left — every work pane it sat beside is gone.
+# The render loop breaks on this and exits, which closes the now-empty window (and
+# the session, if it was the last). One rule retires a stranded rail no matter how
+# the last work pane went away.
 rail_is_alone() {
   [ "$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{window_panes}' 2>/dev/null)" = "1" ]
 }
@@ -558,23 +481,18 @@ cmd_render() {
   printf '%s' "${ESC}[?25l"                       # hide cursor
   trap 'printf "%s" "${ESC}[?25h"; rm -f "$wake_fifo"' EXIT INT TERM
   local out prev="" active
-  # Draw once up front so a window that's never been visible still has content
-  # the instant you switch to it, rather than a blank pane for a tick.
+  # Draw once up front so a freshly-shown window isn't blank for a tick.
   prev="$(render_once)"; printf '%s%s' "${ESC}[H${ESC}[2J" "$prev"
   while :; do
-    # Block on the wake fifo (events: AI-state push, branch push, session/window
-    # changes, pane-exit) and only fall through on the long backstop timeout —
-    # redraws are event-driven now, so this tick rarely fires on its own.
+    # Block on the wake fifo (AI/branch pushes, session/window changes, pane exits)
+    # and only fall through on the slow backstop — redraws are event-driven now.
     if [ "$wake_fd_open" = "1" ]; then
       IFS= read -r -t "${SIDEBAR_REFRESH_INTERVAL:-30}" -u 3 _ || true
     else
       sleep "${SIDEBAR_REFRESH_INTERVAL:-30}"
     fi
-    # Nothing left to sit beside — delete ourselves and let the window close. The
-    # pane-exited hook wakes us, so a process ending closes the rail near-instantly;
-    # an explicit kill we'd otherwise miss is still caught by the next tick.
-    rail_is_alone && break
-    # Every window has its own sidebar now, so only attached current windows work.
+    rail_is_alone && break          # last pane left — close ourselves and the window
+    # Only the attached, current window is on screen, so skip rendering the rest.
     active="$("$TMUX_BIN" display-message -p -t "${TMUX_PANE:-}" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)"
     [ "$active" = "1" ] || continue
     out="$(render_once)"
@@ -585,8 +503,8 @@ cmd_render() {
   done
 }
 
-# Only dispatch when executed directly; sourcing (e.g. from tests) just defines
-# the functions above without running a subcommand.
+# Only dispatch when executed directly; sourcing (e.g. from tests) just defines the
+# functions above.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-toggle}" in
     toggle)      cmd_toggle ;;
