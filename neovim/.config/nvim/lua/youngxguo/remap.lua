@@ -98,6 +98,11 @@ vim.keymap.set("n", "<leader>z", function()
   end
 end, { silent = true, desc = "Toggle zoom current split" })
 
+-- j/k move by display line over wraps, but honor a count (e.g. 5j) so
+-- relativenumber jumps still land on real lines
+vim.keymap.set({ "n", "v" }, "j", "v:count == 0 ? 'gj' : 'j'", { expr = true, silent = true })
+vim.keymap.set({ "n", "v" }, "k", "v:count == 0 ? 'gk' : 'k'", { expr = true, silent = true })
+
 -- search: center + open folds after jumping (neoscroll animates the zz)
 vim.keymap.set("n", "n", "nzzzv")
 vim.keymap.set("n", "N", "Nzzzv")
