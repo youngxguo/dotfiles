@@ -3,7 +3,8 @@
 # from their own hooks instead of the sidebar polling pane contents:
 #   - Claude Code: UserPromptSubmit -> thinking, Stop -> idle, SessionEnd -> clear
 #                  (see claude/ai-state-hooks.json, merged in by install.py)
-#   - Codex:       notify (turn complete) -> idle (see codex/config.toml)
+#   - Codex:       UserPromptSubmit -> thinking, Stop -> idle
+#                  (see codex/ai-state-hooks.json, merged in by install.py)
 #
 # State lives on the PANE the agent runs in (@ai_state = thinking|idle, unset when
 # no agent is there). $TMUX_PANE is inherited by the hook, so it points at that

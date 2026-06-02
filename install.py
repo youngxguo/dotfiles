@@ -565,6 +565,63 @@ def ensure_claude_settings_hooks():
     print(f"merged claude ai-state hooks into {target}")
 
 
+def ensure_codex_hooks():
+    """Merge the repo's agent-state hooks into ``~/.codex/hooks.json``."""
+    fragment_path = REPO_ROOT / "codex/ai-state-hooks.json"
+    if not fragment_path.exists():
+        print("skipping codex ai-state hooks: no codex/ai-state-hooks.json present")
+        return
+    wanted = json.loads(fragment_path.read_text(encoding="utf-8")).get("hooks", {})
+    if not wanted:
+        return
+
+    target = HOME / ".codex/hooks.json"
+    if target.exists():
+        try:
+            settings = json.loads(target.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print(f"skipping codex ai-state hooks: {target} is not valid JSON")
+            return
+        if not isinstance(settings, dict):
+            print(f"skipping codex ai-state hooks: {target} is not a JSON object")
+            return
+    else:
+        settings = {}
+
+    hooks = settings.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        print(f"skipping codex ai-state hooks: {target} hooks is not a JSON object")
+        return
+
+    changed = False
+    for event, groups in wanted.items():
+        existing = hooks.get(event)
+        if existing is None:
+            existing = hooks[event] = []
+        elif not isinstance(existing, list):
+            print(f"skipping codex hook event {event}: existing value is not a list")
+            continue
+        present = {
+            hook.get("command")
+            for group in existing if isinstance(group, dict)
+            for hook in group.get("hooks", []) if isinstance(hook, dict)
+        }
+        for group in groups:
+            commands = {h.get("command") for h in group.get("hooks", []) if isinstance(h, dict)}
+            if commands & present:
+                continue
+            existing.append(group)
+            present |= commands
+            changed = True
+
+    if not changed:
+        print("codex ai-state hooks already present")
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    print(f"merged codex ai-state hooks into {target}")
+
+
 def install_claude():
     links = links_for("claude")
     if any(Path(source).exists() for source, _ in links):
@@ -590,6 +647,7 @@ def install_codex():
         apply_links(config_links)
     else:
         print("skipping codex config: no repo-local codex/config.toml present")
+    ensure_codex_hooks()
 
 
 def install_neovim():
