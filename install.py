@@ -369,6 +369,7 @@ def managed_links():
     links.append(("vscode", REPO_ROOT / "vscode/keybindings.json", vscode_user_dir / "keybindings.json"))
 
     links.append(("claude", REPO_ROOT / "claude/CLAUDE.md", HOME / ".claude/CLAUDE.md"))
+    links.append(("claude", REPO_ROOT / "claude/settings.json", HOME / ".claude/settings.json"))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
     links.append(("codex", REPO_ROOT / "codex/config.toml", HOME / ".codex/config.toml"))
     links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
@@ -504,67 +505,6 @@ def install_vscode():
     apply_links(links_for("vscode"))
 
 
-def ensure_claude_settings_hooks():
-    """Merge the repo's agent-state hooks into ``~/.claude/settings.json``.
-
-    settings.json carries machine-local config (telemetry tokens, plugin
-    enablement) so it can't be symlinked from the repo the way CLAUDE.md is.
-    Instead we merge just the hook blocks from ``claude/ai-state-hooks.json``
-    into whatever settings.json already exists, creating it if absent. Matching
-    is by command string, so re-running never duplicates a hook and leaves any
-    other config untouched — which is what keeps it idempotent.
-    """
-    fragment_path = REPO_ROOT / "claude/ai-state-hooks.json"
-    if not fragment_path.exists():
-        print("skipping claude ai-state hooks: no claude/ai-state-hooks.json present")
-        return
-    wanted = json.loads(fragment_path.read_text(encoding="utf-8")).get("hooks", {})
-    if not wanted:
-        return
-
-    target = HOME / ".claude/settings.json"
-    if target.exists():
-        try:
-            settings = json.loads(target.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            print(f"skipping claude ai-state hooks: {target} is not valid JSON")
-            return
-        if not isinstance(settings, dict):
-            print(f"skipping claude ai-state hooks: {target} is not a JSON object")
-            return
-    else:
-        settings = {}
-
-    hooks = settings.setdefault("hooks", {})
-    changed = False
-    for event, groups in wanted.items():
-        existing = hooks.get(event)
-        if existing is None:
-            existing = hooks[event] = []
-        elif not isinstance(existing, list):
-            print(f"skipping claude hook event {event}: existing value is not a list")
-            continue
-        present = {
-            hook.get("command")
-            for group in existing if isinstance(group, dict)
-            for hook in group.get("hooks", []) if isinstance(hook, dict)
-        }
-        for group in groups:
-            commands = {h.get("command") for h in group.get("hooks", []) if isinstance(h, dict)}
-            if commands & present:
-                continue
-            existing.append(group)
-            present |= commands
-            changed = True
-
-    if not changed:
-        print("claude ai-state hooks already present")
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    print(f"merged claude ai-state hooks into {target}")
-
-
 def ensure_codex_hooks():
     """Merge the repo's agent-state hooks into ``~/.codex/hooks.json``."""
     fragment_path = REPO_ROOT / "codex/ai-state-hooks.json"
@@ -629,7 +569,6 @@ def install_claude():
         apply_links(links)
     else:
         print("skipping claude global instructions: no claude/CLAUDE.md present")
-    ensure_claude_settings_hooks()
 
 
 def install_codex():
