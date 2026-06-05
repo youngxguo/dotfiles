@@ -73,10 +73,27 @@ local function lsp_root_from_init(init_params, config)
   return nil
 end
 
+local ts_lsp_root_markers = { 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'tsconfig.json', 'package.json', '.git' }
+
+local function is_heavy_applied_worktree(path)
+  return type(path) == 'string' and path:match('^/home/young/applied%d+/?')
+end
+
+local function ts_lsp_root_dir(bufnr, cb)
+  local file = vim.api.nvim_buf_get_name(bufnr)
+  local root_dir = vim.fs.root(bufnr, ts_lsp_root_markers)
+  if is_heavy_applied_worktree(root_dir) or is_heavy_applied_worktree(file) then
+    return
+  end
+
+  cb(root_dir)
+end
+
 -- https://github.com/neovim/nvim-lspconfig/blob/master/doc/configs.md
 vim.lsp.config('ts_ls', {
   filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
-  root_markers = { 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'tsconfig.json', 'package.json', '.git' },
+  root_dir = ts_lsp_root_dir,
+  root_markers = ts_lsp_root_markers,
   cmd_env = { NODE_OPTIONS = '--max-old-space-size=8192' },
   before_init = function(init_params, config)
     local root_dir = lsp_root_from_init(init_params, config)
