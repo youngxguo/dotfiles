@@ -121,7 +121,9 @@ case "${1:-}" in
 esac
 
 # Refresh the session mirror and git branch, then wake the visible rail(s) so the
-# change shows immediately.
+# change shows immediately. The status refresh picks up ~/.tmux-ai-status.sh's
+# compact bottom-right idle numbers without waiting for status-interval.
 sync_session
 sync_branch
+"$TMUX_BIN" refresh-client -S >/dev/null 2>&1 || true
 "$SIDEBAR" refresh >/dev/null 2>&1 || true
