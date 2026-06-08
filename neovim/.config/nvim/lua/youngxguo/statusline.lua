@@ -4,6 +4,7 @@ if not ok then
 end
 
 local has_devicons, devicons = pcall(require, "nvim-web-devicons")
+local uv = vim.uv or vim.loop
 
 local mode_names = {
   n = "NORMAL",
@@ -136,6 +137,61 @@ local function get_file_label(bufnr, winid)
   return vim.fn.fnamemodify(name, ":~:.")
 end
 
+local git_head_cache = {}
+
+local function run_git(cwd, args)
+  if vim.fn.executable("git") ~= 1 or cwd == "" then
+    return nil
+  end
+
+  local cmd = { "git", "-C", cwd }
+  vim.list_extend(cmd, args)
+  local lines = vim.fn.systemlist(cmd)
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  return lines
+end
+
+local function git_cwd(bufnr)
+  if vim.bo[bufnr].buftype ~= "" then
+    return nil
+  end
+
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  if name ~= "" then
+    return vim.fn.fnamemodify(name, ":h")
+  end
+  return vim.fn.getcwd()
+end
+
+local function fallback_git_head(bufnr)
+  local cwd = git_cwd(bufnr)
+  if not cwd then
+    return nil
+  end
+
+  local now = uv.now()
+  local cached = git_head_cache[cwd]
+  if cached and now - cached.at < 3000 then
+    return cached.head
+  end
+
+  local head
+  local branch = run_git(cwd, { "branch", "--show-current" })
+  if branch and branch[1] ~= "" then
+    head = branch[1]
+  else
+    local commit = run_git(cwd, { "rev-parse", "--short", "HEAD" })
+    if commit and commit[1] ~= "" then
+      head = "detached@" .. commit[1]
+    end
+  end
+
+  git_head_cache[cwd] = { at = now, head = head }
+  return head
+end
+
 local Align = { provider = "%=" }
 local Space = { provider = " " }
 
@@ -219,13 +275,14 @@ local Git = {
   condition = function(self)
     self.winid = statusline_win()
     self.bufnr = statusline_buf(self.winid)
-    return vim.b[self.bufnr].gitsigns_head ~= nil
+    self.head = vim.b[self.bufnr].gitsigns_head or fallback_git_head(self.bufnr)
+    return self.head ~= nil and self.head ~= ""
   end,
   init = function(self)
     self.winid = statusline_win()
     self.bufnr = statusline_buf(self.winid)
     self.git = vim.b[self.bufnr].gitsigns_status_dict or {}
-    self.head = vim.b[self.bufnr].gitsigns_head
+    self.head = self.head or vim.b[self.bufnr].gitsigns_head or fallback_git_head(self.bufnr)
   end,
   {
     provider = "  ",
@@ -258,6 +315,7 @@ local Git = {
     end,
     hl = "StatusLine",
   },
+  update = { "BufEnter", "BufWritePost" },
 }
 
 local Diagnostics = {
