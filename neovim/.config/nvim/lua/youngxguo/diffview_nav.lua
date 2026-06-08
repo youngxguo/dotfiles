@@ -9,7 +9,7 @@ local M = {}
 -- stacks them top/bottom. Side-by-side only reads well when there's room for
 -- two code buffers next to the file panel, so in a narrow window (e.g. a
 -- small tmux pane) we stack them instead and each buffer keeps a usable width.
-local MIN_COLUMNS_FOR_SIDE_BY_SIDE = 120
+local MIN_COLUMNS_FOR_SIDE_BY_SIDE = 100
 
 local function want_horizontal()
   return vim.o.columns >= MIN_COLUMNS_FOR_SIDE_BY_SIDE
