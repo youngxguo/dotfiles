@@ -9,31 +9,24 @@
 
 local M = {}
 
--- Width budget. The window splits into `explorer (~40) + diff area`.
---   * Side-by-side wants two code panes of ~60 cols each beside the explorer,
---     so it only reads well once there's room for explorer + 2 panes.
---   * Below the narrow mark, even a single inline pane is tight, so we reclaim
---     the explorer's columns for the diff and start hidden.
-local MIN_COLUMNS_FOR_SIDE_BY_SIDE = 160
-local MIN_COLUMNS_FOR_EXPLORER = 120
+-- Width budget. The window splits into `explorer (~32) + diff area`.
+--   * Side-by-side wants two code panes of ~50 cols each beside the explorer,
+--     so it reads well once there's room for the smaller explorer + 2 panes.
+local MIN_COLUMNS_FOR_SIDE_BY_SIDE = 132
 
 -- Decide the tier for the current editor width:
---   < 120        -> inline,        explorer hidden
---   120 .. 159   -> inline,        explorer shown
---   >= 160       -> side-by-side,  explorer shown
+--   < 132        -> inline,        explorer shown
+--   >= 132       -> side-by-side,  explorer shown
 local function plan()
   local cols = vim.o.columns
   local layout = cols >= MIN_COLUMNS_FOR_SIDE_BY_SIDE and "side-by-side" or "inline"
-  local hide_explorer = cols < MIN_COLUMNS_FOR_EXPLORER
-  return layout, hide_explorer
+  return layout
 end
 
 -- Steer the layout + explorer state codediff uses for the next view it opens.
--- Returns the chosen layout so callers can also pass the matching flag (belt
--- and suspenders: the flag pins the layout even if a future codediff reads it
--- differently, while the config mutation is the only lever for `explorer.hidden`).
+-- Returns the chosen layout so callers can also pass the matching flag.
 local function apply()
-  local layout, hide_explorer = plan()
+  local layout = plan()
 
   local ok, config = pcall(require, "codediff.config")
   if ok and config.options then
@@ -41,7 +34,7 @@ local function apply()
       config.options.diff.layout = layout
     end
     if config.options.explorer then
-      config.options.explorer.hidden = hide_explorer
+      config.options.explorer.hidden = false
     end
   end
 

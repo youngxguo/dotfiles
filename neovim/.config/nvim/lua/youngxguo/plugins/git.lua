@@ -113,6 +113,17 @@ return {
         layout = "inline", -- fallback; codediff_nav picks per-open by width
         compute_moves = true,
       },
+      explorer = {
+        width = 32,
+        view_mode = "tree",
+        auto_open_on_cursor = true,
+      },
+      keymaps = {
+        view = {
+          next_file = "<Tab>",
+          prev_file = "<S-Tab>",
+        },
+      },
     },
   },
 
