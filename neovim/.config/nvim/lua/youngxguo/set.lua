@@ -88,6 +88,31 @@ vim.api.nvim_create_autocmd("BufWinEnter", {
   end,
 })
 
+local function wrap_codediff_explorer_windows(buf)
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+    if vim.api.nvim_win_is_valid(win) then
+      vim.wo[win].wrap = true
+      vim.wo[win].linebreak = true
+      vim.wo[win].breakindent = true
+    end
+  end
+end
+
+vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter", "WinEnter" }, {
+  group = vim.api.nvim_create_augroup("codediff_explorer_wrap", { clear = true }),
+  callback = function(args)
+    local buf = args.buf
+    if vim.bo[buf].filetype ~= "codediff-explorer" then
+      return
+    end
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(buf) then
+        wrap_codediff_explorer_windows(buf)
+      end
+    end)
+  end,
+})
+
 -- Keep an open Diffview in sync with disk without polling git. Two triggers
 -- feed one debounced refresh:
 --   * save / focus-gained -- the interactive case.
