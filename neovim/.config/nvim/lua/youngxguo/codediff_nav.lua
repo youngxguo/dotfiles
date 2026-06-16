@@ -65,40 +65,8 @@ local function enable_compact(tabpage, attempts)
   end
 end
 
-local function command(layout, revision)
-  local args = { "CodeDiff" }
-  if revision then
-    table.insert(args, revision)
-  end
-  table.insert(args, "--" .. layout)
-  vim.cmd(table.concat(args, " "))
-end
-
-local function probe_dir()
-  local current_file = vim.api.nvim_buf_get_name(0)
-  local buftype = vim.api.nvim_get_option_value("buftype", { buf = 0 })
-  if current_file ~= "" and buftype == "" then
-    return vim.fn.fnamemodify(current_file, ":p:h")
-  end
-  return vim.fn.getcwd()
-end
-
-local function git_lines(dir, args)
-  local cmd = vim.list_extend({ "git", "-C", dir }, args)
-  local lines = vim.fn.systemlist(cmd)
-  if vim.v.shell_error ~= 0 then
-    return nil
-  end
-  return lines
-end
-
-local function has_worktree_changes(dir)
-  local lines = git_lines(dir, { "status", "--porcelain", "--untracked-files=normal" })
-  return lines == nil or #lines > 0
-end
-
-local function has_parent_commit(dir)
-  return git_lines(dir, { "rev-parse", "--verify", "HEAD~1" }) ~= nil
+local function command(layout)
+  vim.cmd("CodeDiff --" .. layout)
 end
 
 vim.api.nvim_create_autocmd("User", {
@@ -115,25 +83,7 @@ vim.api.nvim_create_autocmd("User", {
 -- Open the working-tree diff sized for the current width.
 function M.open_diff()
   local layout = apply()
-
-  local ok_lifecycle, lifecycle = pcall(require, "codediff.ui.lifecycle")
-  if ok_lifecycle and lifecycle.get_session(vim.api.nvim_get_current_tabpage()) then
-    command(layout)
-    return
-  end
-
-  local dir = probe_dir()
-  if has_worktree_changes(dir) then
-    command(layout)
-    return
-  end
-
-  if has_parent_commit(dir) then
-    vim.notify("Working tree clean; showing HEAD~1", vim.log.levels.INFO)
-    command(layout, "HEAD~1")
-  else
-    vim.notify("Working tree clean; HEAD has no parent commit", vim.log.levels.INFO)
-  end
+  command(layout)
 end
 
 return M
