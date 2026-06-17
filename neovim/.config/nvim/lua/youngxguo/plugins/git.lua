@@ -117,7 +117,7 @@ return {
         width = 32,
         view_mode = "tree",
         auto_refresh = true,
-        auto_open_on_cursor = false,
+        auto_open_on_cursor = true,
       },
       keymaps = {
         view = {
