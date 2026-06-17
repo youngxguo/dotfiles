@@ -100,8 +100,8 @@ return {
     },
   },
 
-  -- Primary working-tree diff (replaced diffview on <leader>gd): VSCode-style
-  -- char-level diffs, inline layout, moved-code detection. Close with `q`.
+  -- Primary working-tree diff (replaced diffview on <leader>gd). The local
+  -- adapter keeps automatic explorer refreshes cheap in applied* worktrees.
   {
     "esmuellert/codediff.nvim",
     cmd = "CodeDiff",
@@ -111,12 +111,13 @@ return {
     opts = {
       diff = {
         layout = "inline", -- fallback; codediff_nav picks per-open by width
-        compute_moves = true,
+        compute_moves = false,
       },
       explorer = {
         width = 32,
         view_mode = "tree",
-        auto_open_on_cursor = true,
+        auto_refresh = true,
+        auto_open_on_cursor = false,
       },
       keymaps = {
         view = {
@@ -125,6 +126,9 @@ return {
         },
       },
     },
+    config = function(_, opts)
+      require("youngxguo.codediff_perf").setup(opts)
+    end,
   },
 
   {

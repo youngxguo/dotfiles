@@ -66,6 +66,16 @@ local function enable_compact(tabpage, attempts)
 end
 
 local function command(layout)
+  local is_codediff_tab = false
+  local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
+  if ok then
+    is_codediff_tab = lifecycle.get_session(vim.api.nvim_get_current_tabpage()) ~= nil
+  end
+
+  if not is_codediff_tab then
+    require("youngxguo.codediff_perf").request_full_status()
+  end
+
   vim.cmd("CodeDiff --" .. layout)
 end
 
