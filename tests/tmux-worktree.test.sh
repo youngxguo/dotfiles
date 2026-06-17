@@ -44,6 +44,7 @@ repo="$work/myrepo"
 mkdir -p "$repo"
 git -C "$repo" init -q -b main
 git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+printf '# Local instructions\n' >"$repo/AGENTS.md"
 tmux_t new-session -d -s bootstrap -c "$repo"
 
 wt_dir="$work/myrepo-worktrees"
@@ -59,6 +60,12 @@ check "worktree is registered with git" "$?"
 
 [ "$(git -C "$wt_dir/feature-x" rev-parse --abbrev-ref HEAD)" = "feature-x" ]
 check "worktree is on a new branch named after the worktree" "$?"
+
+[ "$(cat "$wt_dir/feature-x/AGENTS.md" 2>/dev/null)" = "# Local instructions" ]
+check "fresh copies local AGENTS.md into the worktree" "$?"
+
+[ -z "$(git -C "$wt_dir/feature-x" status --short -- AGENTS.md)" ]
+check "copied local AGENTS.md is excluded from git status" "$?"
 
 tmux_t has-session -t feature-x 2>/dev/null
 check "session is created" "$?"

@@ -66,6 +66,26 @@ fail() {
   exit 1
 }
 
+seed_local_agent_instructions() {
+  local src_root="$1"
+  local dst_root="$2"
+  local rel src dst exclude_file
+
+  for rel in AGENTS.md CLAUDE.md; do
+    src="$src_root/$rel"
+    dst="$dst_root/$rel"
+    [ -f "$src" ] || continue
+    [ ! -e "$dst" ] || continue
+    git -C "$src_root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 && continue
+
+    cp -p "$src" "$dst" || fail "could not copy local $rel into worktree"
+    exclude_file="$(git -C "$dst_root" rev-parse --git-path info/exclude 2>/dev/null)" || continue
+    mkdir -p "$(dirname "$exclude_file")" || fail "could not create git exclude dir"
+    touch "$exclude_file" || fail "could not update git exclude file"
+    grep -Fxq "/$rel" "$exclude_file" 2>/dev/null || printf '/%s\n' "$rel" >>"$exclude_file"
+  done
+}
+
 [ -n "$name" ] || fail "a name is required"
 
 current_repo_root="$(git -C "$src_path" rev-parse --show-toplevel 2>/dev/null)" \
@@ -96,6 +116,9 @@ else
       || fail "git worktree add -b $name from $base failed"
   fi
 fi
+
+seed_local_agent_instructions "$current_repo_root" "$worktree_path"
+[ "$current_repo_root" = "$repo_root" ] || seed_local_agent_instructions "$repo_root" "$worktree_path"
 
 # Structural session + windows, then the editor launch — the exact helpers
 # `prefix t` uses, so behavior stays in sync. We pass --no-attach and switch the
