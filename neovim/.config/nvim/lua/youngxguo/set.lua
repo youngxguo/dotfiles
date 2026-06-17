@@ -88,12 +88,12 @@ vim.api.nvim_create_autocmd("BufWinEnter", {
   end,
 })
 
-local function wrap_codediff_explorer_windows(buf)
+local function nowrap_codediff_explorer_windows(buf)
   for _, win in ipairs(vim.fn.win_findbuf(buf)) do
     if vim.api.nvim_win_is_valid(win) then
-      vim.wo[win].wrap = true
-      vim.wo[win].linebreak = true
-      vim.wo[win].breakindent = true
+      vim.wo[win].wrap = false
+      vim.wo[win].linebreak = false
+      vim.wo[win].breakindent = false
     end
   end
 end
@@ -107,7 +107,7 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter", "WinEnter" }, {
     end
     vim.schedule(function()
       if vim.api.nvim_buf_is_valid(buf) then
-        wrap_codediff_explorer_windows(buf)
+        nowrap_codediff_explorer_windows(buf)
       end
     end)
   end,
