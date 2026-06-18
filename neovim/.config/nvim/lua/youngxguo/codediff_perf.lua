@@ -1,6 +1,17 @@
 local M = {}
 
 local FULL_STATUS_REQUESTS = "youngxguo_codediff_full_status_requests"
+local STATUS_CACHE_TTL_MS = 2000
+local uv = vim.uv or vim.loop
+local status_cache = {}
+
+local function now_ms()
+  return math.floor(uv.hrtime() / 1000000)
+end
+
+local function clone_status(result)
+  return result and vim.deepcopy(result) or nil
+end
 
 local function pending_full_status_requests()
   return tonumber(vim.g[FULL_STATUS_REQUESTS]) or 0
@@ -193,6 +204,54 @@ local function run_git_status(git_root, callback)
   end)
 end
 
+local function finish_cached_status(git_root, err, result)
+  local entry = status_cache[git_root] or {}
+  local callbacks = entry.callbacks or {}
+
+  entry.in_flight = false
+  entry.callbacks = {}
+  entry.updated_at = now_ms()
+  if not err then
+    entry.result = result
+  end
+  status_cache[git_root] = entry
+
+  for _, callback in ipairs(callbacks) do
+    callback(err, clone_status(result))
+  end
+end
+
+local function run_git_status_cached(git_root, callback)
+  local entry = status_cache[git_root]
+  local current_ms = now_ms()
+
+  if
+    entry
+    and not entry.in_flight
+    and entry.result
+    and current_ms - entry.updated_at < STATUS_CACHE_TTL_MS
+  then
+    vim.schedule(function()
+      callback(nil, clone_status(entry.result))
+    end)
+    return
+  end
+
+  if entry and entry.in_flight then
+    table.insert(entry.callbacks, callback)
+    return
+  end
+
+  entry = entry or {}
+  entry.in_flight = true
+  entry.callbacks = { callback }
+  status_cache[git_root] = entry
+
+  run_git_status(git_root, function(err, result)
+    finish_cached_status(git_root, err, result)
+  end)
+end
+
 local function patch_git_status()
   local git = require("codediff.core.git")
   if git._youngxguo_cheap_status_patched then
@@ -206,7 +265,7 @@ local function patch_git_status()
       return full_get_status(git_root, callback)
     end
 
-    run_git_status(git_root, function(err, result)
+    run_git_status_cached(git_root, function(err, result)
       if err then
         callback(err, nil)
         return

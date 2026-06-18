@@ -2,6 +2,7 @@
 export ZSH="$HOME/.oh-my-zsh"
 
 export PATH="$HOME/.local/bin:$PATH"
+export PATH="/usr/local/go/bin:$PATH"
 
 # prompt: starship replaces the oh-my-zsh theme (config in starship/starship.toml)
 ZSH_THEME=""
