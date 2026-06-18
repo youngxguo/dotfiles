@@ -307,6 +307,79 @@ local function patch_explorer_keymaps()
   keymaps._youngxguo_full_refresh_patched = true
 end
 
+local function patch_explorer_status_prefix()
+  -- codediff.nvim only renders explorer file status at the right edge today.
+  -- Keep this as a narrow private-renderer shim: let codediff build the row,
+  -- then move the final status segment before the filename so narrow sidebars
+  -- still show M/A/D/?? without horizontal scrolling.
+  local nodes = require("codediff.ui.explorer.nodes")
+  if nodes._youngxguo_status_prefix_patched then
+    return
+  end
+
+  local original_prepare_node = nodes.prepare_node
+
+  local function is_blank_segment(segment)
+    return segment and segment.text and segment.text ~= "" and segment.text:match("^%s+$") ~= nil
+  end
+
+  local function is_indent_segment(segment)
+    if not segment or not segment.text or segment.text == "" then
+      return false
+    end
+
+    local text = segment.text
+    if text:match("^%s+$") then
+      return true
+    end
+
+    return text:find("\u{2502}", 1, true) ~= nil
+      or text:find("\u{251c}", 1, true) ~= nil
+      or text:find("\u{2514}", 1, true) ~= nil
+  end
+
+  nodes.prepare_node = function(node, max_width, selected_path, selected_group)
+    local line = original_prepare_node(node, max_width, selected_path, selected_group)
+    local data = node.data or {}
+    local status_symbol = data.status_symbol or data.status or ""
+    if not line or not line._segments or status_symbol == "" or data.type == "group" or data.type == "directory" then
+      return line
+    end
+
+    local segments = line._segments
+    local status_index = #segments
+    while status_index > 0 and is_blank_segment(segments[status_index]) do
+      status_index = status_index - 1
+    end
+
+    if status_index == 0 or segments[status_index].text ~= status_symbol then
+      return line
+    end
+
+    local status_segment = table.remove(segments, status_index)
+    while status_index <= #segments do
+      table.remove(segments, status_index)
+    end
+
+    local gap_hl = "Normal"
+    if is_blank_segment(segments[#segments]) then
+      gap_hl = segments[#segments].hl or gap_hl
+      table.remove(segments)
+    end
+
+    local insert_index = is_indent_segment(segments[1]) and 2 or 1
+    if data.icon == "" and is_blank_segment(segments[insert_index]) then
+      table.remove(segments, insert_index)
+    end
+    table.insert(segments, insert_index, { text = " ", hl = gap_hl })
+    table.insert(segments, insert_index, status_segment)
+
+    return line
+  end
+
+  nodes._youngxguo_status_prefix_patched = true
+end
+
 local function opens_working_tree_status(args)
   local non_flag_args = {}
   for _, arg in ipairs(args or {}) do
@@ -340,6 +413,7 @@ function M.setup(opts)
   require("codediff").setup(opts)
   patch_git_status()
   patch_explorer_keymaps()
+  patch_explorer_status_prefix()
   patch_commands()
 end
 
