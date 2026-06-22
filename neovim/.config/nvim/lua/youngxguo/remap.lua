@@ -55,7 +55,6 @@ vim.keymap.set("n", "<C-p>", function()
   fzf.global({
     raw_cmd = raw,
     fzf_opts = {
-      ["--keep-right"] = true,
       ["--tiebreak"] = "index",
     },
   })

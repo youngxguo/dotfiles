@@ -45,7 +45,6 @@ return {
     },
     fzf_opts = {
       ["--layout"] = "reverse",
-      ["--keep-right"] = true,
     },
     files = {
       hidden = true,
