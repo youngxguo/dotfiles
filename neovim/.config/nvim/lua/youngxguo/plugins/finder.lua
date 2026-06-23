@@ -39,8 +39,10 @@ return {
       height = 0.95,
       width = 0.95,
       preview = {
-        layout = "horizontal",
+        layout = "flex",
         horizontal = "right:55%",
+        vertical = "down:45%",
+        flip_columns = 120,
       },
     },
     fzf_opts = {
@@ -52,6 +54,8 @@ return {
       fd_opts = [[--color=never --hidden --type f --type l --exclude .git --exclude node_modules --exclude bazel-out --exclude bazel-bin --exclude bazel-testlogs --exclude "bazel-applied*" --exclude lcov-report --exclude map_tiles --exclude data/py --exclude "*.generated"]],
     },
     grep = {
+      formatter = { "path.filename_first", 2 },
+      multiline = 2,
       rg_opts = [[--column --line-number --no-heading --color=always --smart-case --max-columns=4096 --glob "!.git" --glob "!node_modules/**" --glob "!bazel-out/**" --glob "!bazel-bin/**" --glob "!bazel-testlogs/**" --glob "!bazel-applied*/**" --glob "!lcov-report/**" --glob "!map_tiles/**" --glob "!*.generated" --glob "!data/py/**" -e]],
     },
   },

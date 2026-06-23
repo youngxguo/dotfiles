@@ -54,6 +54,7 @@ vim.keymap.set("n", "<C-p>", function()
 
   fzf.global({
     raw_cmd = raw,
+    formatter = { "path.filename_first", 2 },
     fzf_opts = {
       ["--tiebreak"] = "index",
     },
