@@ -15,6 +15,8 @@ M.solarized_ui = {
   yellow = "#b58900",
   orange = "#cb4b16",
   red = "#dc322f",
+  magenta = "#d33682",
+  violet = "#6c71c4",
   blue = "#268bd2",
   cyan = "#2aa198",
 }
@@ -31,6 +33,14 @@ function M.apply_ui_highlights()
   local c = M.solarized_ui
   vim.api.nvim_set_hl(0, "StatusLine", { fg = c.base1, bg = c.base03 })
   vim.api.nvim_set_hl(0, "StatusLineNC", { fg = c.base01, bg = c.base03 })
+  vim.api.nvim_set_hl(0, "StatusModeNormal", { fg = c.base03, bg = c.blue, bold = true })
+  vim.api.nvim_set_hl(0, "StatusModeInsert", { fg = c.base03, bg = c.green, bold = true })
+  vim.api.nvim_set_hl(0, "StatusModeVisual", { fg = c.base03, bg = c.magenta, bold = true })
+  vim.api.nvim_set_hl(0, "StatusModeSelect", { fg = c.base03, bg = c.violet, bold = true })
+  vim.api.nvim_set_hl(0, "StatusModeReplace", { fg = c.base03, bg = c.orange, bold = true })
+  vim.api.nvim_set_hl(0, "StatusModeCommand", { fg = c.base03, bg = c.yellow, bold = true })
+  vim.api.nvim_set_hl(0, "StatusModePrompt", { fg = c.base03, bg = c.cyan, bold = true })
+  vim.api.nvim_set_hl(0, "StatusModeShell", { fg = c.base03, bg = c.red, bold = true })
   vim.api.nvim_set_hl(0, "TabLine", { fg = c.base0, bg = c.base03 })
   vim.api.nvim_set_hl(0, "TabLineSel", { fg = c.base03, bg = c.blue, bold = true })
   vim.api.nvim_set_hl(0, "TabLineFill", { bg = c.base03 })
