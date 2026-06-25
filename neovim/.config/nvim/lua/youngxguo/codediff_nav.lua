@@ -65,17 +65,44 @@ local function enable_compact(tabpage, attempts)
   end
 end
 
-local function command(layout)
-  local is_codediff_tab = false
+-- codediff keys its sessions by tabpage, so a diff view lives in exactly one
+-- tab. Scan the tab list for a CodeDiff session already open anywhere in this
+-- Neovim instance.
+local function find_codediff_tab()
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
-  if ok then
-    is_codediff_tab = lifecycle.get_session(vim.api.nvim_get_current_tabpage()) ~= nil
+  if not ok then
+    return nil
+  end
+  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+    if lifecycle.get_session(tabpage) ~= nil then
+      return tabpage
+    end
+  end
+  return nil
+end
+
+local function command(layout)
+  local current = vim.api.nvim_get_current_tabpage()
+  local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
+
+  -- Already sitting in the CodeDiff tab: re-run :CodeDiff, which toggles the
+  -- session closed (its normal in-session behaviour). No fresh git status.
+  if ok and lifecycle.get_session(current) ~= nil then
+    vim.cmd("CodeDiff --" .. layout)
+    return
   end
 
-  if not is_codediff_tab then
-    require("youngxguo.codediff_perf").request_full_status()
+  -- A CodeDiff tab is open in another tab: focus it instead of spawning a
+  -- second one. Repeated <leader>gd from a file tab otherwise piles up
+  -- duplicate diff tabs.
+  local existing = find_codediff_tab()
+  if existing then
+    vim.api.nvim_set_current_tabpage(existing)
+    return
   end
 
+  -- No CodeDiff tab yet: warm the git-status cache, then open a fresh one.
+  require("youngxguo.codediff_perf").request_full_status()
   vim.cmd("CodeDiff --" .. layout)
 end
 
