@@ -61,6 +61,7 @@ return {
     opts = {
       notify_on_error = true,
       formatters_by_ft = {
+        python = { "ruff_fix", "ruff_organize_imports", "ruff_format" },
         javascript = { "prettier" },
         javascriptreact = { "prettier" },
         typescript = { "prettier" },

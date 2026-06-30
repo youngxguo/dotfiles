@@ -599,6 +599,7 @@ def install_neovim():
     install_package("ripgrep")
     install_package("fd")
     install_homebrew_only_package("prettier")
+    install_homebrew_only_package("ruff")
     install_homebrew_only_package("tree-sitter-cli")
     install_homebrew_only_package("typescript-language-server")
     install_homebrew_only_package("basedpyright")
