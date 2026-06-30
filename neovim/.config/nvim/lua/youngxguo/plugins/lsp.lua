@@ -9,10 +9,7 @@ return {
     version = "1.*",
     opts = {
       keymap = {
-        preset = "default",
-        ["<Up>"] = { "select_prev", "fallback" },
-        ["<Down>"] = { "select_next", "fallback" },
-        ["<Tab>"] = { "show", "fallback" },
+        preset = "super-tab",
         ["<CR>"] = { "accept", "fallback" },
       },
       completion = {
