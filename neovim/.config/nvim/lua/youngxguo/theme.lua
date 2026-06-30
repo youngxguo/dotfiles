@@ -68,12 +68,25 @@ end
 
 function M.bufferline_highlights()
   local c = M.solarized_ui
+  local selected = function()
+    return { fg = c.base03, bg = c.blue, bold = true, italic = false }
+  end
   return {
     fill = { bg = c.base03 },
     background = { fg = c.base0, bg = c.base03 },
     buffer_visible = { fg = c.base0, bg = c.base03 },
-    buffer_selected = { fg = c.base03, bg = c.blue, bold = true, italic = false },
+    buffer_selected = selected(),
     indicator_selected = { fg = c.base03, bg = c.blue },
+    numbers_selected = selected(),
+    diagnostic_selected = selected(),
+    hint_selected = selected(),
+    hint_diagnostic_selected = selected(),
+    info_selected = selected(),
+    info_diagnostic_selected = selected(),
+    warning_selected = selected(),
+    warning_diagnostic_selected = selected(),
+    error_selected = selected(),
+    error_diagnostic_selected = selected(),
     tab = { fg = c.base0, bg = c.base03 },
     tab_selected = { fg = c.base03, bg = c.blue, bold = true },
     tab_separator = { fg = c.base02, bg = c.base03 },
