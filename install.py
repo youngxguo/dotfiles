@@ -369,7 +369,11 @@ def managed_links():
     links.append(("vscode", REPO_ROOT / "vscode/keybindings.json", vscode_user_dir / "keybindings.json"))
 
     links.append(("claude", REPO_ROOT / "claude/CLAUDE.md", HOME / ".claude/CLAUDE.md"))
-    links.append(("claude", REPO_ROOT / "claude/settings.json", HOME / ".claude/settings.json"))
+    links.append(
+        ("claude", REPO_ROOT / "claude/statusline-command.sh", HOME / ".claude/statusline-command.sh")
+    )
+    for script in sorted((REPO_ROOT / "claude/hooks").glob("*.sh")):
+        links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
     links.append(("codex", REPO_ROOT / "codex/config.toml", HOME / ".codex/config.toml"))
     links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
@@ -562,13 +566,70 @@ def ensure_codex_hooks():
     print(f"merged codex ai-state hooks into {target}")
 
 
+# settings.json keys the repo template owns outright. Hooks are owned
+# per-event instead (see merge_claude_settings), and everything else in the
+# live file — model, enabledPlugins, env, machine-local hooks like the work
+# box's SessionStart team-skills sync — is preserved as-is, so the template
+# stays small enough to generalize to any machine.
+CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
+
+
+def merge_claude_settings():
+    """Merge the repo-owned parts of claude/settings.json into ``~/.claude/settings.json``.
+
+    The live file cannot be a symlink into the repo: Claude Code rewrites
+    settings.json in place at runtime (model changes, enabledPlugins, ...),
+    which replaces a symlink with a plain file and orphans the repo copy — that
+    is exactly how the old symlink scheme drifted. Instead the template owns
+    ``CLAUDE_SETTINGS_KEYS`` plus each hook event it declares; hook events it
+    doesn't declare and every other live key pass through untouched.
+    """
+    source = REPO_ROOT / "claude/settings.json"
+    target = HOME / ".claude/settings.json"
+    if not source.is_file():
+        print("skipping claude settings: no claude/settings.json present")
+        return
+    template = json.loads(source.read_text(encoding="utf-8"))
+
+    if target.is_symlink():
+        # Left over from the old symlink scheme; writing through it would
+        # clobber the repo template.
+        target.unlink()
+    settings = {}
+    if target.is_file():
+        try:
+            settings = json.loads(target.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print(f"skipping claude settings: {target} is not valid JSON")
+            return
+        if not isinstance(settings, dict):
+            print(f"skipping claude settings: {target} is not a JSON object")
+            return
+
+    for key in CLAUDE_SETTINGS_KEYS:
+        if key in template:
+            settings[key] = template[key]
+
+    hooks = settings.setdefault("hooks", {})
+    if isinstance(hooks, dict):
+        for event, groups in template.get("hooks", {}).items():
+            hooks[event] = groups
+    else:
+        print(f"skipping claude hooks merge: {target} hooks is not a JSON object")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    print(f"merged claude settings into {target}")
+
+
 def install_claude():
     links = links_for("claude")
     if any(Path(source).exists() for source, _ in links):
-        print("applying claude global instructions")
+        print("applying claude config")
         apply_links(links)
     else:
-        print("skipping claude global instructions: no claude/CLAUDE.md present")
+        print("skipping claude config: no claude/ files present")
+    merge_claude_settings()
 
 
 def install_codex():

@@ -1,13 +1,22 @@
 {
   "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "Glob",
+      "Grep",
+      "NotebookEdit",
+      "WebSearch"
+    ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "opus",
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline.sh",
-    "padding": 0,
-    "refreshInterval": 60
+    "command": "bash ~/.claude/statusline-command.sh",
+    "refreshInterval": 1
   },
   "hooks": {
     "UserPromptSubmit": [
@@ -16,6 +25,22 @@
           {
             "type": "command",
             "command": "~/.tmux-ai-state.sh thinking"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/auto-name-session.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/prompt-timer.sh start"
           }
         ]
       }
@@ -28,6 +53,14 @@
             "command": "~/.tmux-ai-state.sh idle"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/prompt-timer.sh clear"
+          }
+        ]
       }
     ],
     "SessionEnd": [
@@ -38,8 +71,15 @@
             "command": "~/.tmux-ai-state.sh clear"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/prompt-timer.sh clear"
+          }
+        ]
       }
     ]
-  },
-  "skipDangerousModePermissionPrompt": true
+  }
 }
