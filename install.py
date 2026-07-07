@@ -375,7 +375,6 @@ def managed_links():
     for script in sorted((REPO_ROOT / "claude/hooks").glob("*.sh")):
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
-    links.append(("codex", REPO_ROOT / "codex/config.toml", HOME / ".codex/config.toml"))
     links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
 
     return links
@@ -632,9 +631,34 @@ def install_claude():
     merge_claude_settings()
 
 
+def ensure_codex_local_config():
+    """Keep Codex config local while preserving old repo-symlink installs."""
+    target = HOME / ".codex/config.toml"
+    template = REPO_ROOT / "codex/config.example.toml"
+
+    if target.is_symlink():
+        source = target.resolve()
+        if source.exists() and source.is_relative_to(REPO_ROOT):
+            target.unlink()
+            shutil.copy2(source, target)
+            print(f"detached codex config into local file: {target}")
+            return
+
+    if target.exists():
+        print(f"leaving existing codex config unmanaged: {target}")
+        return
+
+    if not template.exists():
+        print("skipping codex config: no local config or codex/config.example.toml present")
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(template, target)
+    print(f"created local codex config from {template}: {target}")
+
+
 def install_codex():
     agents_links = [(s, d) for s, d in links_for("codex") if Path(s).name == "AGENTS.md"]
-    config_links = [(s, d) for s, d in links_for("codex") if Path(s).name == "config.toml"]
 
     if any(Path(s).exists() for s, _ in agents_links):
         print("applying codex global instructions")
@@ -642,11 +666,7 @@ def install_codex():
     else:
         print("skipping codex global instructions: no codex/AGENTS.md present")
 
-    if any(Path(s).exists() for s, _ in config_links):
-        print("applying codex config")
-        apply_links(config_links)
-    else:
-        print("skipping codex config: no repo-local codex/config.toml present")
+    ensure_codex_local_config()
     ensure_codex_hooks()
 
 

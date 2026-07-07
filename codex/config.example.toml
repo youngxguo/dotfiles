@@ -1,0 +1,11 @@
+# Portable Codex defaults. The live ~/.codex/config.toml stays local because
+# Codex writes account, plugin, cache, and trusted-project state into it.
+
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+personality = "pragmatic"
+service_tier = "fast"
+
+[features]
+fast_mode = true
+memories = true
