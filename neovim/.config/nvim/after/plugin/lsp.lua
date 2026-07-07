@@ -75,17 +75,8 @@ end
 
 local ts_lsp_root_markers = { 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'tsconfig.json', 'package.json', '.git' }
 
-local function is_heavy_applied_worktree(path)
-  return type(path) == 'string' and path:match('^/home/young/applied%d+/?')
-end
-
 local function ts_lsp_root_dir(bufnr, cb)
-  local file = vim.api.nvim_buf_get_name(bufnr)
   local root_dir = vim.fs.root(bufnr, ts_lsp_root_markers)
-  if is_heavy_applied_worktree(root_dir) or is_heavy_applied_worktree(file) then
-    return
-  end
-
   cb(root_dir)
 end
 

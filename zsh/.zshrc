@@ -73,10 +73,6 @@ alias gcomm="git commit -m"
 alias gcom="git commit"
 alias gcoma="git commit --amend"
 alias vim="nvim"
-# dport <container-port>: host port the current repo's dev docker bound it to
-dport() { docker port "$(cat "$(git rev-parse --show-toplevel)/.dev_docker_name")" "$1/tcp" | sed -n "s/.*://p" | head -n1; }
-alias fep='dport 8080'  # frontend (adp start_fe)
-alias fsp='dport 6006'  # dragonfruit storybook
 
 # tmux: push the current git branch into the session's @git_branch option so the
 # sessions sidebar and status line read it instead of forking git on a timer.

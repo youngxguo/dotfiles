@@ -100,8 +100,7 @@ return {
     },
   },
 
-  -- Primary working-tree diff (replaced diffview on <leader>gd). The local
-  -- adapter keeps automatic explorer refreshes cheap in applied* worktrees.
+  -- Primary working-tree diff (replaced diffview on <leader>gd).
   {
     "esmuellert/codediff.nvim",
     cmd = "CodeDiff",

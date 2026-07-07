@@ -1,8 +1,8 @@
 #!/bin/sh
 # Claude Code statusline: model | prompt timer | session cost | daily/monthly
-# budget bars | context bar | ADP URL. Reads the statusLine JSON payload on
-# stdin and writes one line. install.py symlinks this to
-# ~/.claude/statusline-command.sh; claude/settings.json points statusLine here.
+# budget bars | context bar. Reads the statusLine JSON payload on stdin and
+# writes one line. install.py symlinks this to ~/.claude/statusline-command.sh;
+# claude/settings.json points statusLine here.
 input=$(cat)
 
 # Extract fields from JSON input using python3
@@ -44,8 +44,8 @@ if [ -n "$session_id" ]; then
   session_cost=$(python3 -c "print(max(0.0, float('$session_cost') - float('$baseline' or 0)))")
 fi
 
-# Daily/monthly budget bars are fed by the ccusage cache refresher, which is
-# machine-local (only installed on the work box) — skip them where it's absent.
+# Daily/monthly budget bars are fed by the ccusage cache refresher. It is
+# machine-local, so skip those bars where it is absent.
 CCUSAGE_REFRESH="$CLAUDE_DIR/ccusage-refresh.sh"
 if [ -x "$CCUSAGE_REFRESH" ]; then
   # Read monthly budget from config file, default 1500
@@ -154,22 +154,4 @@ if [ -n "$used_pct" ]; then
   ctx_bar=$(build_bar "$used_pct")
   pct_int=$(python3 -c "print(int(float('$used_pct')))")
   printf " | ctx:%s%% %s" "$pct_int" "$ctx_bar"
-fi
-
-# Determine the ADP frontend URL by looking up the host port for container port 8080.
-# The dev docker container name is stored in .dev_docker_name in the project root.
-project_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace', {}).get('project_dir', ''))")
-adp_url=""
-if [ -n "$project_dir" ] && [ -f "$project_dir/.dev_docker_name" ]; then
-  docker_name=$(cat "$project_dir/.dev_docker_name" 2>/dev/null | tr -d '[:space:]')
-  if [ -n "$docker_name" ]; then
-    host_port=$(docker port "$docker_name" 8080 2>/dev/null | head -1 | sed 's/.*://')
-    if [ -n "$host_port" ]; then
-      adp_url="http://localhost:${host_port}"
-    fi
-  fi
-fi
-
-if [ -n "$adp_url" ]; then
-  printf " | %s" "$adp_url"
 fi

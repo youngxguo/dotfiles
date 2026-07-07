@@ -567,9 +567,9 @@ def ensure_codex_hooks():
 
 # settings.json keys the repo template owns outright. Hooks are owned
 # per-event instead (see merge_claude_settings), and everything else in the
-# live file — model, enabledPlugins, env, machine-local hooks like the work
-# box's SessionStart team-skills sync — is preserved as-is, so the template
-# stays small enough to generalize to any machine.
+# live file — model, enabledPlugins, env, and machine-local hooks — is
+# preserved as-is, so the template stays small enough to generalize to any
+# machine.
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
 
 
