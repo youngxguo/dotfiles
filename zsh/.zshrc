@@ -12,7 +12,6 @@ ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=10"
 # zsh-syntax-highlighting wraps ZLE widgets last, so it must load before
 # zsh-autosuggestions — keep autosuggestions at the end of the list.
 plugins=(
-  git
   zsh-syntax-highlighting
   zsh-autosuggestions
 )
