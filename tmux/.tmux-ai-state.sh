@@ -18,8 +18,10 @@
 # the session (@session_ai_idle / @session_ai_thinking) for the `prefix s` tree
 # menu, which can only read session-scoped options.
 #
-# `idle` also fires a desktop notification, so finishing a turn pings you — but
-# only for a session you're NOT currently watching.
+# A transition into `idle` also fires a desktop notification, so finishing a turn
+# pings you — but only for a session you're NOT currently watching. Repeated idle
+# signals are harmless: Codex can emit both a Stop hook and a legacy `notify`
+# callback for the same turn, and only the first one should ping.
 #
 # Every invocation also republishes the session's @git_branch from the agent
 # pane's directory, so a branch the agent checks out mid-turn reaches the sidebar:
@@ -54,6 +56,7 @@ session="$("$TMUX_BIN" display-message -p -t "$pane" '#{session_id}' 2>/dev/null
 set_idle()     { "$TMUX_BIN" set-option -pqt "$pane" @ai_state idle; }
 set_thinking() { "$TMUX_BIN" set-option -pqt "$pane" @ai_state thinking; }
 clear_pane()   { "$TMUX_BIN" set-option -pqut "$pane" @ai_state; }
+pane_state()   { "$TMUX_BIN" show-options -pqv -t "$pane" @ai_state 2>/dev/null; }
 
 # Re-derive the session-level mirror from the live pane states, so the tree menu
 # (prefix s) and any other session-scoped reader stay in step with the panes.
@@ -115,7 +118,11 @@ notify_idle() {
 
 case "${1:-}" in
   thinking) set_thinking ;;
-  idle)     set_idle; notify_idle ;;
+  idle)
+    previous_state="$(pane_state)"
+    set_idle
+    [ "$previous_state" = idle ] || notify_idle
+    ;;
   clear)    clear_pane ;;
   *) printf 'usage: %s {thinking|idle|clear}\n' "${0##*/}" >&2; exit 2 ;;
 esac

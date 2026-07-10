@@ -24,6 +24,10 @@ shim_dir="$work/bin"
 mkdir -p "$shim_dir"
 cat >"$shim_dir/tmux" <<EOF
 #!/bin/sh
+if [ -n "\${TMUX_TEST_CLIENT_TTY:-}" ] && [ "\${1:-}" = list-clients ]; then
+  printf '%s\n' "\$TMUX_TEST_CLIENT_TTY"
+  exit 0
+fi
 exec "$real_tmux" -L "$SOCKET" "\$@"
 EOF
 chmod +x "$shim_dir/tmux"
@@ -402,6 +406,18 @@ TMUX_PANE="$syncwork" bash "$ai_script" clear
 check "ai-state: clear unsets the pane @ai_state" "$?"
 [ -z "$(t show-options -qv -t winsync @session_ai_idle)" ]
 check "ai-state: clear re-syncs the session mirror off" "$?"
+
+# Codex may report the same completed turn through both its Stop hook and the
+# legacy `notify` callback. Only the thinking -> idle transition should ping.
+notify_log="$work/idle-notifications"
+TMUX_PANE="$syncwork" bash "$ai_script" thinking
+TMUX_TEST_CLIENT_TTY=/dev/fd/9 TMUX_PANE="$syncwork" bash "$ai_script" idle 9>>"$notify_log"
+first_notification_size="$(wc -c <"$notify_log" | tr -d ' ')"
+TMUX_TEST_CLIENT_TTY=/dev/fd/9 TMUX_PANE="$syncwork" bash "$ai_script" idle 9>>"$notify_log"
+second_notification_size="$(wc -c <"$notify_log" | tr -d ' ')"
+[ "$first_notification_size" -gt 0 ] && [ "$second_notification_size" = "$first_notification_size" ]
+check "ai-state: duplicate idle signals produce one desktop notification" "$?"
+TMUX_PANE="$syncwork" bash "$ai_script" clear
 
 # --- ai-state: republishes the agent pane's git branch onto @git_branch ---------
 # A branch switched while an agent (not a shell) holds the pane has no precmd to

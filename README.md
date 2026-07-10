@@ -14,7 +14,9 @@ optional: `APPLY_LOGIN_SHELL=1 python3 install.py` if you want zsh as login shel
 
 installs deps (brew or linux pkg mgr), oh-my-zsh, symlinks into `$HOME`, lazy.nvim bootstrap. safe to re-run; existing targets get backed up first.
 
-Codex uses repo-managed `codex/AGENTS.md`; local config is seeded once from `codex/config.example.toml`.
+Codex uses repo-managed `codex/AGENTS.md`; local config is seeded once from
+`codex/config.example.toml`, and the installer merges the tmux AI-state lifecycle
+hooks from `codex/ai-state-hooks.json` into `~/.codex/hooks.json`.
 
 ## cleanup
 
