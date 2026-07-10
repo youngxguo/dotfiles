@@ -1,4 +1,6 @@
 return {
+  { "christoomey/vim-tmux-navigator" },
+
   -- Jump anywhere on screen by typing a label. NOTE: this rebinds `s`/`S` in
   -- normal/visual/operator mode (use `cl` for the old `s` = substitute char).
   {

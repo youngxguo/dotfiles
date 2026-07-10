@@ -60,26 +60,6 @@ vim.keymap.set("n", "<C-p>", function()
     },
   })
 end, { silent = true })
--- vim/tmux pane navigation
-local tmux_bin = vim.fn.exepath("tmux")
-if tmux_bin == "" then
-  tmux_bin = "tmux"
-end
-
-local tmux_dir_map = { h = "L", j = "D", k = "U", l = "R" }
-
-local function tmux_navigate(direction)
-  local nr = vim.fn.winnr()
-  vim.cmd("wincmd " .. direction)
-  if nr == vim.fn.winnr() and vim.env.TMUX then
-    vim.fn.system({ tmux_bin, "select-pane", "-" .. tmux_dir_map[direction] })
-  end
-end
-
-vim.keymap.set("n", "<C-h>", function() tmux_navigate("h") end, { silent = true })
-vim.keymap.set("n", "<C-j>", function() tmux_navigate("j") end, { silent = true })
-vim.keymap.set("n", "<C-k>", function() tmux_navigate("k") end, { silent = true })
-vim.keymap.set("n", "<C-l>", function() tmux_navigate("l") end, { silent = true })
 
 -- splits
 vim.api.nvim_set_keymap("n", "<leader>\\", ":vsplit<CR>", { noremap = true, silent = true })
