@@ -74,6 +74,7 @@ alias gcomm="git commit -m"
 alias gcom="git commit"
 alias gcoma="git commit --amend"
 alias vim="nvim"
+alias cx="codex"
 
 # tmux: push the current git branch into the session's @git_branch option so the
 # sessions sidebar and status line read it instead of forking git on a timer.
