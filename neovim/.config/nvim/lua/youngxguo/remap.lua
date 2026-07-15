@@ -86,6 +86,7 @@ vim.keymap.set({ "n", "v" }, "k", "v:count == 0 ? 'gk' : 'k'", { expr = true, si
 -- search: center + open folds after jumping (neoscroll animates the zz)
 vim.keymap.set("n", "n", "nzzzv")
 vim.keymap.set("n", "N", "Nzzzv")
+vim.keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>", { silent = true, desc = "Clear search highlight" })
 
 -- tabs
 vim.keymap.set("n", "<leader>tn", "<cmd>tabnew<CR>", { silent = true })
