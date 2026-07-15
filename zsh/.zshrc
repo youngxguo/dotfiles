@@ -68,6 +68,7 @@ alias gs="git status"
 alias gd="git diff"
 alias gdc="git diff --cached"
 alias gco="git checkout"
+alias gcm='git switch "$(git show-ref --verify --quiet refs/heads/main && printf main || printf master)"'
 alias gl="git log"
 alias gp="git push"
 alias gcomm="git commit -m"
