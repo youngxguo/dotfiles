@@ -25,7 +25,7 @@ local commands = {
   -- edit
   { "Format",                  function() require("conform").format({ lsp_format = "never", timeout_ms = 5000 }) end },
   { "Rename",                  function() vim.lsp.buf.rename() end },
-  { "CodeAction",              function() vim.lsp.buf.code_action() end },
+  { "CodeAction",              function() require("fzf-lua").lsp_code_actions() end },
 
   -- navigation
   { "ToggleFileTree",          function() vim.cmd("NvimTreeToggle") end },
