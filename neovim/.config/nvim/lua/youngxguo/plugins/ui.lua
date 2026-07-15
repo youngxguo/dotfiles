@@ -85,7 +85,6 @@ return {
     event = "InsertEnter",
     opts = {
       check_ts = true,
-      map_cr = false,
     },
   },
 
