@@ -1,6 +1,12 @@
 return {
   { "christoomey/vim-tmux-navigator" },
 
+  {
+    "windwp/nvim-autopairs",
+    event = "InsertEnter",
+    opts = {},
+  },
+
   -- Jump anywhere on screen by typing a label. NOTE: this rebinds `s`/`S` in
   -- normal/visual/operator mode (use `cl` for the old `s` = substitute char).
   {
