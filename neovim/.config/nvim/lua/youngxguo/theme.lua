@@ -50,8 +50,11 @@ function M.apply_ui_highlights()
   vim.api.nvim_set_hl(0, "LineNr", { fg = c.base01 })
   vim.api.nvim_set_hl(0, "CursorLineNr", { fg = c.cyan, bg = c.base02, bold = true })
 
-  local fidget_bg = c.base02
-  vim.api.nvim_set_hl(0, "YoungFidgetNormal", { fg = c.base1, bg = fidget_bg })
+  -- Standard float groups are shared by native LSP windows and plugins.
+  vim.api.nvim_set_hl(0, "NormalFloat", { fg = c.base1, bg = c.base03 })
+  vim.api.nvim_set_hl(0, "FloatBorder", { fg = c.cyan, bg = c.base03 })
+
+  local fidget_bg = c.base03
   vim.api.nvim_set_hl(0, "YoungFidgetGroup", { fg = c.blue, bg = fidget_bg, bold = true })
   vim.api.nvim_set_hl(0, "YoungFidgetIcon", { fg = c.cyan, bg = fidget_bg })
   vim.api.nvim_set_hl(0, "YoungFidgetProgress", { fg = c.yellow, bg = fidget_bg })

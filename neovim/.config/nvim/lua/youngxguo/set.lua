@@ -22,6 +22,7 @@ vim.opt.ignorecase = true
 vim.opt.smartcase = true
 
 vim.opt.termguicolors = true
+vim.opt.winborder = "single"
 
 vim.opt.splitbelow = true
 vim.opt.splitright = true

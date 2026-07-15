@@ -125,7 +125,8 @@ return {
             group_separator_hl = "YoungFidgetSeparator",
           },
           window = {
-            normal_hl = "YoungFidgetNormal",
+            normal_hl = "NormalFloat",
+            border = "single",
             winblend = 0,
             avoid = { "NvimTree" },
           },
