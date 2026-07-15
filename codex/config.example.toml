@@ -9,3 +9,6 @@ service_tier = "fast"
 [features]
 fast_mode = true
 memories = true
+
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-used", "five-hour-limit", "weekly-limit"]
