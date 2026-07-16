@@ -141,6 +141,20 @@ return {
     opts = {
       default_merge_method = "squash",
       picker = "fzf-lua",
+      mappings = {
+        review_thread = {
+          select_next_entry = { lhs = "<Tab>" },
+          select_prev_entry = { lhs = "<S-Tab>" },
+        },
+        review_diff = {
+          select_next_entry = { lhs = "<Tab>" },
+          select_prev_entry = { lhs = "<S-Tab>" },
+        },
+        file_panel = {
+          select_next_entry = { lhs = "<Tab>" },
+          select_prev_entry = { lhs = "<S-Tab>" },
+        },
+      },
     },
   },
 }
