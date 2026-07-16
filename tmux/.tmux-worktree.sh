@@ -1,28 +1,26 @@
 #!/usr/bin/env bash
-# Create a git worktree and a matching tmux session in one step, seeded with the
-# same agents/vim windows as `prefix t`, with an agent launched and ready.
+# Create a git worktree and a matching tmux session in one step, with Codex and
+# Neovim side by side in a single window.
 #
 # `prefix W` prompts for a NAME, then this script:
 #   1. resolves the primary repo root from the pane's directory (errors if not a
 #      repo),
 #   2. adds a worktree at ../<repo>-worktrees/<NAME> on a new branch <NAME>,
 #      forked from the local tip of the repo's default branch (main/master),
-#   3. delegates session + window creation to .tmux-setup-sessions.sh and the
-#      editor launch to .tmux-setup-vim.sh (the same helpers `prefix t` uses),
-#   4. launches an agent in the "agents" window via tmux_launch_agent.
+#   3. creates a <repo>-<NAME> session with one "work" window containing two
+#      side-by-side panes rooted in the new worktree,
+#   4. launches Codex in the left pane and Neovim in the right pane.
 #
-# Idempotent: if the worktree already exists it is reused, and setup-sessions
-# re-attaches rather than duplicating windows. The worktree mechanics are the
-# only new logic here; everything structural is reused. install.py symlinks this
-# to ~/.tmux-worktree.sh via its `.tmux-*.sh` glob.
+# Idempotent: if the worktree and session already exist they are reused without
+# duplicating panes or relaunching Codex/Neovim. install.py symlinks this to
+# ~/.tmux-worktree.sh via its `.tmux-*.sh` glob.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/.tmux-lib.sh"
 
 # Drive tmux through the same socket the sibling setup helpers use. Normally
 # that's the default socket (tmux_resolve_bin); TMUX_SETUP_SOCKET overrides it so
-# the whole flow can be exercised end-to-end on a throwaway socket under test,
-# matching .tmux-setup-sessions.sh / .tmux-setup-vim.sh.
+# the whole flow can be exercised end-to-end on a throwaway socket under test.
 tmux_bin=("$(tmux_resolve_bin)")
 [ -n "${TMUX_SETUP_SOCKET:-}" ] && tmux_bin+=(-L "$TMUX_SETUP_SOCKET")
 
@@ -39,11 +37,11 @@ usage() {
 Usage: .tmux-worktree.sh --name NAME [--path DIR]
 
 Create a git worktree (branch NAME, forked from the repo default branch) at
-../<repo>-worktrees/NAME, then a tmux session NAME with agents/vim windows
-and an agent launched in the agents window.
+../<repo>-worktrees/NAME, then a tmux session <repo>-NAME with one side-by-side
+Codex/Neovim window. The repo prefix keeps sidebar entries identifiable.
 
 Options:
-  --name NAME   Worktree, branch, and session name (required)
+  --name NAME   Worktree and branch name (required)
   --path DIR    A directory inside the target repo (default: cwd)
   -h, --help    Show this help
 EOF
@@ -120,18 +118,23 @@ fi
 seed_local_agent_instructions "$current_repo_root" "$worktree_path"
 [ "$current_repo_root" = "$repo_root" ] || seed_local_agent_instructions "$repo_root" "$worktree_path"
 
-# Structural session + windows, then the editor launch — the exact helpers
-# `prefix t` uses, so behavior stays in sync. We pass --no-attach and switch the
-# invoking client ourselves below, rather than relying on setup-sessions' attach
-# branch: that branch keys off $TMUX, which tmux does not reliably export into
-# the run-shell environment `prefix W` runs us in.
-"$SCRIPT_DIR/.tmux-setup-sessions.sh" --no-attach --name "$name" "$worktree_path" \
-  || fail "session setup failed"
-"$SCRIPT_DIR/.tmux-setup-vim.sh" "$name" || true
+# Prefix the task/branch name with the main repository folder so the sidebar
+# keeps enough project context when several repositories have worktree sessions.
+# tmux target syntax gives "." and ":" special meaning, so fold both to "_".
+session="$(basename "$repo_root")-$name"
+session="${session//[.:]/_}"
+if ! "${tmux_bin[@]}" has-session -t "$session" 2>/dev/null; then
+  codex_pane="$("${tmux_bin[@]}" new-session -d -s "$session" -n work \
+    -c "$worktree_path" -P -F '#{pane_id}')" \
+    || fail "session setup failed"
+  vim_pane="$("${tmux_bin[@]}" split-window -h -d -t "$codex_pane" \
+    -c "$worktree_path" -P -F '#{pane_id}')" \
+    || fail "Neovim pane setup failed"
+  "${tmux_bin[@]}" select-layout -t "$session:work" even-horizontal >/dev/null \
+    || fail "pane layout failed"
+  tmux_launch_agent "$codex_pane" codex "${tmux_bin[@]}"
+  "${tmux_bin[@]}" send-keys -t "$vim_pane" nvim Enter
+fi
 
-# tmux folds "." and ":" in session names; mirror setup-sessions so we target the
-# right session.
-session="${name//[.:]/_}"
 "${tmux_bin[@]}" set-option -qt "$session" @git_branch "$name" 2>/dev/null || true
-tmux_launch_agent "$session:agents" "" "${tmux_bin[@]}"
 "${tmux_bin[@]}" switch-client -t "$session" 2>/dev/null || true

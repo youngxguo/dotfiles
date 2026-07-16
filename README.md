@@ -43,7 +43,7 @@ prefix: **ctrl-space** (not ctrl-b)
 |-----|------|
 | `c` | new window (current dir) |
 | `C` | new session (asks name) |
-| `W` | new git worktree + agents/vim session |
+| `W` | new git worktree + repo-prefixed Codex / Neovim session |
 | `t` | add agents / vim windows in current session |
 | `X` | kill session (confirm) |
 | `b` | toggle left sidebar |

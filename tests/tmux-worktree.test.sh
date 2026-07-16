@@ -49,7 +49,7 @@ tmux_t new-session -d -s bootstrap -c "$repo"
 
 wt_dir="$work/myrepo-worktrees"
 
-# --- fresh: creates worktree + branch off main, seeds windows, launches agent ---
+# --- fresh: creates worktree + branch off main, seeds Codex/Neovim panes ---
 run --name feature-x --path "$repo" >/dev/null 2>&1 || true
 
 [ -d "$wt_dir/feature-x" ]
@@ -67,17 +67,25 @@ check "fresh copies local AGENTS.md into the worktree" "$?"
 [ -z "$(git -C "$wt_dir/feature-x" status --short -- AGENTS.md)" ]
 check "copied local AGENTS.md is excluded from git status" "$?"
 
-tmux_t has-session -t feature-x 2>/dev/null
+tmux_t has-session -t myrepo-feature-x 2>/dev/null
 check "session is created" "$?"
 
-[ "$(tmux_t show-options -qv -t feature-x @git_branch)" = "feature-x" ]
+[ "$(tmux_t show-options -qv -t myrepo-feature-x @git_branch)" = "feature-x" ]
 check "session git branch label is seeded" "$?"
 
-got="$(tmux_t list-windows -t feature-x -F '#{window_name}' | tr '\n' ' ' | sed 's/ $//')"
-[ "$got" = "agents vim" ]
-check "session seeds the default windows" "$?"
+got="$(tmux_t list-windows -t myrepo-feature-x -F '#{window_name}' | tr '\n' ' ' | sed 's/ $//')"
+[ "$got" = "work" ]
+check "repo-prefixed session creates one work window" "$?"
 
-# Every window is *spawned* in the worktree. We check pane_start_path, not
+[ "$(tmux_t list-panes -t myrepo-feature-x:work | wc -l | tr -d ' ')" = "2" ]
+check "work window has two panes" "$?"
+
+pane_geometry="$(tmux_t list-panes -t myrepo-feature-x:work -F '#{pane_top}:#{pane_left}' | sort)"
+[ "$(printf '%s\n' "$pane_geometry" | cut -d: -f1 | uniq | wc -l | tr -d ' ')" = "1" ] \
+  && [ "$(printf '%s\n' "$pane_geometry" | cut -d: -f2 | uniq | wc -l | tr -d ' ')" = "2" ]
+check "panes are side by side" "$?"
+
+# Both panes are *spawned* in the worktree. We check pane_start_path, not
 # pane_current_path: the latter follows the live shell and lags during zsh/
 # oh-my-zsh init (it can briefly read as the shell's startup dir), which made an
 # earlier version of this assertion flaky. start_path is where tmux spawned the
@@ -86,13 +94,22 @@ wt_real="$(cd "$wt_dir/feature-x" && pwd -P)"
 roots_ok=0
 while IFS= read -r p; do
   [ "$(cd "$p" 2>/dev/null && pwd -P)" = "$wt_real" ] || roots_ok=1
-done < <(tmux_t list-windows -t feature-x -F '#{pane_start_path}')
-check "all windows are spawned in the worktree" "$roots_ok"
+done < <(tmux_t list-panes -t myrepo-feature-x:work -F '#{pane_start_path}')
+check "both panes are spawned in the worktree" "$roots_ok"
 
-# The agent command was typed into the agents window (default: claude). The test
-# host may lack a claude binary, so we assert the prompt history, not a process.
-tmux_t capture-pane -p -t feature-x:agents | grep -q 'claude'
-check "an agent (claude) is launched in the agents window" "$?"
+# Codex is typed into the first pane. The test host may or may not have a Codex
+# binary, so assert the prompt history rather than the live process.
+tmux_t capture-pane -p -t myrepo-feature-x:work.0 -S - | grep -q 'codex'
+check "Codex is launched in the first pane" "$?"
+
+vim_cmd="$(tmux_t display-message -p -t myrepo-feature-x:work.1 '#{pane_current_command}')"
+if [ "$vim_cmd" = "nvim" ] \
+  || tmux_t capture-pane -p -t myrepo-feature-x:work.1 -S - | grep -q 'nvim'; then
+  rc=0
+else
+  rc=1
+fi
+check "Neovim is launched in the second pane" "$rc"
 
 # Forks from the LOCAL default-branch tip, including commits not pushed to
 # origin. Simulate a repo whose local master is ahead of origin/master (the
@@ -110,10 +127,12 @@ check "forks from the local default-branch tip, not the (stale) origin tip" "$?"
 
 # --- idempotent: re-running reuses the worktree and does not duplicate it ---
 before="$(git -C "$repo" worktree list | wc -l | tr -d ' ')"
+before_panes="$(tmux_t list-panes -t myrepo-feature-x:work | wc -l | tr -d ' ')"
 run --name feature-x --path "$repo" >/dev/null 2>&1 || true
 after="$(git -C "$repo" worktree list | wc -l | tr -d ' ')"
-[ "$before" = "$after" ]
-check "re-running reuses the worktree (idempotent)" "$?"
+after_panes="$(tmux_t list-panes -t myrepo-feature-x:work | wc -l | tr -d ' ')"
+[ "$before" = "$after" ] && [ "$before_panes" = "$after_panes" ]
+check "re-running reuses the worktree and panes (idempotent)" "$?"
 
 # --- nested source: creating from a worktree still targets the main repo layout ---
 run --name feature-y --path "$wt_dir/feature-x" >/dev/null 2>&1 || true
