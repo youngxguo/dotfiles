@@ -20,8 +20,9 @@
 # plus a slow backstop tick.
 #
 # Subcommands: toggle | ensure [win] | ensure-all | reset-all | switch <n> |
-# refresh | render | fix <win> | rebalance <win> [h|v] | layout-hook <ev> <win> <z> |
-# install-hooks. render runs inside the rail pane and self-closes when it's last.
+# click <row> [client] | refresh | render | fix <win> | rebalance <win> [h|v] |
+# layout-hook <ev> <win> <z> | install-hooks. render runs inside the rail pane and
+# self-closes when it's last.
 #
 # install.py symlinks this to ~/.tmux-sidebar.sh via its `.tmux-*.sh` glob.
 set -u
@@ -386,6 +387,45 @@ cmd_switch() {
   "$TMUX_BIN" switch-client -t "$name" 2>/dev/null && cmd_refresh || true
 }
 
+# Map a zero-based rendered row to its one-based session index. The layout mirrors
+# render_once: the first session starts immediately; later sessions have a divider
+# above them; and a session with @git_branch occupies a second clickable line.
+# Divider rows and the blank space below the list intentionally print nothing.
+session_index_at_row() {
+  local wanted="$1" row=0 index=0 name branch
+  case "$wanted" in *[!0-9]*|'') return 1 ;; esac
+
+  while IFS=$'\t' read -r name branch; do
+    index=$((index + 1))
+    [ "$index" -gt 1 ] && row=$((row + 1)) # divider before this session
+
+    if [ "$wanted" -eq "$row" ]; then
+      printf '%s\n' "$index"
+      return 0
+    fi
+    row=$((row + 1))                         # session name
+
+    if [ -n "$branch" ]; then
+      if [ "$wanted" -eq "$row" ]; then
+        printf '%s\n' "$index"
+        return 0
+      fi
+      row=$((row + 1))                       # git branch
+    fi
+  done < <("$TMUX_BIN" list-sessions -F \
+'#{session_name}'$'\t''#{@git_branch}' 2>/dev/null)
+  return 1
+}
+
+# click <row> [client]: switch when a MouseDown1Pane event lands on a rendered
+# session row. mouse_y is already relative to the clicked pane in tmux, so the
+# binding can pass it straight through without depending on the rail's position.
+cmd_click() {
+  local row="$1" client="${2:-}" index
+  index="$(session_index_at_row "$row")" || return 0
+  cmd_switch "$index" "$client"
+}
+
 ### Rendering ###
 
 ESC=$'\033'
@@ -594,12 +634,13 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     ensure-all)  run_quiet cmd_ensure_all ;;
     reset-all)   run_quiet cmd_reset_all ;;
     switch)      cmd_switch "${2:-}" "${3:-}" ;;
+    click)       cmd_click "${2:-}" "${3:-}" ;;
     refresh)     cmd_refresh ;;
     render)      cmd_render ;;
     fix)         cmd_fix "${2:-}" ;;
     rebalance)   cmd_rebalance "${2:-}" "${3:-}" ;;
     layout-hook) cmd_layout_hook "${2:-}" "${3:-}" "${4:-0}" ;;
     install-hooks) install_layout_hooks ;;
-    *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|refresh|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>|install-hooks}\n' "${0##*/}" >&2; exit 2 ;;
+    *)           printf 'usage: %s {toggle|ensure [win]|ensure-all|reset-all|switch <n>|click <row> [client]|refresh|render|fix <win>|rebalance <win> [h|v]|layout-hook <ev> <win> <z>|install-hooks}\n' "${0##*/}" >&2; exit 2 ;;
   esac
 fi

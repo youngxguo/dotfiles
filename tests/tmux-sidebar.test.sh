@@ -288,6 +288,32 @@ check "rail_is_alone: true once the rail is the only pane" "$r"
 if cmd_refresh; then r=0; else r=1; fi
 check "refresh: exits 0 even when work panes trail the rail" "$r"
 
+# --- click mapping: name + branch rows select; divider rows do nothing ---------
+# The first two sessions give us a deterministic prefix of the rendered list. Give
+# the first a branch so it occupies rows 0 and 1; row 2 is the divider; the second
+# session starts on row 3. Stub cmd_switch so this stays a pure mapping test and
+# does not need an attached client on the throwaway server.
+first_session="$(t list-sessions -F '#{session_name}' | sed -n '1p')"
+t set-option -t "$first_session" @git_branch click-test
+clicked=""
+cmd_switch() { clicked="$1/$2"; }
+cmd_click 0 click-client
+[ "$clicked" = "1/click-client" ]
+check "click: session name row switches to that session" "$?"
+clicked=""
+cmd_click 1 click-client
+[ "$clicked" = "1/click-client" ]
+check "click: git branch row switches to its session" "$?"
+clicked=""
+cmd_click 2 click-client
+[ -z "$clicked" ]
+check "click: divider row does nothing" "$?"
+clicked=""
+cmd_click 3 click-client
+[ "$clicked" = "2/click-client" ]
+check "click: next session name maps past the divider" "$?"
+t set-option -t "$first_session" -u @git_branch
+
 # --- a settled layout wakes the rail so the client redraw can't drift -----------
 # A split/close/resize pins the rail back to WIDTH but leaves its content identical;
 # the rail must still be woken so its render loop forces a full redraw and the
