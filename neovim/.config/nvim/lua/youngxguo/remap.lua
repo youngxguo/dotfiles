@@ -120,7 +120,31 @@ vim.keymap.set("n", "<leader>om", "<cmd>Octo pr search author:@me is:open<CR>", 
 vim.keymap.set("n", "<leader>oa", "<cmd>Octo pr search assignee:@me is:open<CR>", { silent = true })
 vim.keymap.set("n", "<leader>os", "<cmd>Octo pr search<CR>", { silent = true })
 vim.keymap.set("n", "<leader>oc", "<cmd>Octo pr checkout<CR>", { silent = true })
-vim.keymap.set("n", "<leader>or", "<cmd>Octo review start<CR>", { silent = true })
+vim.keymap.set("n", "<leader>or", function()
+  local loading = require("fidget.progress").handle.create({
+    lsp_client = { name = "Octo" },
+    message = "Loading review...",
+  })
+  local done = false
+  local function finish_loading()
+    if done then
+      return
+    end
+    done = true
+    loading:finish()
+  end
+
+  local autocmd = vim.api.nvim_create_autocmd("FileType", {
+    pattern = "octo_panel",
+    once = true,
+    callback = finish_loading,
+  })
+  vim.defer_fn(function()
+    finish_loading()
+    pcall(vim.api.nvim_del_autocmd, autocmd)
+  end, 15000)
+
+  vim.cmd("Octo review")
+end, { silent = true, desc = "Open Octo review" })
 vim.keymap.set("n", "<leader>oR", "<cmd>Octo review submit<CR>", { silent = true })
-vim.keymap.set("n", "<leader>oe", "<cmd>Octo review resume<CR>", { silent = true })
 vim.keymap.set("n", "<leader>od", "<cmd>Octo pr diff<CR>", { silent = true })
