@@ -375,6 +375,14 @@ def managed_links():
     for script in sorted((REPO_ROOT / "claude/hooks").glob("*.sh")):
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
+
+    skills_dir = REPO_ROOT / "skills"
+    if skills_dir.is_dir():
+        for skill_dir in sorted(skills_dir.iterdir()):
+            if (skill_dir / "SKILL.md").is_file():
+                links.append(("skills", skill_dir, HOME / ".claude/skills" / skill_dir.name))
+                links.append(("skills", skill_dir, HOME / ".agents/skills" / skill_dir.name))
+
     links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
 
     return links
@@ -708,6 +716,7 @@ def run_install_flow():
     install_vscode()
     install_claude()
     install_codex()
+    apply_links(links_for("skills"))
     install_neovim()
     print("Done")
 

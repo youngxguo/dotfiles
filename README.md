@@ -18,6 +18,8 @@ Codex uses repo-managed `codex/AGENTS.md`; local config is seeded once from
 `codex/config.example.toml`, and the installer merges the tmux AI-state lifecycle
 hooks from `codex/ai-state-hooks.json` into `~/.codex/hooks.json`.
 
+Personal agent skills live in `skills/` and are linked into Codex and Claude Code by the installer.
+
 ## cleanup
 
 ```sh
@@ -54,5 +56,3 @@ prefix: **ctrl-space** (not ctrl-b)
 | cmd-`1`–`9` | jump to session by sidebar number |
 
 sidebar stuck? `~/.tmux-sidebar.sh reset-all`
-
-commit message notes for agents live in `codex/COMMIT_RULES.md`

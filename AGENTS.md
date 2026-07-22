@@ -1,26 +1,13 @@
 # AGENTS.md
 
-## Git Hygiene
+## Git
 
-- Do not commit or push changes automatically. Leave changes uncommitted so the user can review them, then wait for explicit approval before committing or pushing; approval to make a change is not approval to commit it.
-- Keep commits small and focused. One logical change per commit.
-- Write clear commit messages that explain what changed and why.
-- After the user approves committing, commit at meaningful checkpoints so progress is easy to review and recover.
-- Push only after the user explicitly approves pushing.
-- Keep repo hooks enabled (`git config core.hooksPath .githooks`) so pre-push checks run.
-- Pull/rebase before pushing if the remote branch has moved.
-- Run relevant checks/tests before committing when possible.
-- Do not commit secrets, local env files, or machine-specific generated files.
-- Review `git status` before every commit to avoid accidental file adds.
-- Prefer feature branches for larger changes instead of committing directly to shared branches.
-- Do not require PRs by default. Direct pushes to `main` are acceptable in personal or shared automation repos when that repo's policy allows it, such as `~/claude-code-shared`.
-- Avoid force-pushing shared branches unless everyone involved agrees.
+- Leave changes uncommitted unless the user explicitly asks to commit, and do not push without separate approval.
+- Before committing, review `git status`, run relevant checks, and keep the commit focused.
+- Keep repo hooks enabled with `git config core.hooksPath .githooks`.
+- Prefer a feature branch for larger changes; direct pushes to `main` are fine when the repository allows them.
 
-## Suggested Workflow
+## Agent Skills
 
-1. Create or switch to a branch for the task.
-2. Make a small, testable change.
-3. Leave the changes uncommitted so the user can review `git diff` and `git status`.
-4. Wait for explicit approval to commit, then commit with a descriptive message.
-5. Wait for explicit approval to push, then push the branch to remote (let `pre-push` checks run).
-6. Repeat in small increments.
+- Keep each skill in `skills/<skill-name>` with aligned `agents/openai.yaml` metadata.
+- Validate changed skills with the skill creator's `quick_validate.py` and `npx skills add . --list`.

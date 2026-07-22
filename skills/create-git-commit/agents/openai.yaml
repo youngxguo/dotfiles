@@ -1,0 +1,4 @@
+interface:
+  display_name: "create git commit"
+  short_description: "create focused git commits safely"
+  default_prompt: "use $create-git-commit to commit the current changes with the repository's preferred message format."
