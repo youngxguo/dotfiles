@@ -6,7 +6,7 @@ return {
   priority = 1000,
   opts = {
     transparent = {
-      enabled = vim.env.NVIM_TRANSPARENT ~= "0",
+      enabled = vim.env.NVIM_TRANSPARENT == "1",
       normal = true,
       normalfloat = true,
       nvimtree = true,
