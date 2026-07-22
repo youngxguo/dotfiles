@@ -4,7 +4,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-script="$here/../tmux/.tmux-ai-status.sh"
+script="$here/.tmux-ai-status.sh"
 real_tmux="$(command -v tmux)"
 
 work="$(mktemp -d)"

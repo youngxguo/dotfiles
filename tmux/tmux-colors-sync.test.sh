@@ -4,9 +4,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-repo="$(cd "$here/.." && pwd)"
 
-python3 - "$repo/tmux/.tmux-palette.sh" "$repo/tmux/.tmux.conf" <<'PY'
+python3 - "$here/.tmux-palette.sh" "$here/.tmux.conf" <<'PY'
 import re
 import sys
 from pathlib import Path
