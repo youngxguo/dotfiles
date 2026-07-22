@@ -38,6 +38,11 @@ STATUS_CHECKS = {
 
 
 class RepositorySettingsTests(unittest.TestCase):
+    def test_merged_branches_are_deleted(self):
+        self.assertIs(
+            repository_settings.REPOSITORY_SETTINGS["delete_branch_on_merge"], True
+        )
+
     def test_new_ruleset_contains_only_shared_rules(self):
         result = repository_settings.ruleset_for(None)
 

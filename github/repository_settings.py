@@ -12,6 +12,7 @@ REPOSITORY_SETTINGS: dict[str, object] = {
     "allow_squash_merge": True,
     "allow_merge_commit": False,
     "allow_rebase_merge": False,
+    "delete_branch_on_merge": True,
     "squash_merge_commit_title": "PR_TITLE",
     "squash_merge_commit_message": "PR_BODY",
 }
