@@ -16,7 +16,9 @@ installs deps (brew or linux pkg mgr), oh-my-zsh, symlinks into `$HOME`, lazy.nv
 
 Codex uses repo-managed `codex/AGENTS.md`; local config is seeded once from
 `codex/config.example.toml`, and the installer merges the tmux AI-state lifecycle
-hooks from `codex/ai-state-hooks.json` into `~/.codex/hooks.json`.
+hooks from `codex/ai-state-hooks.json` into `~/.codex/hooks.json`. Custom pets in
+`codex/pets/` are linked into `~/.codex/pets/`; Piggy comes from
+[codex-pet.com](https://www.codex-pet.com/pets/piggy).
 
 Personal agent skills live in `skills/` and are linked into Codex and Claude Code by the installer.
 
