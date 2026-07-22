@@ -1,5 +1,7 @@
 {
   "id": "piggy",
   "displayName": "Piggy",
-  "description": ""
+  "description": "A cheerful pink pixel-art pig.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
 }
