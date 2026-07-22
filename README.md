@@ -29,13 +29,10 @@ python3 install.py --cleanup --dry-run
 
 doesn't uninstall packages or delete your backups.
 
-## hacking this repo
+## contributing
 
-```sh
-git config core.hooksPath .githooks
-```
-
-pre-push runs `install.py --verify-idempotent`. skip once: `SKIP_DOTFILES_PREPUSH=1 git push`
+Make changes on a branch and open a pull request into `master`. GitHub CI runs
+the installer, tmux, shell, and agent-skill checks; local checks are optional.
 
 ## tmux cheatsheet
 

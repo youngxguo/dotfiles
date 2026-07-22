@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: check out code
+        uses: actions/checkout@v4
+
+      - name: install test tools
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck tmux zsh
+
+      - name: validate installer
+        run: |
+          python3 -m py_compile install.py
+          python3 install.py --verify-idempotent
+
+      - name: lint shell scripts
+        run: |
+          shellcheck tmux/.tmux.conf 2>/dev/null || true
+          shellcheck tmux/.tmux-*.sh tests/*.sh
+
+      - name: test tmux scripts
+        run: |
+          if grep -E 'send-keys|capture-pane|gt status|git status|shell-timeout|wait_for_shell|printf .+__tmux_setup_ready_|run_tmux .*(nvim|vim)' tmux/.tmux-setup-sessions.sh; then
+            echo "tmux setup helper should only create sessions/windows, not launch apps or probe panes." >&2
+            exit 1
+          fi
+
+          for test in tests/*.test.sh; do
+            echo "running $test"
+            bash "$test"
+          done
+
+      - name: validate skill metadata
+        run: |
+          ruby <<'RUBY'
+          require "psych"
+
+          skills = Dir.glob("skills/*/SKILL.md").sort
+          abort "no skills found" if skills.empty?
+
+          skills.each do |path|
+            contents = File.read(path)
+            frontmatter = contents.match(/\A---\n(.*?)\n---\n/m)
+            abort "missing frontmatter: #{path}" unless frontmatter
+
+            metadata = Psych.safe_load(frontmatter[1])
+            directory = File.basename(File.dirname(path))
+            abort "skill name does not match directory: #{path}" unless metadata["name"] == directory
+            abort "missing skill description: #{path}" unless metadata["description"].is_a?(String) && !metadata["description"].empty?
+
+            agent = File.join(File.dirname(path), "agents", "openai.yaml")
+            abort "missing agent metadata: #{path}" unless File.file?(agent)
+            Psych.safe_load(File.read(agent))
+            puts "validated #{path}"
+          end
+          RUBY
+
+      - name: check Skills CLI discovery
+        env:
+          DISABLE_TELEMETRY: "1"
+        run: npx --yes skills add . --list
