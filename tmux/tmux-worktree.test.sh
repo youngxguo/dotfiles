@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Tests for .tmux-worktree.sh. Uses a dedicated tmux socket and throwaway git
 # repos so it never touches your real sessions or worktrees. Run directly:
-#   bash tests/tmux-worktree.test.sh
+#   bash tmux/tmux-worktree.test.sh
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-script="$here/../tmux/.tmux-worktree.sh"
+script="$here/.tmux-worktree.sh"
 
 SOCKET="worktree_test_$$"
 export TMUX_SETUP_SOCKET="$SOCKET"

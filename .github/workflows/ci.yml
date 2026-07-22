@@ -35,10 +35,10 @@ jobs:
       - name: validate github settings
         run: |
           python3 -m py_compile github/repository_settings.py
-          python3 -m unittest discover --start-directory tests --pattern 'test_*.py'
+          python3 -m unittest github/repository_settings_test.py
 
       - name: lint shell scripts
-        run: shellcheck --severity=error tmux/.tmux-*.sh tests/*.sh
+        run: shellcheck --severity=error tmux/.tmux-*.sh tmux/*.test.sh
 
       - name: test tmux scripts
         run: |
@@ -47,7 +47,7 @@ jobs:
             exit 1
           fi
 
-          for test in tests/*.test.sh; do
+          for test in tmux/*.test.sh; do
             echo "running $test"
             bash "$test"
           done

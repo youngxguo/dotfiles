@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import call, patch
 
 
-SCRIPT = Path(__file__).parents[1] / "github" / "repository_settings.py"
+SCRIPT = Path(__file__).with_name("repository_settings.py")
 SPEC = importlib.util.spec_from_file_location("repository_settings", SCRIPT)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"could not load {SCRIPT}")

@@ -3,12 +3,12 @@
 # the rail must stay a fixed-width, full-height left column while the remaining
 # work panes are spread evenly. Runs on a dedicated tmux socket via a PATH shim,
 # so the unmodified script drives the throwaway server. Run directly:
-#   bash tests/tmux-sidebar.test.sh
+#   bash tmux/tmux-sidebar.test.sh
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-script="$here/../tmux/.tmux-sidebar.sh"
-ai_script="$here/../tmux/.tmux-ai-state.sh"
+script="$here/.tmux-sidebar.sh"
+ai_script="$here/.tmux-ai-state.sh"
 real_tmux="$(command -v tmux)"
 
 WIDTH=26
