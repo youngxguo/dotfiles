@@ -32,6 +32,11 @@ jobs:
           python3 -m py_compile install.py
           python3 install.py --verify-idempotent
 
+      - name: validate github settings
+        run: |
+          python3 -m py_compile github/repository_settings.py
+          python3 -m unittest github/repository_settings_test.py
+
       - name: lint shell scripts
         run: shellcheck --severity=error tmux/.tmux-*.sh tests/*.sh
 
