@@ -1,0 +1,4 @@
+interface:
+  display_name: "create github issue"
+  short_description: "create focused github issues"
+  default_prompt: "use $create-github-issue to format this bug report or feature request."

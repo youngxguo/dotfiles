@@ -18,6 +18,8 @@ Codex uses repo-managed `codex/AGENTS.md`; local config is seeded once from
 `codex/config.example.toml`, and the installer merges the tmux AI-state lifecycle
 hooks from `codex/ai-state-hooks.json` into `~/.codex/hooks.json`.
 
+Personal agent skills live in `skills/` and are linked into Codex and Claude Code by the installer.
+
 ## cleanup
 
 ```sh
@@ -27,13 +29,10 @@ python3 install.py --cleanup --dry-run
 
 doesn't uninstall packages or delete your backups.
 
-## hacking this repo
+## contributing
 
-```sh
-git config core.hooksPath .githooks
-```
-
-pre-push runs `install.py --verify-idempotent`. skip once: `SKIP_DOTFILES_PREPUSH=1 git push`
+Make changes on a branch and open a pull request into `master`. GitHub CI runs
+the installer, tmux, shell, and agent-skill checks; local checks are optional.
 
 ## tmux cheatsheet
 
@@ -54,5 +53,3 @@ prefix: **ctrl-space** (not ctrl-b)
 | cmd-`1`–`9` | jump to session by sidebar number |
 
 sidebar stuck? `~/.tmux-sidebar.sh reset-all`
-
-commit message notes for agents live in `codex/COMMIT_RULES.md`
