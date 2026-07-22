@@ -376,6 +376,12 @@ def managed_links():
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
 
+    pets_dir = REPO_ROOT / "codex/pets"
+    if pets_dir.is_dir():
+        for pet_dir in sorted(pets_dir.iterdir()):
+            if (pet_dir / "pet.json").is_file() and (pet_dir / "spritesheet.webp").is_file():
+                links.append(("codex-pets", pet_dir, HOME / ".codex/pets" / pet_dir.name))
+
     skills_dir = REPO_ROOT / "skills"
     if skills_dir.is_dir():
         for skill_dir in sorted(skills_dir.iterdir()):
@@ -676,6 +682,11 @@ def install_codex():
 
     ensure_codex_local_config()
     ensure_codex_hooks()
+
+    pet_links = links_for("codex-pets")
+    if pet_links:
+        print("applying codex pets")
+        apply_links(pet_links)
 
 
 def install_neovim():
