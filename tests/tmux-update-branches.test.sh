@@ -4,11 +4,11 @@
 # single-session form the focus / session-change hooks use). Runs on a dedicated
 # tmux socket via a PATH shim — the script resolves tmux through PATH, so the shim
 # drives the whole run onto a throwaway server. Run directly:
-#   bash tmux/tmux-update-branches.test.sh
+#   bash tests/tmux-update-branches.test.sh
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-script="$here/.tmux-update-branches.sh"
+script="$here/../tmux/.tmux-update-branches.sh"
 real_tmux="$(command -v tmux)"
 
 work="$(mktemp -d)"

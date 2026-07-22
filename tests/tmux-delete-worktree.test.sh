@@ -3,7 +3,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-script="$here/.tmux-delete-worktree.sh"
+script="$here/../tmux/.tmux-delete-worktree.sh"
 
 SOCKET="delete_worktree_test_$$"
 export TMUX_SETUP_SOCKET="$SOCKET"
