@@ -16,17 +16,8 @@ REPOSITORY_SETTINGS: dict[str, object] = {
     "squash_merge_commit_message": "PR_BODY",
 }
 
-# GitHub requires each status check to be named explicitly in a ruleset.
-REQUIRED_STATUS_CHECKS = {
-    "youngxguo/dotfiles": ("validate",),
-    "youngxguo/yxgui": (
-        "Quality Checks",
-        "Vercel",
-        "Vercel Preview Comments",
-    ),
-}
-
 RULESET_NAME = "default branch"
+MANAGED_RULE_TYPES = {"deletion", "non_fast_forward", "pull_request"}
 BRANCH_RULES: list[dict[str, object]] = [
     {"type": "deletion"},
     {"type": "non_fast_forward"},
@@ -45,12 +36,17 @@ BRANCH_RULES: list[dict[str, object]] = [
 ]
 
 
-def ruleset_for(repository: str) -> dict[str, object]:
-    required_checks = REQUIRED_STATUS_CHECKS.get(repository)
-    if required_checks is None:
-        raise RuntimeError(
-            f"add {repository}'s checks to REQUIRED_STATUS_CHECKS before syncing"
-        )
+def ruleset_for(existing_ruleset: dict[str, object] | None) -> dict[str, object]:
+    # Preserve repository-specific rules such as required status checks.
+    preserved_rules: list[dict[str, object]] = []
+    if existing_ruleset is not None:
+        existing_rules = existing_ruleset.get("rules")
+        if not isinstance(existing_rules, list):
+            raise RuntimeError("GitHub returned an invalid ruleset rule list")
+        for item in cast(list[object], existing_rules):
+            rule = object_mapping(item, "ruleset rule")
+            if rule.get("type") not in MANAGED_RULE_TYPES:
+                preserved_rules.append(rule)
 
     return {
         "name": RULESET_NAME,
@@ -65,16 +61,7 @@ def ruleset_for(repository: str) -> dict[str, object]:
         },
         "rules": [
             *BRANCH_RULES,
-            {
-                "type": "required_status_checks",
-                "parameters": {
-                    "do_not_enforce_on_create": False,
-                    "required_status_checks": [
-                        {"context": check} for check in required_checks
-                    ],
-                    "strict_required_status_checks_policy": True,
-                },
-            },
+            *preserved_rules,
         ],
     }
 
@@ -111,12 +98,14 @@ def targets_default_branch(ruleset: dict[str, object]) -> bool:
     return isinstance(included_refs, list) and "~DEFAULT_BRANCH" in included_refs
 
 
-def default_branch_ruleset_id(repository: str) -> int | None:
+def default_branch_ruleset(
+    repository: str,
+) -> tuple[int, dict[str, object]] | None:
     response = read_github_api(f"repos/{repository}/rulesets")
     if not isinstance(response, list):
         raise RuntimeError("GitHub returned an invalid ruleset list")
 
-    matching_rulesets: list[tuple[int, str]] = []
+    matching_rulesets: list[tuple[int, str, dict[str, object]]] = []
     for item in cast(list[object], response):
         summary = object_mapping(item, "ruleset summary")
         ruleset_id = summary.get("id")
@@ -134,16 +123,18 @@ def default_branch_ruleset_id(repository: str) -> int | None:
         if targets_default_branch(ruleset):
             name = ruleset.get("name")
             matching_rulesets.append(
-                (ruleset_id, name if isinstance(name, str) else "")
+                (ruleset_id, name if isinstance(name, str) else "", ruleset)
             )
 
     managed_rulesets = [
-        ruleset_id for ruleset_id, name in matching_rulesets if name == RULESET_NAME
+        ruleset for ruleset in matching_rulesets if ruleset[1] == RULESET_NAME
     ]
     if len(managed_rulesets) == 1:
-        return managed_rulesets[0]
+        ruleset_id, _, ruleset = managed_rulesets[0]
+        return ruleset_id, ruleset
     if len(matching_rulesets) == 1:
-        return matching_rulesets[0][0]
+        ruleset_id, _, ruleset = matching_rulesets[0]
+        return ruleset_id, ruleset
     if matching_rulesets:
         raise RuntimeError(
             f"{repository} has multiple default-branch rulesets; refusing to choose one"
@@ -152,14 +143,18 @@ def default_branch_ruleset_id(repository: str) -> int | None:
 
 
 def sync_repository(repository: str) -> None:
-    ruleset = ruleset_for(repository)
     write_github_api("PATCH", f"repos/{repository}", REPOSITORY_SETTINGS)
 
-    ruleset_id = default_branch_ruleset_id(repository)
-    if ruleset_id is None:
-        write_github_api("POST", f"repos/{repository}/rulesets", ruleset)
+    existing_ruleset = default_branch_ruleset(repository)
+    if existing_ruleset is None:
+        write_github_api("POST", f"repos/{repository}/rulesets", ruleset_for(None))
     else:
-        write_github_api("PUT", f"repos/{repository}/rulesets/{ruleset_id}", ruleset)
+        ruleset_id, ruleset = existing_ruleset
+        write_github_api(
+            "PUT",
+            f"repos/{repository}/rulesets/{ruleset_id}",
+            ruleset_for(ruleset),
+        )
 
     print(f"{repository}: repository settings and ruleset synced")
 
