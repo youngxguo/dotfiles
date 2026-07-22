@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: install test tools
         run: sudo apt-get update && sudo apt-get install --yes shellcheck tmux zsh
@@ -33,9 +33,7 @@ jobs:
           python3 install.py --verify-idempotent
 
       - name: lint shell scripts
-        run: |
-          shellcheck tmux/.tmux.conf 2>/dev/null || true
-          shellcheck tmux/.tmux-*.sh tests/*.sh
+        run: shellcheck --severity=error tmux/.tmux-*.sh tests/*.sh
 
       - name: test tmux scripts
         run: |
