@@ -343,6 +343,7 @@ def managed_links():
         ("zsh", REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc"),
         ("zsh", REPO_ROOT / "starship/starship.toml", HOME / ".config/starship.toml"),
         ("ghostty", REPO_ROOT / "ghostty/config", HOME / ".config/ghostty/config"),
+        ("herdr", REPO_ROOT / "herdr/config.toml", HOME / ".config/herdr/config.toml"),
     ]
 
     shader_dir = REPO_ROOT / "ghostty/shaders"
@@ -508,6 +509,11 @@ def install_zsh_stack():
 def install_ghostty():
     print("applying ghostty config")
     apply_links(links_for("ghostty"))
+
+
+def install_herdr():
+    print("applying herdr config")
+    apply_links(links_for("herdr"))
 
 
 def install_tmux():
@@ -722,6 +728,7 @@ def run_install_flow():
     install_homebrew()
     install_zsh_stack()
     install_ghostty()
+    install_herdr()
     install_tmux()
     install_btop()
     install_vscode()

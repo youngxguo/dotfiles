@@ -1,6 +1,6 @@
 # dotfiles
 
-my mac/linux configs — zsh, tmux, neovim, ghostty, vscode, btop, plus shared claude/codex instructions.
+my mac/linux configs — zsh, tmux, herdr, neovim, ghostty, vscode, btop, plus shared claude/codex instructions.
 
 ## setup
 
@@ -55,3 +55,16 @@ prefix: **ctrl-space** (not ctrl-b)
 | cmd-`1`–`9` | jump to session by sidebar number |
 
 sidebar stuck? `~/.tmux-sidebar.sh reset-all`
+
+## herdr cheatsheet
+
+Herdr workspaces replace tmux sessions; tabs replace tmux windows. The prefix
+and main navigation stay the same:
+
+| key | what |
+|-----|------|
+| `c` | new tab in the current directory |
+| `C` | new workspace (asks name) |
+| `s` | workspace picker |
+| shift-left / shift-right | previous / next tab |
+| cmd-`1`–`9` | jump to workspace by sidebar number |

@@ -1,0 +1,22 @@
+# Match the tmux hierarchy: workspaces are sessions and tabs are windows.
+[terminal]
+new_cwd = "follow"
+
+[keys]
+prefix = "ctrl+space"
+
+# Session/workspace controls.
+settings = ""
+workspace_picker = "prefix+s"
+new_workspace = "prefix+shift+c"
+switch_workspace = "cmd+1..9"
+
+# Window/tab controls.
+new_tab = "prefix+c"
+previous_tab = "shift+left"
+next_tab = "shift+right"
+
+[ui]
+prompt_new_tab_name = false
+prompt_new_workspace_name = true
+agent_panel_sort = "spaces"
