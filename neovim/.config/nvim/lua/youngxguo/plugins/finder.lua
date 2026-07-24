@@ -32,7 +32,7 @@ return {
   },
   opts = {
     "telescope",
-    ui_select = true,
+    ui_select = {},
     defaults = {
       formatter = "path.dirname_first",
     },
