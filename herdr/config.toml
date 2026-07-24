@@ -16,6 +16,11 @@ new_tab = "prefix+c"
 previous_tab = "shift+left"
 next_tab = "shift+right"
 
+# Pane splits match tmux: a vertical divider opens right; a horizontal divider
+# opens down.
+split_vertical = ["prefix+backslash", "prefix+percent"]
+split_horizontal = ["prefix+minus", "prefix+double_quote"]
+
 [ui]
 prompt_new_tab_name = false
 prompt_new_workspace_name = true

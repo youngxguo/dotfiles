@@ -67,4 +67,6 @@ and main navigation stay the same:
 | `C` | new workspace (asks name) |
 | `s` | workspace picker |
 | shift-left / shift-right | previous / next tab |
+| `\` or `%` | split pane right |
+| `-` or `"` | split pane down |
 | cmd-`1`–`9` | jump to workspace by sidebar number |
