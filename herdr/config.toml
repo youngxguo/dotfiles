@@ -21,6 +21,10 @@ next_tab = "shift+right"
 # opens down.
 split_vertical = ["prefix+backslash", "prefix+percent"]
 split_horizontal = ["prefix+minus", "prefix+double_quote"]
+focus_pane_left = ["prefix+h", "ctrl+h"]
+focus_pane_down = ["prefix+j", "ctrl+j"]
+focus_pane_up = ["prefix+k", "ctrl+k"]
+focus_pane_right = ["prefix+l", "ctrl+l"]
 
 [ui]
 prompt_new_tab_name = false

@@ -70,4 +70,5 @@ and main navigation stay the same:
 | shift-left / shift-right | previous / next tab |
 | `\` or `%` | split pane right |
 | `-` or `"` | split pane down |
+| ctrl-`h`/`j`/`k`/`l` | focus split left / down / up / right |
 | cmd-`1`–`9` | jump to workspace by sidebar number |
