@@ -64,6 +64,7 @@ and main navigation stay the same:
 | key | what |
 |-----|------|
 | `c` | new tab in the current directory |
+| `,` | rename current tab |
 | `C` | new workspace (asks name) |
 | `s` | workspace picker |
 | shift-left / shift-right | previous / next tab |

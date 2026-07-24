@@ -13,6 +13,7 @@ switch_workspace = "cmd+1..9"
 
 # Window/tab controls.
 new_tab = "prefix+c"
+rename_tab = "prefix+comma"
 previous_tab = "shift+left"
 next_tab = "shift+right"
 
