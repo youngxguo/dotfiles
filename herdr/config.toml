@@ -29,4 +29,5 @@ focus_pane_right = ["prefix+l", "ctrl+l"]
 [ui]
 prompt_new_tab_name = false
 prompt_new_workspace_name = true
+pane_gaps = false
 agent_panel_sort = "spaces"
