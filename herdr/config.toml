@@ -1,3 +1,5 @@
+onboarding = false
+
 # Match the tmux hierarchy: workspaces are sessions and tabs are windows.
 [terminal]
 new_cwd = "follow"
