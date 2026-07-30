@@ -75,24 +75,6 @@ return {
         lsp_format = "never",
       },
     },
-    config = function(_, opts)
-      require("conform").setup(opts)
-
-      -- Run ESLint fix-all on save via the ESLint LSP (like VSCode's
-      -- source.fixAll.eslint). Fast because the ESLint LSP keeps the TS project
-      -- in memory. Dormant unless an eslint client is attached.
-      vim.api.nvim_create_autocmd("BufWritePre", {
-        callback = function(args)
-          local clients = vim.lsp.get_clients({ bufnr = args.buf, name = "eslint" })
-          if #clients > 0 then
-            vim.lsp.buf.code_action({
-              context = { only = { "source.fixAll.eslint" }, diagnostics = {} },
-              apply = true,
-            })
-          end
-        end,
-      })
-    end,
   },
 
   {
