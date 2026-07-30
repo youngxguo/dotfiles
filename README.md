@@ -59,7 +59,7 @@ and main navigation stay the same:
 | shift-left / shift-right | — | previous / next tab |
 | `\` or `%` | — | split pane right |
 | `-` or `"` | — | split pane down |
-| ctrl-`h`/`j`/`k`/`l` | — | focus split left / down / up / right |
+| ctrl-`h`/`j`/`k`/`l` | — | focus Neovim or Herdr split left / down / up / right |
 | cmd-`1`–`9` | jump to session by sidebar number | jump to workspace by sidebar number |
 
 tmux sidebar stuck? `~/.tmux-sidebar.sh reset-all`
