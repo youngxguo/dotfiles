@@ -21,7 +21,6 @@
     "workbench.activityBar.location": "top",
     "workbench.colorTheme": "Solarized Dark",
     "workbench.editor.revealIfOpen": true,
-    "workbench.iconTheme": "vscode-icons",
 
     // Terminal settings
     "terminal.integrated.tabStopWidth": 2,
@@ -126,37 +125,18 @@
       "**/node_modules/*/**": true
     },
 
-    // CMake settings
-    "cmake.showOptionsMovedNotification": false,
-    "cmake.pinnedCommands": [
-      "workbench.action.tasks.configureTaskRunner",
-      "workbench.action.tasks.runTask"
-    ],
-
     // Python settings
     "python.languageServer": "Pylance",
     "python.analysis.exclude": [
       "**/bazel-*"
     ],
-    "[python]": {
-      "editor.defaultFormatter": "charliermarsh.ruff",
-      "editor.formatOnSave": true,
-      "editor.codeActionsOnSave": {
-        "source.fixAll.ruff": "explicit",
-        "source.organizeImports.ruff": "explicit"
-      }
-    },
 
     // Miscellaneous settings
     "window.zoomLevel": 1,
     "window.customTitleBarVisibility": "auto",
     "window.commandCenter": false,
-    "vsicons.dontShowNewVersionMessage": true,
-    "cSpell.diagnosticLevel": "Hint",
     "chat.editing.alwaysSaveWithGeneratedChanges": true,
     "diffEditor.ignoreTrimWhitespace": true,
     "references.preferredLocation": "view",
-    "chat.editing.confirmEditRequestRetry": false,
-    // Optional, machine-local custom CSS import.
-    "vscode_custom_css.imports": [],
+    "chat.editing.confirmEditRequestRetry": false
   }
