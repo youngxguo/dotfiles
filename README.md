@@ -47,8 +47,8 @@ and main navigation stay the same:
 |-----|------|-------|
 | `c` | new window (current dir) | new tab in the current directory |
 | `,` | — | rename current tab |
-| `C` | new session (asks name) | new workspace (asks name) |
-| `W` | new git worktree + repo-prefixed Codex / Neovim session | — |
+| `C` | new session (asks name) | — |
+| `W` | new git worktree + repo-prefixed Codex / Neovim session | new git worktree + workspace (asks branch) |
 | `D` | delete current worktree session + local branch (confirm) | — |
 | `t` | add agents / vim windows in current session | — |
 | `X` | kill session (confirm) | — |
