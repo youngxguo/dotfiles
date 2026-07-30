@@ -1,0 +1,56 @@
+onboarding = false
+
+# Match the tmux hierarchy: workspaces are sessions and tabs are windows.
+[terminal]
+new_cwd = "follow"
+
+[keys]
+prefix = "ctrl+space"
+
+# Session/workspace controls.
+settings = ""
+workspace_picker = "prefix+s"
+new_workspace = "prefix+shift+c"
+switch_workspace = "cmd+1..9"
+
+# Window/tab controls.
+new_tab = "prefix+c"
+rename_tab = "prefix+comma"
+previous_tab = "shift+left"
+next_tab = "shift+right"
+
+# Pane splits match tmux: a vertical divider opens right; a horizontal divider
+# opens down.
+split_vertical = ["prefix+backslash", "prefix+percent"]
+split_horizontal = ["prefix+minus", "prefix+double_quote"]
+# Prefix navigation remains available even if a plugin action is unavailable.
+focus_pane_left = "prefix+h"
+focus_pane_down = "prefix+j"
+focus_pane_up = "prefix+k"
+focus_pane_right = "prefix+l"
+
+[[keys.command]]
+key = "ctrl+h"
+type = "plugin_action"
+command = "herdr-splits.nav-left"
+
+[[keys.command]]
+key = "ctrl+j"
+type = "plugin_action"
+command = "herdr-splits.nav-down"
+
+[[keys.command]]
+key = "ctrl+k"
+type = "plugin_action"
+command = "herdr-splits.nav-up"
+
+[[keys.command]]
+key = "ctrl+l"
+type = "plugin_action"
+command = "herdr-splits.nav-right"
+
+[ui]
+prompt_new_tab_name = true
+prompt_new_workspace_name = true
+pane_gaps = false
+agent_panel_sort = "priority"
