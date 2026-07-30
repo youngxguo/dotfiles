@@ -71,6 +71,7 @@ alias gco="git checkout"
 alias gcm='git switch "$(git show-ref --verify --quiet refs/heads/main && printf main || printf master)"'
 alias gl="git log"
 alias gp="git push"
+alias gpu="git pull"
 alias gcomm="git commit -m"
 alias gcom="git commit"
 alias gcoma="git commit --amend"
