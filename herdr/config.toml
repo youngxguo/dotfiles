@@ -10,7 +10,7 @@ prefix = "ctrl+space"
 # Session/workspace controls.
 settings = ""
 workspace_picker = "prefix+s"
-new_workspace = ""
+new_workspace = "prefix+shift+c"
 new_worktree = "prefix+shift+w"
 rename_workspace = ""
 switch_workspace = "cmd+1..9"
