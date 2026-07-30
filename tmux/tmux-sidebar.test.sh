@@ -433,8 +433,7 @@ check "ai-state: clear unsets the pane @ai_state" "$?"
 [ -z "$(t show-options -qv -t winsync @session_ai_idle)" ]
 check "ai-state: clear re-syncs the session mirror off" "$?"
 
-# Codex may report the same completed turn through both its Stop hook and the
-# legacy `notify` callback. Only the thinking -> idle transition should ping.
+# Repeated idle signals should only notify for the thinking -> idle transition.
 notify_log="$work/idle-notifications"
 TMUX_PANE="$syncwork" bash "$ai_script" thinking
 TMUX_TEST_CLIENT_TTY=/dev/fd/9 TMUX_PANE="$syncwork" bash "$ai_script" idle 9>>"$notify_log"
