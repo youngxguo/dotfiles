@@ -118,20 +118,4 @@ if vim.fn.executable('basedpyright-langserver') == 1 then
   table.insert(enabled_servers, 'basedpyright')
 end
 
--- Keep ESLint LSP disabled by default to avoid extra memory pressure in large
--- worktrees. Run linting manually from the CLI instead.
--- if vim.fn.executable('vscode-eslint-language-server') == 1 then
---   vim.lsp.config('eslint', {
---     cmd = { 'vscode-eslint-language-server', '--stdio' },
---     filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue', 'svelte', 'astro' },
---     settings = {
---       run = 'onType',
---       validate = 'on',
---       nodePath = vim.fn.exepath('node'),
---       workingDirectories = { mode = 'auto' }
---     },
---     cmd_env = { NODE_OPTIONS = '--max-old-space-size=8192' }
---   })
--- end
-
 vim.lsp.enable(enabled_servers)

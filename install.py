@@ -279,23 +279,6 @@ def install_homebrew_only_package(pkg):
     return install_package(pkg)
 
 
-def install_npm_global(package, binaries):
-    if any(command_exists(binary) for binary in binaries):
-        print(f"{package} already installed")
-        return True
-    if VERIFY_MODE:
-        print(f"verify mode: skipping npm global install for {package}")
-        return False
-    if not command_exists("npm"):
-        if command_exists("brew"):
-            install_package("node")
-    if not command_exists("npm"):
-        print(f"skipping {package}: npm is not available")
-        return False
-    run(["npm", "install", "-g", package])
-    return any(command_exists(binary) for binary in binaries)
-
-
 def clone_if_missing(repo_url, target_dir):
     target = Path(target_dir).expanduser()
     if VERIFY_MODE:
@@ -713,7 +696,6 @@ def install_neovim():
     install_homebrew_only_package("chafa")
     install_homebrew_only_package("viu")
     install_homebrew_only_package("mercurial")
-    install_npm_global("vscode-langservers-extracted", ("vscode-eslint-language-server",))
     ensure_fd_compat_shim()
     if not command_exists("nvim"):
         print("skipping neovim config: nvim is not installed")
