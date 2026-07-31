@@ -60,7 +60,6 @@ PACKAGE_BINARIES = {
     "tmux": ("tmux",),
     "direnv": ("direnv",),
     "fzf": ("fzf",),
-    "fd": ("fd",),
     "starship": ("starship",),
     "btop": ("btop",),
 }
