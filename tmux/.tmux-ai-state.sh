@@ -20,17 +20,12 @@
 #
 # A transition into `idle` also fires a desktop notification, so finishing a turn
 # pings you — but only for a session you're NOT currently watching. Repeated idle
-# signals are harmless: Codex can emit both a Stop hook and a legacy `notify`
-# callback for the same turn, and only the first one should ping.
+# signals are harmless; only the first one should ping.
 #
 # Every invocation also republishes the session's @git_branch from the agent
 # pane's directory, so a branch the agent checks out mid-turn reaches the sidebar:
 # the shell precmd hook that normally pushes it can't fire while an agent holds
 # the pane (see sync_branch).
-#
-# This replaces the old capture-pane poller entirely: agents the hooks can't reach
-# (e.g. one running an ssh hop past the host the tmux server lives on) simply show
-# no badge rather than being scraped.
 #
 # Subcommands (the target pane is always $TMUX_PANE):
 #   thinking   mark the pane busy   (set thinking)
