@@ -18,7 +18,14 @@ REPOSITORY_SETTINGS: dict[str, object] = {
 }
 
 RULESET_NAME = "default branch"
-MANAGED_RULE_TYPES = {"deletion", "non_fast_forward", "pull_request"}
+# Actions still run, but this shared policy does not make them merge
+# requirements.
+MANAGED_RULE_TYPES = {
+    "deletion",
+    "non_fast_forward",
+    "pull_request",
+    "required_status_checks",
+}
 BRANCH_RULES: list[dict[str, object]] = [
     {"type": "deletion"},
     {"type": "non_fast_forward"},
@@ -38,7 +45,7 @@ BRANCH_RULES: list[dict[str, object]] = [
 
 
 def ruleset_for(existing_ruleset: dict[str, object] | None) -> dict[str, object]:
-    # Preserve repository-specific rules such as required status checks.
+    # Preserve repository-specific rules this shared policy does not manage.
     preserved_rules: list[dict[str, object]] = []
     if existing_ruleset is not None:
         existing_rules = existing_ruleset.get("rules")
