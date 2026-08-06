@@ -11,7 +11,16 @@ return {
       -- NOTE: the config table must go to nvim-treesitter.configs; the top-level
       -- require("nvim-treesitter").setup() takes no arguments and silently drops it.
       require("nvim-treesitter.configs").setup({
-        ensure_installed = { "javascript", "typescript", "tsx", "lua", "c", "cpp" },
+        ensure_installed = {
+          "javascript",
+          "typescript",
+          "tsx",
+          "lua",
+          "c",
+          "cpp",
+          "markdown",
+          "markdown_inline",
+        },
         auto_install = true,
         highlight = { enable = true },
         incremental_selection = {
