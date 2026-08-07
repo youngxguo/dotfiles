@@ -35,6 +35,8 @@ doesn't uninstall packages or delete your backups.
 
 Make changes on a branch and open a pull request into `master`. GitHub CI runs
 the installer, tmux, shell, and agent-skill checks; local checks are optional.
+Treat repository check failures as blocking. Merge without a green check only
+when GitHub explicitly reports an Actions infrastructure failure.
 
 ## tmux / herdr cheatsheet
 
