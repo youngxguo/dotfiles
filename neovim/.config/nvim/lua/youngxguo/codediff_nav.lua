@@ -81,31 +81,51 @@ local function find_codediff_tab()
   return nil
 end
 
-local function activate_existing(layout)
-  local current = vim.api.nvim_get_current_tabpage()
-  local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
-
-  -- Already sitting in the CodeDiff tab: re-run :CodeDiff, which toggles the
-  -- session closed (its normal in-session behaviour). No fresh git status.
-  if ok and lifecycle.get_session(current) ~= nil then
-    vim.cmd("CodeDiff --" .. layout)
-    return true
+local function session_has_revision(lifecycle, tabpage)
+  local explorer = lifecycle.get_explorer(tabpage)
+  if explorer then
+    return explorer.base_revision ~= nil
   end
 
-  -- A CodeDiff tab is open in another tab: focus it instead of spawning a
-  -- second one. Repeated diff shortcuts from a file tab otherwise pile up
-  -- duplicate diff tabs.
+  local context = lifecycle.get_git_context(tabpage)
+  return context and context.original_revision ~= nil or false
+end
+
+local function activate_existing(layout, wants_revision)
+  local current = vim.api.nvim_get_current_tabpage()
+  local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
+  if not ok then
+    return false
+  end
+
+  -- Toggle a matching session when already sitting in its tab. If the shortcut
+  -- requests the other diff kind, close this session and let the caller replace
+  -- it instead.
+  if lifecycle.get_session(current) ~= nil then
+    if session_has_revision(lifecycle, current) == wants_revision then
+      vim.cmd("CodeDiff --" .. layout)
+      return true
+    end
+    return not lifecycle.close(current)
+  end
+
+  -- A matching CodeDiff tab in another tab should be focused instead of
+  -- duplicated. Replace a different kind so <leader>gd and <leader>gD can
+  -- switch between the working-tree and trunk views.
   local existing = find_codediff_tab()
   if existing then
-    vim.api.nvim_set_current_tabpage(existing)
-    return true
+    if session_has_revision(lifecycle, existing) == wants_revision then
+      vim.api.nvim_set_current_tabpage(existing)
+      return true
+    end
+    return not lifecycle.close(existing)
   end
 
   return false
 end
 
 local function command(layout, revision)
-  if activate_existing(layout) then
+  if activate_existing(layout, revision ~= nil) then
     return
   end
 
@@ -179,7 +199,7 @@ end
 -- Show committed changes on the current branch since it diverged from trunk.
 function M.open_trunk_diff()
   local layout = apply()
-  if activate_existing(layout) then
+  if activate_existing(layout, true) then
     return
   end
 
