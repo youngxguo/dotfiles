@@ -37,6 +37,11 @@ jobs:
           python3 -m py_compile github/repository_settings.py
           python3 -m unittest github/repository_settings_test.py
 
+      - name: validate herdr worktree setup
+        run: |
+          python3 -m py_compile herdr/plugins/worktree-tabs/worktree_tabs.py
+          python3 -m unittest herdr/plugins/worktree-tabs/worktree_tabs_test.py
+
       - name: lint shell scripts
         run: shellcheck --severity=error tmux/.tmux-*.sh tmux/*.test.sh
 
