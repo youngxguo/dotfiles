@@ -313,13 +313,11 @@ def link_file(source_path, target_path):
 
 
 def managed_links():
-    """Single source of truth for every symlink this repo manages.
+    """Return every symlink managed by the setup flow.
 
-    Returns a list of (category, source, target) tuples. Both the setup flow
-    (via ``links_for``/``apply_links``) and ``cleanup_links`` iterate over this,
-    so the two can never drift. Dynamic categories (ghostty assets, tmux
-    scripts) are enumerated from whatever currently exists in the repo; targets
-    read the module-global ``HOME`` at call time so verify mode works.
+    Dynamic categories (ghostty assets, tmux scripts) are enumerated from
+    whatever currently exists in the repo; targets read the module-global
+    ``HOME`` at call time so verify mode works.
     """
     links = [
         ("zsh", REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc"),
@@ -770,38 +768,6 @@ def run_install_flow():
     print("Done")
 
 
-def cleanup_links(dry_run=False):
-    """Remove only the symlinks this repo created.
-
-    A target is removed only when it is a symlink that resolves into this repo,
-    so real user files (and symlinks pointing elsewhere) are left untouched.
-    Packages, cloned repos, and ``*.bak.*`` backups are not affected.
-    """
-    label = " (dry run)" if dry_run else ""
-    print(f"cleaning up repo-managed symlinks{label}")
-    removed = 0
-    skipped = 0
-    for _category, source, target in managed_links():
-        target = Path(target)
-        if target.is_symlink():
-            if target.resolve() == Path(source).resolve():
-                if dry_run:
-                    print(f"would remove link: {target}")
-                else:
-                    target.unlink()
-                    print(f"removed link: {target}")
-                removed += 1
-            else:
-                print(f"skipping {target}: symlink points outside repo -> {os.readlink(target)}")
-                skipped += 1
-        elif target.exists():
-            print(f"skipping {target}: real file, not a repo symlink")
-            skipped += 1
-
-    verb = "would remove" if dry_run else "removed"
-    print(f"cleanup done: {verb} {removed} link(s), skipped {skipped}")
-
-
 def snapshot_tree(root):
     snapshot = {}
     for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
@@ -909,16 +875,6 @@ def parse_args():
         action="store_true",
         help="Run Neovim checkhealth and fail if health reports errors.",
     )
-    parser.add_argument(
-        "--cleanup",
-        action="store_true",
-        help="Remove repo-managed symlinks from $HOME (packages and real files are left untouched).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="With --cleanup, print what would be removed without changing anything.",
-    )
     return parser.parse_args()
 
 
@@ -929,9 +885,6 @@ def main():
         return
     if args.verify_neovim_health:
         verify_neovim_health()
-        return
-    if args.cleanup:
-        cleanup_links(dry_run=args.dry_run)
         return
     run_install_flow()
 

@@ -26,15 +26,6 @@ Pi's global config lives in `pi/settings.json`. The installer copies it to
 
 Personal agent skills live in `skills/` and are linked into Codex and Claude Code by the installer.
 
-## cleanup
-
-```sh
-python3 install.py --cleanup          # remove repo symlinks only
-python3 install.py --cleanup --dry-run
-```
-
-doesn't uninstall packages or delete your backups.
-
 ## contributing
 
 Make changes on a branch and open a pull request into `master`. GitHub CI runs
