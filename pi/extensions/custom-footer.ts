@@ -11,6 +11,35 @@ import { hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui
 
 const BAR_WIDTH = 8;
 const WEEK_MINUTES = 7 * 24 * 60;
+const FOOTER_GAP = 2;
+
+function alignFooterSides(left: string, right: string, width: number): string {
+	if (width <= 0) return "";
+	if (!left) {
+		const renderedRight = truncateToWidth(right, width, "…");
+		return " ".repeat(Math.max(0, width - visibleWidth(renderedRight))) + renderedRight;
+	}
+	if (!right) return truncateToWidth(left, width, "…");
+	if (width <= FOOTER_GAP) return truncateToWidth(left, width, "…");
+
+	const leftWidth = visibleWidth(left);
+	const rightWidth = visibleWidth(right);
+	if (leftWidth + FOOTER_GAP + rightWidth <= width) {
+		return left + " ".repeat(width - leftWidth - rightWidth) + right;
+	}
+
+	const available = width - FOOTER_GAP;
+	let leftBudget = Math.min(leftWidth, Math.floor(available / 2));
+	const rightBudget = Math.min(rightWidth, available - leftBudget);
+	leftBudget = Math.min(leftWidth, available - rightBudget);
+
+	const renderedLeft = truncateToWidth(left, leftBudget, "…");
+	const renderedRight = truncateToWidth(right, rightBudget, "…");
+	const padding = " ".repeat(
+		Math.max(FOOTER_GAP, width - visibleWidth(renderedLeft) - visibleWidth(renderedRight)),
+	);
+	return truncateToWidth(renderedLeft + padding + renderedRight, width, "");
+}
 
 type RateLimitWindow = {
 	usedPercent: number;
@@ -192,7 +221,7 @@ export default function (pi: ExtensionAPI) {
 					const statuses = [...footerData.getExtensionStatuses().values()].join(theme.fg("dim", " · "));
 					const model = ctx.model?.id ?? "no-model";
 					const thinking = ctx.thinkingLevel === "off" ? "" : ` ${theme.fg("accent", `⚡ ${ctx.thinkingLevel}`)}`;
-					const left = [statuses, `${theme.fg("accent", `🧠 ${model}`)}${thinking}`].filter(Boolean).join("  ");
+					const modelText = `${theme.fg("accent", `🧠 ${model}`)}${thinking}`;
 
 					const usage = ctx.getContextUsage();
 					const percent = usage?.percent == null ? undefined : Math.max(0, Math.min(100, usage.percent));
@@ -209,16 +238,20 @@ export default function (pi: ExtensionAPI) {
 						const weeklyBar = theme.fg(weeklyColor, "█".repeat(weeklyFilled)) + theme.fg("dim", "░".repeat(BAR_WIDTH - weeklyFilled));
 						weekly = `📅 week ${weeklyBar} ${Math.round(weeklyRemaining)}% left`;
 					}
+					const usageText = [context, weekly]
+						.filter(Boolean)
+						.map((part) => theme.fg("dim", part))
+						.join("  ");
 
 					const branch = footerData.getGitBranch();
 					const pullRequest = openPullRequest
 						? `  ${hyperlink(`🔀 #${openPullRequest.number}`, openPullRequest.url)}`
 						: "";
-					const branchText = branch ? `🌿 ${branch}${pullRequest}` : "";
-					const right = [context, weekly, branchText].filter(Boolean).map((part) => theme.fg("dim", part)).join("  ");
+					const branchText = branch ? theme.fg("dim", `🌿 ${branch}${pullRequest}`) : "";
 
-					const padding = " ".repeat(Math.max(1, width - visibleWidth(left) - visibleWidth(right)));
-					return [truncateToWidth(left + padding + right, width)];
+					const left = [statuses, branchText].filter(Boolean).join("  ");
+					const right = [usageText, modelText].filter(Boolean).join("  ");
+					return [alignFooterSides(left, right, width)];
 				},
 			};
 		});
