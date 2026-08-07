@@ -359,6 +359,11 @@ def managed_links():
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
 
+    pi_extensions_dir = REPO_ROOT / "pi/extensions"
+    if pi_extensions_dir.is_dir():
+        for extension in sorted(pi_extensions_dir.glob("*.ts")):
+            links.append(("pi", extension, HOME / ".pi/agent/extensions" / extension.name))
+
     pets_dir = REPO_ROOT / "codex/pets"
     if pets_dir.is_dir():
         for pet_dir in sorted(pets_dir.iterdir()):
@@ -648,6 +653,7 @@ def copy_pi_settings():
 def install_pi():
     print("applying pi config")
     copy_pi_settings()
+    apply_links(links_for("pi"))
 
 
 def ensure_codex_local_config():
