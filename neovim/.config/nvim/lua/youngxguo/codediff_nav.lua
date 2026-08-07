@@ -148,43 +148,49 @@ function M.open_diff()
   command(layout)
 end
 
--- Show the committed diff for the PR associated with the current branch.
--- GitHub supplies the actual base branch; triple-dot syntax gives the same
--- merge-base comparison used by a PR's Files changed view.
-function M.open_pr_diff()
+local function git_ref_exists(dir, ref)
+  local result = vim.system({
+    "git", "-C", dir, "rev-parse", "--verify", "--quiet", ref .. "^{commit}",
+  }):wait()
+  return result.code == 0
+end
+
+-- Resolve the repository's locally known trunk branch. Prefer origin's default
+-- branch, then conventional remote-tracking and local branch names. This stays
+-- entirely local; users can fetch separately when they want a newer trunk tip.
+local function trunk_ref(dir)
+  local remote_head = vim.system({
+    "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD",
+  }, { text = true }):wait()
+  if remote_head.code == 0 then
+    local ref = vim.trim(remote_head.stdout or "")
+    if ref ~= "" and git_ref_exists(dir, ref) then
+      return ref
+    end
+  end
+
+  for _, ref in ipairs({ "origin/main", "origin/master", "main", "master" }) do
+    if git_ref_exists(dir, ref) then
+      return ref
+    end
+  end
+end
+
+-- Show committed changes on the current branch since it diverged from trunk.
+function M.open_trunk_diff()
   local layout = apply()
   if activate_existing(layout) then
     return
   end
 
-  if vim.fn.executable("gh") ~= 1 then
-    vim.notify("gh is required to find the current PR", vim.log.levels.ERROR)
+  local dir = probe_dir()
+  local base_ref = trunk_ref(dir)
+  if not base_ref then
+    vim.notify("Could not find a local trunk branch", vim.log.levels.ERROR)
     return
   end
 
-  local dir = probe_dir()
-  vim.system({ "gh", "pr", "view", "--json", "baseRefName", "--jq", ".baseRefName" }, {
-    cwd = dir,
-    text = true,
-  }, function(result)
-    vim.schedule(function()
-      local base = vim.trim(result.stdout or "")
-      if result.code ~= 0 or base == "" then
-        local err = vim.trim(result.stderr or "")
-        vim.notify(err ~= "" and err or "No PR found for the current branch", vim.log.levels.ERROR)
-        return
-      end
-
-      -- Prefer the remote-tracking branch so the comparison uses the fetched
-      -- base branch tip, but support repositories without an origin remote.
-      local remote_base = "origin/" .. base
-      local resolved = vim.system({
-        "git", "-C", dir, "rev-parse", "--verify", "--quiet", remote_base .. "^{commit}",
-      }):wait()
-      local base_ref = resolved.code == 0 and remote_base or base
-      command(layout, base_ref .. "...HEAD")
-    end)
-  end)
+  command(layout, base_ref .. "...HEAD")
 end
 
 return M
