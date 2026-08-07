@@ -81,7 +81,7 @@ local function find_codediff_tab()
   return nil
 end
 
-local function command(layout)
+local function activate_existing(layout)
   local current = vim.api.nvim_get_current_tabpage()
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
 
@@ -89,21 +89,46 @@ local function command(layout)
   -- session closed (its normal in-session behaviour). No fresh git status.
   if ok and lifecycle.get_session(current) ~= nil then
     vim.cmd("CodeDiff --" .. layout)
-    return
+    return true
   end
 
   -- A CodeDiff tab is open in another tab: focus it instead of spawning a
-  -- second one. Repeated <leader>gd from a file tab otherwise piles up
+  -- second one. Repeated diff shortcuts from a file tab otherwise pile up
   -- duplicate diff tabs.
   local existing = find_codediff_tab()
   if existing then
     vim.api.nvim_set_current_tabpage(existing)
+    return true
+  end
+
+  return false
+end
+
+local function command(layout, revision)
+  if activate_existing(layout) then
     return
   end
 
-  -- No CodeDiff tab yet: warm the git-status cache, then open a fresh one.
-  require("youngxguo.codediff_perf").request_full_status()
-  vim.cmd("CodeDiff --" .. layout)
+  -- The full status is only needed for the ordinary working-tree explorer.
+  if not revision then
+    require("youngxguo.codediff_perf").request_full_status()
+  end
+
+  local args = {}
+  if revision then
+    table.insert(args, revision)
+  end
+  table.insert(args, "--" .. layout)
+  vim.api.nvim_cmd({ cmd = "CodeDiff", args = args }, {})
+end
+
+local function probe_dir()
+  local current_file = vim.api.nvim_buf_get_name(0)
+  local buftype = vim.api.nvim_get_option_value("buftype", { buf = 0 })
+  if current_file ~= "" and buftype == "" then
+    return vim.fn.fnamemodify(current_file, ":p:h")
+  end
+  return vim.fn.getcwd()
 end
 
 vim.api.nvim_create_autocmd("User", {
@@ -121,6 +146,45 @@ vim.api.nvim_create_autocmd("User", {
 function M.open_diff()
   local layout = apply()
   command(layout)
+end
+
+-- Show the committed diff for the PR associated with the current branch.
+-- GitHub supplies the actual base branch; triple-dot syntax gives the same
+-- merge-base comparison used by a PR's Files changed view.
+function M.open_pr_diff()
+  local layout = apply()
+  if activate_existing(layout) then
+    return
+  end
+
+  if vim.fn.executable("gh") ~= 1 then
+    vim.notify("gh is required to find the current PR", vim.log.levels.ERROR)
+    return
+  end
+
+  local dir = probe_dir()
+  vim.system({ "gh", "pr", "view", "--json", "baseRefName", "--jq", ".baseRefName" }, {
+    cwd = dir,
+    text = true,
+  }, function(result)
+    vim.schedule(function()
+      local base = vim.trim(result.stdout or "")
+      if result.code ~= 0 or base == "" then
+        local err = vim.trim(result.stderr or "")
+        vim.notify(err ~= "" and err or "No PR found for the current branch", vim.log.levels.ERROR)
+        return
+      end
+
+      -- Prefer the remote-tracking branch so the comparison uses the fetched
+      -- base branch tip, but support repositories without an origin remote.
+      local remote_base = "origin/" .. base
+      local resolved = vim.system({
+        "git", "-C", dir, "rev-parse", "--verify", "--quiet", remote_base .. "^{commit}",
+      }):wait()
+      local base_ref = resolved.code == 0 and remote_base or base
+      command(layout, base_ref .. "...HEAD")
+    end)
+  end)
 end
 
 return M
