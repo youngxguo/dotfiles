@@ -16,6 +16,10 @@ new_worktree = "prefix+shift+w"
 rename_workspace = "prefix+$"
 switch_workspace = "cmd+1..9"
 
+# Vim-style workspace navigation inside the workspace picker.
+navigate_workspace_up = "k"
+navigate_workspace_down = "j"
+
 # Window/tab controls.
 new_tab = "prefix+c"
 rename_tab = "prefix+comma"
