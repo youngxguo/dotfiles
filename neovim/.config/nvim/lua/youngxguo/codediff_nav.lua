@@ -81,29 +81,74 @@ local function find_codediff_tab()
   return nil
 end
 
-local function command(layout)
+local function session_has_revision(lifecycle, tabpage)
+  local explorer = lifecycle.get_explorer(tabpage)
+  if explorer then
+    return explorer.base_revision ~= nil
+  end
+
+  local context = lifecycle.get_git_context(tabpage)
+  return context and context.original_revision ~= nil or false
+end
+
+local function activate_existing(layout, wants_revision)
   local current = vim.api.nvim_get_current_tabpage()
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
-
-  -- Already sitting in the CodeDiff tab: re-run :CodeDiff, which toggles the
-  -- session closed (its normal in-session behaviour). No fresh git status.
-  if ok and lifecycle.get_session(current) ~= nil then
-    vim.cmd("CodeDiff --" .. layout)
-    return
+  if not ok then
+    return false
   end
 
-  -- A CodeDiff tab is open in another tab: focus it instead of spawning a
-  -- second one. Repeated <leader>gd from a file tab otherwise piles up
-  -- duplicate diff tabs.
+  -- Toggle a matching session when already sitting in its tab. If the shortcut
+  -- requests the other diff kind, close this session and let the caller replace
+  -- it instead.
+  if lifecycle.get_session(current) ~= nil then
+    if session_has_revision(lifecycle, current) == wants_revision then
+      vim.cmd("CodeDiff --" .. layout)
+      return true
+    end
+    return not lifecycle.close(current)
+  end
+
+  -- A matching CodeDiff tab in another tab should be focused instead of
+  -- duplicated. Replace a different kind so <leader>gd and <leader>gD can
+  -- switch between the working-tree and trunk views.
   local existing = find_codediff_tab()
   if existing then
-    vim.api.nvim_set_current_tabpage(existing)
+    if session_has_revision(lifecycle, existing) == wants_revision then
+      vim.api.nvim_set_current_tabpage(existing)
+      return true
+    end
+    return not lifecycle.close(existing)
+  end
+
+  return false
+end
+
+local function command(layout, revision)
+  if activate_existing(layout, revision ~= nil) then
     return
   end
 
-  -- No CodeDiff tab yet: warm the git-status cache, then open a fresh one.
-  require("youngxguo.codediff_perf").request_full_status()
-  vim.cmd("CodeDiff --" .. layout)
+  -- The full status is only needed for the ordinary working-tree explorer.
+  if not revision then
+    require("youngxguo.codediff_perf").request_full_status()
+  end
+
+  local args = {}
+  if revision then
+    table.insert(args, revision)
+  end
+  table.insert(args, "--" .. layout)
+  vim.api.nvim_cmd({ cmd = "CodeDiff", args = args }, {})
+end
+
+local function probe_dir()
+  local current_file = vim.api.nvim_buf_get_name(0)
+  local buftype = vim.api.nvim_get_option_value("buftype", { buf = 0 })
+  if current_file ~= "" and buftype == "" then
+    return vim.fn.fnamemodify(current_file, ":p:h")
+  end
+  return vim.fn.getcwd()
 end
 
 vim.api.nvim_create_autocmd("User", {
@@ -121,6 +166,51 @@ vim.api.nvim_create_autocmd("User", {
 function M.open_diff()
   local layout = apply()
   command(layout)
+end
+
+local function git_ref_exists(dir, ref)
+  local result = vim.system({
+    "git", "-C", dir, "rev-parse", "--verify", "--quiet", ref .. "^{commit}",
+  }):wait()
+  return result.code == 0
+end
+
+-- Resolve the repository's locally known trunk branch. Prefer origin's default
+-- branch, then conventional remote-tracking and local branch names. This stays
+-- entirely local; users can fetch separately when they want a newer trunk tip.
+local function trunk_ref(dir)
+  local remote_head = vim.system({
+    "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD",
+  }, { text = true }):wait()
+  if remote_head.code == 0 then
+    local ref = vim.trim(remote_head.stdout or "")
+    if ref ~= "" and git_ref_exists(dir, ref) then
+      return ref
+    end
+  end
+
+  for _, ref in ipairs({ "origin/main", "origin/master", "main", "master" }) do
+    if git_ref_exists(dir, ref) then
+      return ref
+    end
+  end
+end
+
+-- Show committed changes on the current branch since it diverged from trunk.
+function M.open_trunk_diff()
+  local layout = apply()
+  if activate_existing(layout, true) then
+    return
+  end
+
+  local dir = probe_dir()
+  local base_ref = trunk_ref(dir)
+  if not base_ref then
+    vim.notify("Could not find a local trunk branch", vim.log.levels.ERROR)
+    return
+  end
+
+  command(layout, base_ref .. "...HEAD")
 end
 
 return M

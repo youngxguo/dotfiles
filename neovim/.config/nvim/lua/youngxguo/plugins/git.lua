@@ -106,6 +106,7 @@ return {
     cmd = "CodeDiff",
     keys = {
       { "<leader>gd", function() require("youngxguo.codediff_nav").open_diff() end, desc = "Git diff (CodeDiff)" },
+      { "<leader>gD", function() require("youngxguo.codediff_nav").open_trunk_diff() end, desc = "Git diff vs trunk (CodeDiff)" },
     },
     opts = {
       diff = {
