@@ -12,7 +12,8 @@ settings = ""
 workspace_picker = "prefix+s"
 new_workspace = "prefix+shift+c"
 new_worktree = "prefix+shift+w"
-rename_workspace = ""
+# Match tmux's prefix-$ rename-session binding.
+rename_workspace = "prefix+$"
 switch_workspace = "cmd+1..9"
 
 # Window/tab controls.
