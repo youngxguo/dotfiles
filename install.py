@@ -313,13 +313,11 @@ def link_file(source_path, target_path):
 
 
 def managed_links():
-    """Single source of truth for every symlink this repo manages.
+    """Return every symlink managed by the setup flow.
 
-    Returns a list of (category, source, target) tuples. Both the setup flow
-    (via ``links_for``/``apply_links``) and ``cleanup_links`` iterate over this,
-    so the two can never drift. Dynamic categories (ghostty assets, tmux
-    scripts) are enumerated from whatever currently exists in the repo; targets
-    read the module-global ``HOME`` at call time so verify mode works.
+    Dynamic categories (ghostty assets, tmux scripts) are enumerated from
+    whatever currently exists in the repo; targets read the module-global
+    ``HOME`` at call time so verify mode works.
     """
     links = [
         ("zsh", REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc"),
@@ -390,11 +388,11 @@ def links_for(category):
 
 
 def apply_links(links):
-    """Symlink each (source, target) whose source exists; return count applied."""
+    """Symlink each configured source to its target; return count applied."""
     applied = 0
     for source, target in links:
         if not Path(source).exists():
-            continue
+            raise FileNotFoundError(f"missing repo source: {source}")
         link_file(source, target)
         applied += 1
     return applied
@@ -482,19 +480,6 @@ def install_zsh_stack():
     print("applying zsh config")
     apply_links(links_for("zsh"))
 
-    if VERIFY_MODE:
-        print("verify mode: skipping chsh")
-        return
-
-    zsh_path = shutil.which("zsh")
-    target_shell = Path(zsh_path) if zsh_path else None
-    current_shell = os.environ.get("SHELL", "")
-    if target_shell and target_shell.exists() and current_shell != str(target_shell):
-        if os.environ.get("APPLY_LOGIN_SHELL", "0") == "1":
-            run(["chsh", "-s", str(target_shell)])
-        else:
-            print(f"skipping chsh (set APPLY_LOGIN_SHELL=1 to apply {target_shell})")
-
 
 def install_ghostty():
     print("applying ghostty config")
@@ -527,9 +512,6 @@ def install_vscode():
 def ensure_codex_hooks():
     """Merge the repo's agent-state hooks into ``~/.codex/hooks.json``."""
     fragment_path = REPO_ROOT / "codex/ai-state-hooks.json"
-    if not fragment_path.exists():
-        print("skipping codex ai-state hooks: no codex/ai-state-hooks.json present")
-        return
     wanted = json.loads(fragment_path.read_text(encoding="utf-8")).get("hooks", {})
     if not wanted:
         return
@@ -587,26 +569,17 @@ CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
 
 
 def merge_claude_settings():
-    """Merge the repo-owned parts of claude/settings.json into ``~/.claude/settings.json``.
+    """Merge repo-owned Claude settings while preserving runtime-managed keys.
 
-    The live file cannot be a symlink into the repo: Claude Code rewrites
-    settings.json in place at runtime (model changes, enabledPlugins, ...),
-    which replaces a symlink with a plain file and orphans the repo copy — that
-    is exactly how the old symlink scheme drifted. Instead the template owns
-    ``CLAUDE_SETTINGS_KEYS`` plus each hook event it declares; hook events it
-    doesn't declare and every other live key pass through untouched.
+    The template owns ``CLAUDE_SETTINGS_KEYS`` plus each hook event it declares;
+    hook events it doesn't declare and every other live key pass through.
     """
     source = REPO_ROOT / "claude/settings.json"
     target = HOME / ".claude/settings.json"
-    if not source.is_file():
-        print("skipping claude settings: no claude/settings.json present")
-        return
     template = json.loads(source.read_text(encoding="utf-8"))
 
     if target.is_symlink():
-        # Left over from the old symlink scheme; writing through it would
-        # clobber the repo template.
-        target.unlink()
+        raise RuntimeError(f"refusing to overwrite symlink: {target}")
     settings = {}
     if target.is_file():
         try:
@@ -635,12 +608,8 @@ def merge_claude_settings():
 
 
 def install_claude():
-    links = links_for("claude")
-    if any(Path(source).exists() for source, _ in links):
-        print("applying claude config")
-        apply_links(links)
-    else:
-        print("skipping claude config: no claude/ files present")
+    print("applying claude config")
+    apply_links(links_for("claude"))
     merge_claude_settings()
 
 
@@ -648,59 +617,27 @@ def copy_pi_settings():
     """Copy the repo's global Pi settings into place."""
     source = REPO_ROOT / "pi/settings.json"
     target = HOME / ".pi/agent/settings.json"
-    if not source.is_file():
-        print("skipping pi settings: no pi/settings.json present")
-        return
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_symlink():
-        target.unlink()
+        raise RuntimeError(f"refusing to overwrite symlink: {target}")
     shutil.copy2(source, target)
     print(f"copied pi settings to {target}")
-
-
-def remove_stale_pi_extension_links():
-    """Remove repo-managed extension links whose source no longer exists."""
-    source_dir = (REPO_ROOT / "pi/extensions").resolve()
-    target_dir = HOME / ".pi/agent/extensions"
-    if not target_dir.is_dir():
-        return
-
-    for target in target_dir.iterdir():
-        if not target.is_symlink():
-            continue
-        source = target.resolve()
-        if source.is_relative_to(source_dir) and not source.exists():
-            target.unlink()
-            print(f"removed stale pi extension link: {target}")
 
 
 def install_pi():
     print("applying pi config")
     copy_pi_settings()
-    remove_stale_pi_extension_links()
     apply_links(links_for("pi"))
 
 
 def ensure_codex_local_config():
-    """Keep Codex config local while preserving old repo-symlink installs."""
+    """Seed a local Codex config when one does not already exist."""
     target = HOME / ".codex/config.toml"
     template = REPO_ROOT / "codex/config.example.toml"
 
-    if target.is_symlink():
-        source = target.resolve()
-        if source.exists() and source.is_relative_to(REPO_ROOT):
-            target.unlink()
-            shutil.copy2(source, target)
-            print(f"detached codex config into local file: {target}")
-            return
-
-    if target.exists():
+    if target.is_symlink() or target.exists():
         print(f"leaving existing codex config unmanaged: {target}")
-        return
-
-    if not template.exists():
-        print("skipping codex config: no local config or codex/config.example.toml present")
         return
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -709,13 +646,8 @@ def ensure_codex_local_config():
 
 
 def install_codex():
-    agents_links = [(s, d) for s, d in links_for("codex") if Path(s).name == "AGENTS.md"]
-
-    if any(Path(s).exists() for s, _ in agents_links):
-        print("applying codex global instructions")
-        apply_links(agents_links)
-    else:
-        print("skipping codex global instructions: no codex/AGENTS.md present")
+    print("applying codex global instructions")
+    apply_links(links_for("codex"))
 
     ensure_codex_local_config()
     ensure_codex_hooks()
@@ -768,38 +700,6 @@ def run_install_flow():
     apply_links(links_for("skills"))
     install_neovim()
     print("Done")
-
-
-def cleanup_links(dry_run=False):
-    """Remove only the symlinks this repo created.
-
-    A target is removed only when it is a symlink that resolves into this repo,
-    so real user files (and symlinks pointing elsewhere) are left untouched.
-    Packages, cloned repos, and ``*.bak.*`` backups are not affected.
-    """
-    label = " (dry run)" if dry_run else ""
-    print(f"cleaning up repo-managed symlinks{label}")
-    removed = 0
-    skipped = 0
-    for _category, source, target in managed_links():
-        target = Path(target)
-        if target.is_symlink():
-            if target.resolve() == Path(source).resolve():
-                if dry_run:
-                    print(f"would remove link: {target}")
-                else:
-                    target.unlink()
-                    print(f"removed link: {target}")
-                removed += 1
-            else:
-                print(f"skipping {target}: symlink points outside repo -> {os.readlink(target)}")
-                skipped += 1
-        elif target.exists():
-            print(f"skipping {target}: real file, not a repo symlink")
-            skipped += 1
-
-    verb = "would remove" if dry_run else "removed"
-    print(f"cleanup done: {verb} {removed} link(s), skipped {skipped}")
 
 
 def snapshot_tree(root):
@@ -875,49 +775,12 @@ def verify_idempotent():
     LINUX_APT_UPDATED = original_apt_updated
 
 
-def verify_neovim_health():
-    if not command_exists("nvim"):
-        print("neovim health check failed: nvim is not installed", file=sys.stderr)
-        sys.exit(1)
-
-    with tempfile.NamedTemporaryFile(prefix="nvim-health-", suffix=".txt") as health_file:
-        run([
-            "nvim",
-            "--headless",
-            "+checkhealth",
-            f"+write! {health_file.name}",
-            "+qa",
-        ])
-        health = Path(health_file.name).read_text(encoding="utf-8", errors="replace")
-
-    if "ERROR" in health or "❌" in health:
-        print("neovim health check reported errors", file=sys.stderr)
-        sys.exit(1)
-
-    print("neovim health verification passed")
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Bootstrap dotfiles on macOS/Linux.")
     parser.add_argument(
         "--verify-idempotent",
         action="store_true",
         help="Run a safe two-pass install verification in a temporary HOME.",
-    )
-    parser.add_argument(
-        "--verify-neovim-health",
-        action="store_true",
-        help="Run Neovim checkhealth and fail if health reports errors.",
-    )
-    parser.add_argument(
-        "--cleanup",
-        action="store_true",
-        help="Remove repo-managed symlinks from $HOME (packages and real files are left untouched).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="With --cleanup, print what would be removed without changing anything.",
     )
     return parser.parse_args()
 
@@ -926,12 +789,6 @@ def main():
     args = parse_args()
     if args.verify_idempotent:
         verify_idempotent()
-        return
-    if args.verify_neovim_health:
-        verify_neovim_health()
-        return
-    if args.cleanup:
-        cleanup_links(dry_run=args.dry_run)
         return
     run_install_flow()
 
