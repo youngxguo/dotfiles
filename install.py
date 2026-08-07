@@ -567,25 +567,9 @@ def ensure_codex_hooks():
     print(f"merged codex ai-state hooks into {target}")
 
 
-# settings.json keys the repo templates own outright. Everything else in each
+# settings.json keys the Claude template owns outright. Everything else in the
 # live file is preserved so runtime-managed and machine-local state stays local.
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
-PI_SETTINGS_KEYS = (
-    "theme",
-    "defaultProvider",
-    "defaultModel",
-    "defaultThinkingLevel",
-    "externalEditor",
-    "quietStartup",
-    "collapseChangelog",
-    "treeFilterMode",
-    "hideThinkingBlock",
-    "enableInstallTelemetry",
-    "steeringMode",
-    "followUpMode",
-    "packages",
-    "markdown",
-)
 
 
 def merge_claude_settings():
@@ -646,38 +630,24 @@ def install_claude():
     merge_claude_settings()
 
 
-def merge_pi_settings():
-    """Merge repo-owned Pi settings while preserving Pi's runtime state."""
+def copy_pi_settings():
+    """Copy the repo's global Pi settings into place."""
     source = REPO_ROOT / "pi/settings.json"
     target = HOME / ".pi/agent/settings.json"
     if not source.is_file():
         print("skipping pi settings: no pi/settings.json present")
         return
 
-    template = json.loads(source.read_text(encoding="utf-8"))
-    settings = {}
-    if target.is_file():
-        try:
-            settings = json.loads(target.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            print(f"skipping pi settings: {target} is not valid JSON")
-            return
-        if not isinstance(settings, dict):
-            print(f"skipping pi settings: {target} is not a JSON object")
-            return
-
-    for key in PI_SETTINGS_KEYS:
-        if key in template:
-            settings[key] = template[key]
-
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    print(f"merged pi settings into {target}")
+    if target.is_symlink():
+        target.unlink()
+    shutil.copy2(source, target)
+    print(f"copied pi settings to {target}")
 
 
 def install_pi():
     print("applying pi config")
-    merge_pi_settings()
+    copy_pi_settings()
 
 
 def ensure_codex_local_config():
