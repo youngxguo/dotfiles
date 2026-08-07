@@ -361,8 +361,11 @@ def managed_links():
 
     pi_extensions_dir = REPO_ROOT / "pi/extensions"
     if pi_extensions_dir.is_dir():
-        for extension in sorted(pi_extensions_dir.glob("*.ts")):
-            links.append(("pi", extension, HOME / ".pi/agent/extensions" / extension.name))
+        for extension in sorted(pi_extensions_dir.iterdir()):
+            if extension.is_file() and extension.suffix == ".ts":
+                links.append(("pi", extension, HOME / ".pi/agent/extensions" / extension.name))
+            elif extension.is_dir() and (extension / "index.ts").is_file():
+                links.append(("pi", extension, HOME / ".pi/agent/extensions" / extension.name))
 
     pets_dir = REPO_ROOT / "codex/pets"
     if pets_dir.is_dir():
@@ -656,9 +659,26 @@ def copy_pi_settings():
     print(f"copied pi settings to {target}")
 
 
+def remove_stale_pi_extension_links():
+    """Remove repo-managed extension links whose source no longer exists."""
+    source_dir = (REPO_ROOT / "pi/extensions").resolve()
+    target_dir = HOME / ".pi/agent/extensions"
+    if not target_dir.is_dir():
+        return
+
+    for target in target_dir.iterdir():
+        if not target.is_symlink():
+            continue
+        source = target.resolve()
+        if source.is_relative_to(source_dir) and not source.exists():
+            target.unlink()
+            print(f"removed stale pi extension link: {target}")
+
+
 def install_pi():
     print("applying pi config")
     copy_pi_settings()
+    remove_stale_pi_extension_links()
     apply_links(links_for("pi"))
 
 
