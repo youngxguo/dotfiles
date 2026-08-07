@@ -21,7 +21,8 @@ hooks from `codex/ai-state-hooks.json` into `~/.codex/hooks.json`. Custom pets i
 [codex-pet.com](https://www.codex-pet.com/pets/piggy).
 
 Pi's global config lives in `pi/settings.json`. The installer copies it to
-`~/.pi/agent/settings.json`.
+`~/.pi/agent/settings.json` and links extensions from `pi/extensions/` into
+`~/.pi/agent/extensions/`.
 
 Personal agent skills live in `skills/` and are linked into Codex and Claude Code by the installer.
 
