@@ -1,0 +1,10 @@
+id = "dotfiles.worktree-tabs"
+name = "Worktree Tabs"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Open new worktrees with Vim and Pi tabs"
+platforms = ["linux", "macos"]
+
+[[events]]
+on = "worktree.created"
+command = ["python3", "worktree_tabs.py"]

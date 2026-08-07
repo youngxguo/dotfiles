@@ -54,7 +54,7 @@ and main navigation stay the same:
 | `c` | new window (current dir) | new tab in the current directory |
 | `,` | — | rename current tab |
 | `C` | new session (asks name) | new parent workspace (asks name) |
-| `W` | — | new git worktree + workspace (asks branch) |
+| `W` | — | new git worktree + workspace, focused in a `chat` (Pi) tab with `vim` alongside |
 | `D` | — | close workspace (worktree checkout remains) |
 | `t` | add agents / vim windows in current session | — |
 | `X` | kill session (confirm) | — |
