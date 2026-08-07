@@ -567,11 +567,8 @@ def ensure_codex_hooks():
     print(f"merged codex ai-state hooks into {target}")
 
 
-# settings.json keys the repo template owns outright. Hooks are owned
-# per-event instead (see merge_claude_settings), and everything else in the
-# live file — model, enabledPlugins, env, and machine-local hooks — is
-# preserved as-is, so the template stays small enough to generalize to any
-# machine.
+# settings.json keys the Claude template owns outright. Everything else in the
+# live file is preserved so runtime-managed and machine-local state stays local.
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
 
 
@@ -631,6 +628,26 @@ def install_claude():
     else:
         print("skipping claude config: no claude/ files present")
     merge_claude_settings()
+
+
+def copy_pi_settings():
+    """Copy the repo's global Pi settings into place."""
+    source = REPO_ROOT / "pi/settings.json"
+    target = HOME / ".pi/agent/settings.json"
+    if not source.is_file():
+        print("skipping pi settings: no pi/settings.json present")
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink():
+        target.unlink()
+    shutil.copy2(source, target)
+    print(f"copied pi settings to {target}")
+
+
+def install_pi():
+    print("applying pi config")
+    copy_pi_settings()
 
 
 def ensure_codex_local_config():
@@ -715,6 +732,7 @@ def run_install_flow():
     install_vscode()
     install_claude()
     install_codex()
+    install_pi()
     apply_links(links_for("skills"))
     install_neovim()
     print("Done")

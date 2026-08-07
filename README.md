@@ -1,6 +1,6 @@
 # dotfiles
 
-my mac/linux configs — zsh, tmux, herdr, neovim, ghostty, vscode, btop, plus shared claude/codex instructions.
+my mac/linux configs — zsh, tmux, herdr, neovim, ghostty, vscode, btop, plus shared claude/codex/pi settings and instructions.
 
 ## setup
 
@@ -19,6 +19,9 @@ Codex uses repo-managed `codex/AGENTS.md`; local config is seeded once from
 hooks from `codex/ai-state-hooks.json` into `~/.codex/hooks.json`. Custom pets in
 `codex/pets/` are linked into `~/.codex/pets/`; Piggy comes from
 [codex-pet.com](https://www.codex-pet.com/pets/piggy).
+
+Pi's global config lives in `pi/settings.json`. The installer copies it to
+`~/.pi/agent/settings.json`.
 
 Personal agent skills live in `skills/` and are linked into Codex and Claude Code by the installer.
 
