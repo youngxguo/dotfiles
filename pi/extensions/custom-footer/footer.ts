@@ -8,7 +8,7 @@ import type { TUI } from "@earendil-works/pi-tui";
 import { hyperlink } from "@earendil-works/pi-tui";
 
 import { findOpenPullRequest, type OpenPullRequest } from "./github.js";
-import { alignSides, renderContextUsage } from "./render.js";
+import { alignSides, renderContextUsage, renderWeeklyUsage } from "./render.js";
 
 export class CompactFooter {
 	private openPullRequest: OpenPullRequest | undefined;
@@ -21,6 +21,7 @@ export class CompactFooter {
 		private readonly tui: TUI,
 		private readonly theme: Theme,
 		private readonly data: ReadonlyFooterDataProvider,
+		private weeklyUsedPercent: number | undefined,
 	) {
 		this.unsubscribe = data.onBranchChange(() => this.refreshPullRequest());
 		this.refreshPullRequest();
@@ -32,6 +33,11 @@ export class CompactFooter {
 	}
 
 	invalidate(): void {}
+
+	setWeeklyUsedPercent(value: number | undefined): void {
+		this.weeklyUsedPercent = value;
+		this.tui.requestRender();
+	}
 
 	refreshPullRequest(): void {
 		const branch = this.data.getGitBranch();
@@ -63,8 +69,15 @@ export class CompactFooter {
 				: ` ${this.theme.fg("accent", `⚡ ${this.ctx.thinkingLevel}`)}`;
 		const model = `${this.theme.fg("accent", `🧠 ${this.ctx.model?.id ?? "no-model"}`)}${thinking}`;
 
+		const weeklyUsage =
+			this.ctx.model?.provider === "openai-codex"
+				? renderWeeklyUsage(this.weeklyUsedPercent, this.theme)
+				: "";
+		const usage = [renderContextUsage(this.ctx, this.theme), weeklyUsage]
+			.filter(Boolean)
+			.join("  ");
 		const left = [statuses, branchText].filter(Boolean).join("  ");
-		const right = [renderContextUsage(this.ctx, this.theme), model].join("  ");
+		const right = [usage, model].join("  ");
 		return [alignSides(left, right, width)];
 	}
 }
