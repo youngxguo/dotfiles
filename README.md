@@ -1,7 +1,5 @@
 # dotfiles
 
-personal dotfiles for macOS and Linux.
-
 ## install
 
 ```sh
