@@ -1,7 +1,7 @@
 id = "dotfiles.worktree-tabs"
 name = "Workspace Tabs"
-version = "0.3.0"
-min_herdr_version = "0.7.0"
+version = "0.4.0"
+min_herdr_version = "0.8.0"
 description = "Open new workspaces and worktrees with Vim and Pi tabs"
 platforms = ["linux", "macos"]
 
