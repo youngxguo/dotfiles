@@ -18,8 +18,8 @@ REPOSITORY_SETTINGS: dict[str, object] = {
 }
 
 RULESET_NAME = "default branch"
-# Actions still run, but this shared policy does not make them merge
-# requirements.
+# Required checks remain repository-specific, but they never require a branch
+# to be updated with the latest default branch before merging.
 MANAGED_RULE_TYPES = {
     "deletion",
     "non_fast_forward",
@@ -53,7 +53,20 @@ def ruleset_for(existing_ruleset: dict[str, object] | None) -> dict[str, object]
             raise RuntimeError("GitHub returned an invalid ruleset rule list")
         for item in cast(list[object], existing_rules):
             rule = object_mapping(item, "ruleset rule")
-            if rule.get("type") not in MANAGED_RULE_TYPES:
+            if rule.get("type") == "required_status_checks":
+                parameters = object_mapping(
+                    rule.get("parameters"), "required status checks parameters"
+                )
+                preserved_rules.append(
+                    {
+                        **rule,
+                        "parameters": {
+                            **parameters,
+                            "strict_required_status_checks_policy": False,
+                        },
+                    }
+                )
+            elif rule.get("type") not in MANAGED_RULE_TYPES:
                 preserved_rules.append(rule)
 
     return {
