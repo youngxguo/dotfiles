@@ -7,10 +7,16 @@ import type {
 import type { TUI } from "@earendil-works/pi-tui";
 import { hyperlink } from "@earendil-works/pi-tui";
 
+import { findGitStatus, type GitStatus } from "./repository.js";
 import { findOpenPullRequest, type OpenPullRequest } from "./github.js";
-import { alignSides, renderContextUsage, renderWeeklyUsage } from "./render.js";
+import { renderGitStatus } from "./render/git.js";
+import { alignSides } from "./render/layout.js";
+import { renderContextUsage, renderWeeklyUsage } from "./render/usage.js";
 
 export class CompactFooter {
+	private gitStatus: GitStatus | undefined;
+	private gitStatusDirty = false;
+	private gitStatusLookup = 0;
 	private openPullRequest: OpenPullRequest | undefined;
 	private pullRequestLookup = 0;
 	private readonly unsubscribe: () => void;
@@ -23,12 +29,19 @@ export class CompactFooter {
 		private readonly data: ReadonlyFooterDataProvider,
 		private weeklyUsedPercent: number | undefined,
 	) {
-		this.unsubscribe = data.onBranchChange(() => this.refreshPullRequest());
+		this.unsubscribe = data.onBranchChange(() => {
+			this.gitStatus = undefined;
+			this.gitStatusDirty = false;
+			this.refreshGitStatus();
+			this.refreshPullRequest();
+		});
+		this.refreshGitStatus();
 		this.refreshPullRequest();
 	}
 
 	dispose(): void {
 		this.unsubscribe();
+		this.gitStatusLookup++;
 		this.pullRequestLookup++;
 	}
 
@@ -39,7 +52,33 @@ export class CompactFooter {
 		this.tui.requestRender();
 	}
 
-	refreshPullRequest(): void {
+	markRepositoryDirty(): void {
+		this.gitStatusDirty = true;
+	}
+
+	refreshDirtyRepository(): void {
+		if (!this.gitStatusDirty) return;
+		this.gitStatusDirty = false;
+		this.refreshGitStatus();
+		this.refreshPullRequest();
+	}
+
+	private refreshGitStatus(): void {
+		const lookup = ++this.gitStatusLookup;
+		if (!this.data.getGitBranch()) {
+			this.gitStatus = undefined;
+			this.tui.requestRender();
+			return;
+		}
+
+		void findGitStatus(this.pi, this.ctx.cwd).then((status) => {
+			if (lookup !== this.gitStatusLookup) return;
+			this.gitStatus = status;
+			this.tui.requestRender();
+		});
+	}
+
+	private refreshPullRequest(): void {
 		const branch = this.data.getGitBranch();
 		const lookup = ++this.pullRequestLookup;
 		this.openPullRequest = undefined;
@@ -59,9 +98,15 @@ export class CompactFooter {
 		);
 		const branch = this.data.getGitBranch();
 		const pullRequest = this.openPullRequest
-			? `  ${hyperlink(`🔀 #${this.openPullRequest.number}`, this.openPullRequest.url)}`
+			? hyperlink(`🔀 #${this.openPullRequest.number}`, this.openPullRequest.url)
 			: "";
-		const branchText = branch ? this.theme.fg("dim", `🌿 ${branch}${pullRequest}`) : "";
+		const branchText = branch
+			? [
+					this.theme.fg("accent", ` ${branch}`),
+					renderGitStatus(this.gitStatus, this.theme),
+					pullRequest,
+				].filter(Boolean).join("  ")
+			: "";
 
 		const thinking =
 			this.ctx.thinkingLevel === "off"

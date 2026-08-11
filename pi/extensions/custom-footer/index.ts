@@ -46,7 +46,12 @@ export default function (pi: ExtensionAPI) {
 		updateWeeklyUsedPercent(value);
 	});
 	pi.on("model_select", (_event, ctx) => void refreshWeeklyUsedPercent(ctx));
-	pi.on("agent_settled", () => currentFooter?.refreshPullRequest());
+	pi.on("tool_execution_end", (event) => {
+		if (["bash", "edit", "write"].includes(event.toolName)) {
+			currentFooter?.markRepositoryDirty();
+		}
+	});
+	pi.on("agent_settled", () => currentFooter?.refreshDirtyRepository());
 
 	pi.registerCommand("footer", {
 		description: "Toggle the compact custom footer",
