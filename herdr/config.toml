@@ -40,7 +40,7 @@ focus_pane_right = "prefix+l"
 [[keys.command]]
 key = "prefix+c"
 type = "plugin_action"
-command = "dotfiles.worktree-tabs.new-tab"
+command = "dotfiles.smart-tabs.new-tab"
 description = "create tab and continue the active coding agent"
 
 [[keys.command]]

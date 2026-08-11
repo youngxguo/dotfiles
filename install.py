@@ -493,7 +493,7 @@ def install_herdr():
     if VERIFY_MODE:
         print("verify mode: skipping herdr plugin registration")
     elif command_exists("herdr"):
-        plugin = REPO_ROOT / "herdr/plugins/worktree-tabs"
+        plugin = REPO_ROOT / "herdr/plugins/smart-tabs"
         run(["herdr", "plugin", "link", str(plugin), "--enabled"])
 
 

@@ -1,0 +1,12 @@
+id = "dotfiles.smart-tabs"
+name = "Smart Tabs"
+version = "0.5.0"
+min_herdr_version = "0.8.0"
+description = "Create tabs that continue the active coding agent"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "new-tab"
+title = "Create tab"
+contexts = ["pane"]
+command = ["python3", "smart_tabs.py", "new-tab"]
