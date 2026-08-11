@@ -8,6 +8,7 @@
   "quietStartup": true,
   "collapseChangelog": true,
   "treeFilterMode": "no-tools",
+  "outputPad": 1,
   "hideThinkingBlock": false,
   "enableInstallTelemetry": false,
   "steeringMode": "all",
