@@ -1,9 +1,19 @@
 id = "dotfiles.worktree-tabs"
-name = "Worktree Tabs"
-version = "0.1.0"
+name = "Workspace Tabs"
+version = "0.3.0"
 min_herdr_version = "0.7.0"
-description = "Open new worktrees with Vim and Pi tabs"
+description = "Open new workspaces and worktrees with Vim and Pi tabs"
 platforms = ["linux", "macos"]
+
+[[actions]]
+id = "new-tab"
+title = "Create tab"
+contexts = ["pane"]
+command = ["python3", "worktree_tabs.py", "new-tab"]
+
+[[events]]
+on = "workspace.created"
+command = ["python3", "worktree_tabs.py"]
 
 [[events]]
 on = "worktree.created"

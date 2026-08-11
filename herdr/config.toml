@@ -20,8 +20,9 @@ switch_workspace = "cmd+1..9"
 navigate_workspace_up = "k"
 navigate_workspace_down = "j"
 
-# Window/tab controls.
-new_tab = "prefix+c"
+# Route prefix+c through the plugin because tab.created does not identify the
+# source pane needed to continue Pi conditionally.
+new_tab = ""
 rename_tab = "prefix+comma"
 previous_tab = "shift+left"
 next_tab = "shift+right"
@@ -35,6 +36,12 @@ focus_pane_left = "prefix+h"
 focus_pane_down = "prefix+j"
 focus_pane_up = "prefix+k"
 focus_pane_right = "prefix+l"
+
+[[keys.command]]
+key = "prefix+c"
+type = "plugin_action"
+command = "dotfiles.worktree-tabs.new-tab"
+description = "create tab and continue Pi when active"
 
 [[keys.command]]
 key = "ctrl+h"
