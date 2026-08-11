@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open new Herdr workspaces and worktrees with Vim and Pi tabs."""
+"""Create Herdr tabs that continue the active coding agent."""
 
 import json
 import os
@@ -63,39 +63,9 @@ def create_tab():
         )
 
 
-def configure_workspace():
-    event = json.loads(os.environ["HERDR_PLUGIN_EVENT_JSON"])["data"]
-    workspace = event["workspace"]
-
-    # A worktree emits workspace.created before worktree.created. Let the latter
-    # configure it once, with the checkout path from its richer event payload.
-    if "worktree" not in event and workspace.get("worktree") is not None:
-        return
-
-    context = json.loads(os.environ["HERDR_PLUGIN_CONTEXT_JSON"])
-    workspace_id = workspace["workspace_id"]
-    vim_tab_id = workspace["active_tab_id"]
-    vim_pane_id = context["focused_pane_id"]
-    cwd = (
-        event.get("worktree", {}).get("path")
-        or context.get("focused_pane_cwd")
-        or context["workspace_cwd"]
-    )
-
-    herdr("tab", "rename", vim_tab_id, "vim")
-    chat = herdr(
-        "tab", "create", "--workspace", workspace_id,
-        "--cwd", cwd, "--label", "chat", "--focus",
-    )
-    herdr("pane", "run", vim_pane_id, "nvim")
-    herdr("pane", "run", chat["result"]["root_pane"]["pane_id"], "pi")
-
-
 def main():
     if sys.argv[1:] == ["new-tab"]:
         create_tab()
-    elif not sys.argv[1:]:
-        configure_workspace()
     else:
         raise SystemExit(f"unknown command: {' '.join(sys.argv[1:])}")
 
