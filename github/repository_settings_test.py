@@ -36,6 +36,14 @@ STATUS_CHECKS = {
     },
 }
 
+NONSTRICT_STATUS_CHECKS = {
+    **STATUS_CHECKS,
+    "parameters": {
+        **STATUS_CHECKS["parameters"],
+        "strict_required_status_checks_policy": False,
+    },
+}
+
 REQUIRED_SIGNATURES = {"type": "required_signatures"}
 
 
@@ -45,7 +53,7 @@ class RepositorySettingsTests(unittest.TestCase):
             repository_settings.REPOSITORY_SETTINGS["delete_branch_on_merge"], True
         )
 
-    def test_new_ruleset_keeps_status_checks_nonblocking(self):
+    def test_new_ruleset_does_not_invent_status_checks(self):
         result = repository_settings.ruleset_for(None)
 
         self.assertEqual(
@@ -53,7 +61,7 @@ class RepositorySettingsTests(unittest.TestCase):
             ["deletion", "non_fast_forward", "pull_request"],
         )
 
-    def test_existing_required_status_checks_are_removed(self):
+    def test_existing_required_status_checks_are_nonstrict(self):
         existing = ruleset(
             42,
             rules=[
@@ -66,7 +74,10 @@ class RepositorySettingsTests(unittest.TestCase):
 
         result = repository_settings.ruleset_for(existing)
 
-        self.assertEqual(result["rules"], repository_settings.BRANCH_RULES)
+        self.assertEqual(
+            result["rules"],
+            [*repository_settings.BRANCH_RULES, NONSTRICT_STATUS_CHECKS],
+        )
 
     def test_existing_unmanaged_rules_are_preserved(self):
         existing = ruleset(42, rules=[STATUS_CHECKS, REQUIRED_SIGNATURES])
@@ -75,7 +86,11 @@ class RepositorySettingsTests(unittest.TestCase):
 
         self.assertEqual(
             result["rules"],
-            [*repository_settings.BRANCH_RULES, REQUIRED_SIGNATURES],
+            [
+                *repository_settings.BRANCH_RULES,
+                NONSTRICT_STATUS_CHECKS,
+                REQUIRED_SIGNATURES,
+            ],
         )
 
     def test_sync_creates_missing_ruleset(self):
