@@ -21,7 +21,7 @@ navigate_workspace_up = "k"
 navigate_workspace_down = "j"
 
 # Route prefix+c through the plugin because tab.created does not identify the
-# source pane needed to continue Pi conditionally.
+# source pane needed to continue its active coding agent conditionally.
 new_tab = ""
 rename_tab = "prefix+comma"
 previous_tab = "shift+left"
@@ -41,7 +41,7 @@ focus_pane_right = "prefix+l"
 key = "prefix+c"
 type = "plugin_action"
 command = "dotfiles.worktree-tabs.new-tab"
-description = "create tab and continue Pi when active"
+description = "create tab and continue the active coding agent"
 
 [[keys.command]]
 key = "ctrl+h"
