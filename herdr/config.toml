@@ -69,3 +69,9 @@ prompt_new_tab_name = true
 prompt_new_workspace_name = true
 pane_gaps = false
 agent_panel_sort = "spaces"
+
+[experimental]
+kitty_graphics = true
+
+[update]
+channel = "preview"
