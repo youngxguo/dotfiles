@@ -14,7 +14,8 @@ new_workspace = "prefix+shift+c"
 new_worktree = "prefix+shift+w"
 # Match tmux's prefix-$ rename-session binding.
 rename_workspace = "prefix+$"
-switch_workspace = "cmd+1..9"
+switch_workspace = ""
+focus_agent = "cmd+1..9"
 
 # Vim-style workspace navigation inside the workspace picker.
 navigate_workspace_up = "k"

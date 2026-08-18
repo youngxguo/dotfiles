@@ -12,7 +12,7 @@ desktop-notifications = true
 # Send Option-Enter as Meta-Enter so tmux can distinguish it from Ctrl-J.
 keybind = alt+enter=text:\x1b\x0d
 
-# Cmd 1-9: jump to the Nth tmux session or Herdr workspace. Ghostty owns these
+# Cmd 1-9: jump to the Nth tmux session or Herdr agent chat. Ghostty owns these
 # chords by default, so unbind both trigger forms and let the active multiplexer
 # receive the real Command-modified key. Herdr binds cmd+1..9 directly; tmux
 # recognizes the corresponding Kitty keyboard sequences as user-keys.
