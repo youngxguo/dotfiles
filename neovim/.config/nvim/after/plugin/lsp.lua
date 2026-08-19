@@ -21,7 +21,9 @@ vim.api.nvim_create_autocmd('LspAttach', {
   desc = 'LSP actions',
   callback = function(event)
     local opts = {buffer = event.buf}
-    vim.keymap.set('n', '<C-]>', '<cmd>lua vim.lsp.buf.definition()<cr>', opts)
+    vim.keymap.set('n', '<C-]>', function()
+      require('fzf-lua').lsp_definitions()
+    end, vim.tbl_extend('force', opts, { desc = 'LSP definitions' }))
     vim.keymap.set('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<cr>', opts)
     vim.keymap.set('n', 'gh', function()
       local row = vim.api.nvim_win_get_cursor(0)[1] - 1
