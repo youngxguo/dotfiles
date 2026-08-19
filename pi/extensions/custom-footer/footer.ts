@@ -13,12 +13,34 @@ import { renderGitStatus } from "./render/git.js";
 import { alignSides } from "./render/layout.js";
 import { renderContextUsage, renderWeeklyUsage } from "./render/usage.js";
 
+const PULL_REQUEST_POLL_INTERVAL_MS = 30_000;
+
+function renderPullRequestChecks(pullRequest: OpenPullRequest, theme: Theme): string {
+	let text: string;
+	switch (pullRequest.checksStatus) {
+		case "success":
+			text = theme.fg("success", "✓ CI");
+			break;
+		case "failure":
+			text = theme.fg("error", "✗ CI");
+			break;
+		case "pending":
+			text = theme.fg("warning", "● CI");
+			break;
+		case "none":
+			text = theme.fg("muted", "○ CI");
+			break;
+	}
+	return hyperlink(text, `${pullRequest.url}/checks`);
+}
+
 export class CompactFooter {
 	private gitStatus: GitStatus | undefined;
 	private gitStatusDirty = false;
 	private gitStatusLookup = 0;
 	private openPullRequest: OpenPullRequest | undefined;
 	private pullRequestLookup = 0;
+	private readonly pullRequestPoll: ReturnType<typeof setInterval>;
 	private readonly unsubscribe: () => void;
 
 	constructor(
@@ -32,15 +54,23 @@ export class CompactFooter {
 		this.unsubscribe = data.onBranchChange(() => {
 			this.gitStatus = undefined;
 			this.gitStatusDirty = false;
+			this.openPullRequest = undefined;
+			this.tui.requestRender();
 			this.refreshGitStatus();
 			this.refreshPullRequest();
 		});
 		this.refreshGitStatus();
 		this.refreshPullRequest();
+		this.pullRequestPoll = setInterval(
+			() => this.refreshPullRequest(),
+			PULL_REQUEST_POLL_INTERVAL_MS,
+		);
+		this.pullRequestPoll.unref();
 	}
 
 	dispose(): void {
 		this.unsubscribe();
+		clearInterval(this.pullRequestPoll);
 		this.gitStatusLookup++;
 		this.pullRequestLookup++;
 	}
@@ -81,13 +111,15 @@ export class CompactFooter {
 	private refreshPullRequest(): void {
 		const branch = this.data.getGitBranch();
 		const lookup = ++this.pullRequestLookup;
-		this.openPullRequest = undefined;
-		this.tui.requestRender();
-		if (!branch) return;
+		if (!branch) {
+			this.openPullRequest = undefined;
+			this.tui.requestRender();
+			return;
+		}
 
 		void findOpenPullRequest(this.pi, this.ctx.cwd).then((pullRequest) => {
-			if (lookup !== this.pullRequestLookup) return;
-			this.openPullRequest = pullRequest;
+			if (lookup !== this.pullRequestLookup || pullRequest === undefined) return;
+			this.openPullRequest = pullRequest ?? undefined;
 			this.tui.requestRender();
 		});
 	}
@@ -100,11 +132,15 @@ export class CompactFooter {
 		const pullRequest = this.openPullRequest
 			? hyperlink(`🔀 #${this.openPullRequest.number}`, this.openPullRequest.url)
 			: "";
+		const checks = this.openPullRequest
+			? renderPullRequestChecks(this.openPullRequest, this.theme)
+			: "";
 		const branchText = branch
 			? [
 					this.theme.fg("accent", ` ${branch}`),
 					renderGitStatus(this.gitStatus, this.theme),
 					pullRequest,
+					checks,
 				].filter(Boolean).join("  ")
 			: "";
 
