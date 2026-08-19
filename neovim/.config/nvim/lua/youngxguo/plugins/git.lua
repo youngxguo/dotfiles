@@ -110,7 +110,7 @@ return {
     },
     opts = {
       diff = {
-        layout = "inline", -- fallback; codediff_nav picks per-open by width
+        layout = "inline", -- unified diffs by default; toggle with `t`
         compute_moves = false,
       },
       explorer = {

@@ -1,32 +1,15 @@
--- codediff navigation helpers: open the working-tree diff with a layout + an
--- explorer state chosen to fit the current editor width. codediff reads
--- `codediff.config.options` at open time, so we mutate it just before opening
--- (the same trick `diffview_nav` uses for Diffview's default layout).
---
--- codediff exposes no public API to toggle layout / explorer or query an open
--- view, so this is an open-time decision only: a view does NOT reflow on
--- resize. Reopen (<leader>gd) to re-pick after resizing the pane.
+-- codediff navigation helpers: open working-tree diffs in the inline (unified)
+-- layout with the explorer visible. `t` can still toggle an open view to the
+-- side-by-side layout.
 
 local M = {}
 
--- Width budget. The window splits into `explorer (~32) + diff area`.
---   * Side-by-side wants two code panes of ~50 cols each beside the explorer,
---     so it reads well once there's room for the smaller explorer + 2 panes.
-local MIN_COLUMNS_FOR_SIDE_BY_SIDE = 132
-
--- Decide the tier for the current editor width:
---   < 132        -> inline,        explorer shown
---   >= 132       -> side-by-side,  explorer shown
-local function plan()
-  local cols = vim.o.columns
-  local layout = cols >= MIN_COLUMNS_FOR_SIDE_BY_SIDE and "side-by-side" or "inline"
-  return layout
-end
+local DEFAULT_LAYOUT = "inline"
 
 -- Steer the layout + explorer state codediff uses for the next view it opens.
--- Returns the chosen layout so callers can also pass the matching flag.
+-- Returns the layout so callers can also pass the matching command flag.
 local function apply()
-  local layout = plan()
+  local layout = DEFAULT_LAYOUT
 
   local ok, config = pcall(require, "codediff.config")
   if ok and config.options then
@@ -162,7 +145,7 @@ vim.api.nvim_create_autocmd("User", {
   end,
 })
 
--- Open the working-tree diff sized for the current width.
+-- Open the working-tree diff in the unified layout.
 function M.open_diff()
   local layout = apply()
   command(layout)
