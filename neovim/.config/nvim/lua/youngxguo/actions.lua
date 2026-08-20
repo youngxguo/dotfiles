@@ -4,14 +4,9 @@
 
 local M = {}
 
--- Yank text to the system clipboard and echo it, forcing an OSC 52 copy so it
--- works over SSH/tmux even when a register write alone would not trigger one.
+-- Yank text to the system clipboard and echo it.
 function M.yank_and_notify(text)
   vim.fn.setreg("+", text)
-  local osc52 = vim.g.clipboard and vim.g.clipboard.copy and vim.g.clipboard.copy["+"]
-  if osc52 then
-    osc52({ text })
-  end
   vim.notify(text)
 end
 
