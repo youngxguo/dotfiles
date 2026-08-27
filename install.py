@@ -667,6 +667,7 @@ def install_neovim():
     install_homebrew_only_package("typescript-language-server")
     install_homebrew_only_package("basedpyright")
     install_homebrew_only_package("gh")
+    install_homebrew_only_package("imagemagick")
     install_homebrew_only_package("chafa")
     install_homebrew_only_package("viu")
     install_homebrew_only_package("mercurial")
