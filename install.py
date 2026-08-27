@@ -14,7 +14,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
 LINUX_APT_UPDATED = False
@@ -119,7 +118,9 @@ def ensure_fd_compat_shim():
     if shim.exists():
         return
 
-    shim.write_text(f"#!/usr/bin/env sh\nexec {shlex.quote(fdfind)} \"$@\"\n", encoding="utf-8")
+    shim.write_text(
+        f'#!/usr/bin/env sh\nexec {shlex.quote(fdfind)} "$@"\n', encoding="utf-8"
+    )
     shim.chmod(0o755)
     print(f"created fd compatibility shim at {shim} (ensure {local_bin} is in PATH)")
 
@@ -129,7 +130,9 @@ def linux_install(pkg):
 
     manager = linux_package_manager()
     if not manager:
-        print(f"skipping {pkg}: no supported linux package manager found (apt/dnf/pacman/zypper)")
+        print(
+            f"skipping {pkg}: no supported linux package manager found (apt/dnf/pacman/zypper)"
+        )
         return False
 
     if pkg_installed(pkg):
@@ -154,7 +157,9 @@ def linux_install(pkg):
     elif manager == "pacman":
         install_cmd = with_privilege(["pacman", "-S", "--noconfirm", target_pkg])
     else:
-        install_cmd = with_privilege(["zypper", "--non-interactive", "install", target_pkg])
+        install_cmd = with_privilege(
+            ["zypper", "--non-interactive", "install", target_pkg]
+        )
 
     if not install_cmd:
         print(f"skipping {pkg}: sudo is required (or run as root)")
@@ -183,7 +188,9 @@ def install_package(pkg):
             return linux_install(pkg)
         print(f"skipping {pkg}: homebrew is not available")
         return False
-    result = subprocess.run(["brew", "list", pkg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(
+        ["brew", "list", pkg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     if result.returncode == 0:
         print(f"{pkg} already installed")
         return True
@@ -206,7 +213,21 @@ def extract_tar_safely(tar, destination):
         target = (destination / member.name).resolve()
         if target != destination and destination not in target.parents:
             raise RuntimeError(f"refusing to extract unsafe tar member: {member.name}")
-    tar.extractall(destination)
+        if member.isdir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        if not member.isfile():
+            raise RuntimeError(
+                f"refusing to extract non-file tar member: {member.name}"
+            )
+
+        source = tar.extractfile(member)
+        if source is None:
+            raise RuntimeError(f"unable to read tar member: {member.name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with source, target.open("wb") as output:
+            shutil.copyfileobj(source, output)
+        target.chmod(member.mode & 0o777)
 
 
 def install_btop_linux_release():
@@ -288,7 +309,9 @@ def clone_if_missing(repo_url, target_dir):
         print(f"repo already present at {target}")
         return
     if target.exists():
-        print(f"cannot clone {repo_url} because {target} already exists and is not a git repo")
+        print(
+            f"cannot clone {repo_url} because {target} already exists and is not a git repo"
+        )
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     run(["git", "clone", repo_url, str(target)])
@@ -305,7 +328,9 @@ def link_file(source_path, target_path):
             return
         target.unlink()
     elif target.exists():
-        backup = target.with_name(f"{target.name}.bak.{datetime.now().strftime('%Y%m%d%H%M%S')}")
+        backup = target.with_name(
+            f"{target.name}.bak.{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        )
         target.rename(backup)
         print(f"backed up existing file to {backup}")
 
@@ -329,55 +354,101 @@ def managed_links():
     shader_dir = REPO_ROOT / "ghostty/shaders"
     if shader_dir.is_dir():
         for shader_file in sorted(shader_dir.glob("*.glsl")):
-            links.append(("ghostty", shader_file, HOME / ".config/ghostty/shaders" / shader_file.name))
+            links.append(
+                (
+                    "ghostty",
+                    shader_file,
+                    HOME / ".config/ghostty/shaders" / shader_file.name,
+                )
+            )
     theme_dir = REPO_ROOT / "ghostty/themes"
     if theme_dir.is_dir():
         for theme_file in sorted(theme_dir.iterdir()):
             if theme_file.is_file():
-                links.append(("ghostty", theme_file, HOME / ".config/ghostty/themes" / theme_file.name))
+                links.append(
+                    (
+                        "ghostty",
+                        theme_file,
+                        HOME / ".config/ghostty/themes" / theme_file.name,
+                    )
+                )
 
     links.append(("tmux", REPO_ROOT / "tmux/.tmux.conf", HOME / ".tmux.conf"))
     for script in sorted((REPO_ROOT / "tmux").glob(".tmux-*.sh")):
         links.append(("tmux", script, HOME / script.name))
 
-    links.append(("btop", REPO_ROOT / "btop/.config/btop/btop.conf", HOME / ".config/btop/btop.conf"))
+    links.append(
+        (
+            "btop",
+            REPO_ROOT / "btop/.config/btop/btop.conf",
+            HOME / ".config/btop/btop.conf",
+        )
+    )
 
     if sys.platform == "darwin":
         vscode_user_dir = HOME / "Library/Application Support/Code/User"
     else:
         vscode_user_dir = HOME / ".config/Code/User"
-    links.append(("vscode", REPO_ROOT / "vscode/settings.json", vscode_user_dir / "settings.json"))
-    links.append(("vscode", REPO_ROOT / "vscode/keybindings.json", vscode_user_dir / "keybindings.json"))
+    links.append(
+        (
+            "vscode",
+            REPO_ROOT / "vscode/settings.json",
+            vscode_user_dir / "settings.json",
+        )
+    )
+    links.append(
+        (
+            "vscode",
+            REPO_ROOT / "vscode/keybindings.json",
+            vscode_user_dir / "keybindings.json",
+        )
+    )
 
     links.append(("claude", REPO_ROOT / "claude/CLAUDE.md", HOME / ".claude/CLAUDE.md"))
     links.append(
-        ("claude", REPO_ROOT / "claude/statusline-command.sh", HOME / ".claude/statusline-command.sh")
+        (
+            "claude",
+            REPO_ROOT / "claude/statusline-command.sh",
+            HOME / ".claude/statusline-command.sh",
+        )
     )
     for script in sorted((REPO_ROOT / "claude/hooks").glob("*.sh")):
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
 
-    links.append(("pi", REPO_ROOT / "pi/pi-lens.json", HOME / ".pi-lens/config.json"))
+    links.append(
+        ("pi", REPO_ROOT / "pi/pi-lens-config.json", HOME / ".pi-lens/config.json")
+    )
     pi_extensions_dir = REPO_ROOT / "pi/extensions"
     if pi_extensions_dir.is_dir():
         for extension in sorted(pi_extensions_dir.iterdir()):
-            if extension.is_file() and extension.suffix == ".ts":
-                links.append(("pi", extension, HOME / ".pi/agent/extensions" / extension.name))
-            elif extension.is_dir() and (extension / "index.ts").is_file():
-                links.append(("pi", extension, HOME / ".pi/agent/extensions" / extension.name))
+            is_extension_file = extension.is_file() and extension.suffix == ".ts"
+            is_extension_dir = extension.is_dir() and (extension / "index.ts").is_file()
+            if is_extension_file or is_extension_dir:
+                links.append(
+                    ("pi", extension, HOME / ".pi/agent/extensions" / extension.name)
+                )
 
     pets_dir = REPO_ROOT / "codex/pets"
     if pets_dir.is_dir():
         for pet_dir in sorted(pets_dir.iterdir()):
-            if (pet_dir / "pet.json").is_file() and (pet_dir / "spritesheet.webp").is_file():
-                links.append(("codex-pets", pet_dir, HOME / ".codex/pets" / pet_dir.name))
+            if (pet_dir / "pet.json").is_file() and (
+                pet_dir / "spritesheet.webp"
+            ).is_file():
+                links.append(
+                    ("codex-pets", pet_dir, HOME / ".codex/pets" / pet_dir.name)
+                )
 
     skills_dir = REPO_ROOT / "skills"
     if skills_dir.is_dir():
         for skill_dir in sorted(skills_dir.iterdir()):
             if (skill_dir / "SKILL.md").is_file():
-                links.append(("skills", skill_dir, HOME / ".claude/skills" / skill_dir.name))
-                links.append(("skills", skill_dir, HOME / ".agents/skills" / skill_dir.name))
+                links.append(
+                    ("skills", skill_dir, HOME / ".claude/skills" / skill_dir.name)
+                )
+                links.append(
+                    ("skills", skill_dir, HOME / ".agents/skills" / skill_dir.name)
+                )
 
     links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
 
@@ -385,7 +456,9 @@ def managed_links():
 
 
 def links_for(category):
-    return [(source, target) for cat, source, target in managed_links() if cat == category]
+    return [
+        (source, target) for cat, source, target in managed_links() if cat == category
+    ]
 
 
 def apply_links(links):
@@ -407,8 +480,13 @@ def install_homebrew():
     if command_exists("brew"):
         print("homebrew already installed")
         return True
-    if sys.platform.startswith("linux") and os.environ.get("INSTALL_HOMEBREW", "0") != "1":
-        print("skipping homebrew bootstrap on linux (set INSTALL_HOMEBREW=1 to force install)")
+    if (
+        sys.platform.startswith("linux")
+        and os.environ.get("INSTALL_HOMEBREW", "0") != "1"
+    ):
+        print(
+            "skipping homebrew bootstrap on linux (set INSTALL_HOMEBREW=1 to force install)"
+        )
         return False
     env = os.environ.copy()
     env["NONINTERACTIVE"] = "1"
@@ -422,7 +500,9 @@ def install_homebrew():
             env=env,
         )
     except subprocess.CalledProcessError:
-        print("warning: unable to install homebrew; continuing without brew-managed packages")
+        print(
+            "warning: unable to install homebrew; continuing without brew-managed packages"
+        )
         return False
     return command_exists("brew")
 
@@ -507,15 +587,28 @@ def install_vscode():
 def ensure_codex_hooks():
     """Merge the repo's agent-state hooks into ``~/.codex/hooks.json``."""
     fragment_path = REPO_ROOT / "codex/ai-state-hooks.json"
-    wanted = json.loads(fragment_path.read_text(encoding="utf-8")).get("hooks", {})
+    try:
+        fragment = json.loads(fragment_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"skipping codex ai-state hooks: unable to read {fragment_path}: {exc}")
+        return
+    if not isinstance(fragment, dict):
+        print(f"skipping codex ai-state hooks: {fragment_path} is not a JSON object")
+        return
+    wanted = fragment.get("hooks", {})
     if not wanted:
+        return
+    if not isinstance(wanted, dict):
+        print(
+            f"skipping codex ai-state hooks: {fragment_path} hooks is not a JSON object"
+        )
         return
 
     target = HOME / ".codex/hooks.json"
     if target.exists():
         try:
             settings = json.loads(target.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (OSError, UnicodeError, json.JSONDecodeError):
             print(f"skipping codex ai-state hooks: {target} is not valid JSON")
             return
         if not isinstance(settings, dict):
@@ -539,11 +632,15 @@ def ensure_codex_hooks():
             continue
         present = {
             hook.get("command")
-            for group in existing if isinstance(group, dict)
-            for hook in group.get("hooks", []) if isinstance(hook, dict)
+            for group in existing
+            if isinstance(group, dict)
+            for hook in group.get("hooks", [])
+            if isinstance(hook, dict)
         }
         for group in groups:
-            commands = {h.get("command") for h in group.get("hooks", []) if isinstance(h, dict)}
+            commands = {
+                h.get("command") for h in group.get("hooks", []) if isinstance(h, dict)
+            }
             if commands & present:
                 continue
             existing.append(group)
@@ -571,7 +668,14 @@ def merge_claude_settings():
     """
     source = REPO_ROOT / "claude/settings.json"
     target = HOME / ".claude/settings.json"
-    template = json.loads(source.read_text(encoding="utf-8"))
+    try:
+        template = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"skipping claude settings: unable to read {source}: {exc}")
+        return
+    if not isinstance(template, dict):
+        print(f"skipping claude settings: {source} is not a JSON object")
+        return
 
     if target.is_symlink():
         raise RuntimeError(f"refusing to overwrite symlink: {target}")
@@ -579,7 +683,7 @@ def merge_claude_settings():
     if target.is_file():
         try:
             settings = json.loads(target.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (OSError, UnicodeError, json.JSONDecodeError):
             print(f"skipping claude settings: {target} is not valid JSON")
             return
         if not isinstance(settings, dict):
@@ -745,13 +849,19 @@ def verify_idempotent():
 
         backup_files = sorted(HOME.rglob("*.bak.*"))
         if backup_files:
-            print("idempotency check failed: backup files were created during verify mode", file=sys.stderr)
+            print(
+                "idempotency check failed: backup files were created during verify mode",
+                file=sys.stderr,
+            )
             for path in backup_files:
                 print(f"- {path}", file=sys.stderr)
             sys.exit(1)
 
         if first_snapshot != second_snapshot:
-            print("idempotency check failed: filesystem state changed between run #1 and run #2", file=sys.stderr)
+            print(
+                "idempotency check failed: filesystem state changed between run #1 and run #2",
+                file=sys.stderr,
+            )
             first_keys = set(first_snapshot)
             second_keys = set(second_snapshot)
             for rel in sorted(first_keys - second_keys):
@@ -792,5 +902,8 @@ if __name__ == "__main__":
     try:
         main()
     except subprocess.CalledProcessError as exc:
-        print(f"command failed with exit code {exc.returncode}: {exc.cmd}", file=sys.stderr)
+        print(
+            f"command failed with exit code {exc.returncode}: {exc.cmd}",
+            file=sys.stderr,
+        )
         sys.exit(exc.returncode)
