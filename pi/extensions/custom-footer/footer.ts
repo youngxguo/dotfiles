@@ -125,9 +125,9 @@ export class CompactFooter {
 	}
 
 	render(width: number): string[] {
-		const statuses = [...this.data.getExtensionStatuses().values()].join(
-			this.theme.fg("dim", " · "),
-		);
+		const statuses = [...this.data.getExtensionStatuses()]
+			.flatMap(([id, status]) => (id.startsWith("pi-lens") ? [] : [status]))
+			.join(this.theme.fg("dim", " · "));
 		const branch = this.data.getGitBranch();
 		const pullRequest = this.openPullRequest
 			? hyperlink(`🔀 #${this.openPullRequest.number}`, this.openPullRequest.url)

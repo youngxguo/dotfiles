@@ -357,6 +357,7 @@ def managed_links():
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
 
+    links.append(("pi", REPO_ROOT / "pi/pi-lens.json", HOME / ".pi-lens/config.json"))
     pi_extensions_dir = REPO_ROOT / "pi/extensions"
     if pi_extensions_dir.is_dir():
         for extension in sorted(pi_extensions_dir.iterdir()):

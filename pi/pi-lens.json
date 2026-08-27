@@ -1,0 +1,11 @@
+{
+  "widget": {
+    "visible": false
+  },
+  "format": {
+    "enabled": false
+  },
+  "autofix": {
+    "enabled": false
+  }
+}
