@@ -24,7 +24,24 @@ return {
       max_height_window_percentage = 80,
     },
     config = function(_, opts)
-      require("image").setup(opts)
+      local image = require("image")
+      image.setup(opts)
+
+      -- ImageMagick's SVG parser fails on common badge images, and image.nvim's
+      -- asynchronous error escapes its per-image pcall. Skip those decorative
+      -- images so one badge cannot prevent bitmap screenshots from rendering.
+      local original_from_url = image.from_url
+      image.from_url = function(url, options, callback)
+        local normalized_url = url:lower()
+        local host = normalized_url:match("^https?://([^/]+)")
+        local is_svg = normalized_url:match("%.svg$") or normalized_url:match("%.svg[?#]")
+        local is_badge = host == "img.shields.io" or host == "badgen.net"
+        if is_svg or is_badge then
+          callback(nil)
+          return
+        end
+        original_from_url(url, options, callback)
+      end
 
       -- Octo enters its buffer before assigning the `octo` filetype, while
       -- image.nvim discovers Markdown documents on BufWinEnter. Replay that
