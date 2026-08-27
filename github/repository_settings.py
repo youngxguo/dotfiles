@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
+import argparse
 import json
 import subprocess
 import sys
 from typing import cast
-
+from urllib.parse import quote
 
 # GitHub does not read repository settings from a tracked file, so apply this
 # version-controlled policy through the authenticated GitHub CLI.
@@ -29,22 +30,32 @@ MANAGED_RULE_TYPES = {
 BRANCH_RULES: list[dict[str, object]] = [
     {"type": "deletion"},
     {"type": "non_fast_forward"},
-    {
-        "type": "pull_request",
-        "parameters": {
-            "allowed_merge_methods": ["squash"],
-            "dismiss_stale_reviews_on_push": False,
-            "require_code_owner_review": False,
-            "require_last_push_approval": False,
-            "required_approving_review_count": 0,
-            "required_review_thread_resolution": False,
-            "required_reviewers": [],
-        },
-    },
 ]
+PULL_REQUEST_RULE: dict[str, object] = {
+    "type": "pull_request",
+    "parameters": {
+        "allowed_merge_methods": ["squash"],
+        "dismiss_stale_reviews_on_push": False,
+        "require_code_owner_review": False,
+        "require_last_push_approval": False,
+        "required_approving_review_count": 0,
+        "required_review_thread_resolution": False,
+        "required_reviewers": [],
+    },
+}
 
 
-def ruleset_for(existing_ruleset: dict[str, object] | None) -> dict[str, object]:
+def branch_rules_for(allow_direct_push: bool) -> list[dict[str, object]]:
+    if allow_direct_push:
+        return [*BRANCH_RULES]
+    return [*BRANCH_RULES, PULL_REQUEST_RULE]
+
+
+def ruleset_for(
+    existing_ruleset: dict[str, object] | None,
+    *,
+    allow_direct_push: bool = False,
+) -> dict[str, object]:
     # Preserve repository-specific rules this shared policy does not manage.
     preserved_rules: list[dict[str, object]] = []
     if existing_ruleset is not None:
@@ -81,7 +92,7 @@ def ruleset_for(existing_ruleset: dict[str, object] | None) -> dict[str, object]
             }
         },
         "rules": [
-            *BRANCH_RULES,
+            *branch_rules_for(allow_direct_push),
             *preserved_rules,
         ],
     }
@@ -94,7 +105,10 @@ def read_github_api(endpoint: str) -> object:
         capture_output=True,
         text=True,
     )
-    return cast(object, json.loads(result.stdout))
+    try:
+        return cast(object, json.loads(result.stdout))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"GitHub returned invalid JSON for {endpoint}") from exc
 
 
 def write_github_api(method: str, endpoint: str, payload: dict[str, object]) -> None:
@@ -103,6 +117,22 @@ def write_github_api(method: str, endpoint: str, payload: dict[str, object]) -> 
         check=True,
         input=json.dumps(payload),
         text=True,
+    )
+
+
+def delete_github_api(endpoint: str) -> None:
+    result = subprocess.run(
+        ["gh", "api", "--method", "DELETE", endpoint, "--silent"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 or "(HTTP 404)" in result.stderr:
+        return
+    raise subprocess.CalledProcessError(
+        result.returncode,
+        result.args,
+        output=result.stdout,
+        stderr=result.stderr,
     )
 
 
@@ -117,6 +147,17 @@ def targets_default_branch(ruleset: dict[str, object]) -> bool:
     ref_name = object_mapping(conditions.get("ref_name"), "ruleset ref condition")
     included_refs = ref_name.get("include")
     return isinstance(included_refs, list) and "~DEFAULT_BRANCH" in included_refs
+
+
+def remove_legacy_pull_request_rule(repository: str) -> None:
+    details = object_mapping(read_github_api(f"repos/{repository}"), "repository")
+    default_branch = details.get("default_branch")
+    if not isinstance(default_branch, str):
+        raise RuntimeError("GitHub returned an invalid default branch")
+    branch = quote(default_branch, safe="")
+    delete_github_api(
+        f"repos/{repository}/branches/{branch}/protection/required_pull_request_reviews"
+    )
 
 
 def default_branch_ruleset(
@@ -163,30 +204,56 @@ def default_branch_ruleset(
     return None
 
 
-def sync_repository(repository: str) -> None:
+def sync_repository(repository: str, *, allow_direct_push: bool = False) -> None:
     write_github_api("PATCH", f"repos/{repository}", REPOSITORY_SETTINGS)
 
     existing_ruleset = default_branch_ruleset(repository)
     if existing_ruleset is None:
-        write_github_api("POST", f"repos/{repository}/rulesets", ruleset_for(None))
+        write_github_api(
+            "POST",
+            f"repos/{repository}/rulesets",
+            ruleset_for(None, allow_direct_push=allow_direct_push),
+        )
     else:
         ruleset_id, ruleset = existing_ruleset
         write_github_api(
             "PUT",
             f"repos/{repository}/rulesets/{ruleset_id}",
-            ruleset_for(ruleset),
+            ruleset_for(ruleset, allow_direct_push=allow_direct_push),
         )
+
+    # Rulesets are the source of truth. Remove any legacy branch-protection PR
+    # requirement after the replacement rule is active so direct mode works.
+    remove_legacy_pull_request_rule(repository)
 
     print(f"{repository}: repository settings and ruleset synced")
 
 
-def main(repositories: list[str]) -> int:
+def parse_args(arguments: list[str]) -> tuple[list[str], bool]:
+    parser = argparse.ArgumentParser(
+        description="Apply repository settings and default-branch rules."
+    )
+    _ = parser.add_argument(
+        "--allow-direct-push",
+        action="store_true",
+        help="Allow direct pushes by omitting the pull-request rule.",
+    )
+    _ = parser.add_argument("repositories", metavar="OWNER/REPOSITORY", nargs="*")
+    parsed = parser.parse_args(arguments)
+    return cast(list[str], parsed.repositories), cast(bool, parsed.allow_direct_push)
+
+
+def main(arguments: list[str]) -> int:
+    repositories, allow_direct_push = parse_args(arguments)
     if not repositories:
-        print(f"usage: {sys.argv[0]} OWNER/REPOSITORY...", file=sys.stderr)
+        print(
+            f"usage: {sys.argv[0]} [--allow-direct-push] OWNER/REPOSITORY...",
+            file=sys.stderr,
+        )
         return 2
 
     for repository in repositories:
-        sync_repository(repository)
+        sync_repository(repository, allow_direct_push=allow_direct_push)
 
     return 0
 
