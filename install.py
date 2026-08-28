@@ -417,8 +417,18 @@ def managed_links():
     links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
 
     links.append(
+        ("pi", REPO_ROOT / "pi/settings.json", HOME / ".pi/agent/settings.json")
+    )
+    links.append(
         ("pi", REPO_ROOT / "pi/pi-lens-config.json", HOME / ".pi-lens/config.json")
     )
+    pi_themes_dir = REPO_ROOT / "pi/themes"
+    if pi_themes_dir.is_dir():
+        for theme_file in sorted(pi_themes_dir.glob("*.json")):
+            links.append(
+                ("pi", theme_file, HOME / ".pi/agent/themes" / theme_file.name)
+            )
+
     pi_extensions_dir = REPO_ROOT / "pi/extensions"
     if pi_extensions_dir.is_dir():
         for extension in sorted(pi_extensions_dir.iterdir()):
@@ -712,21 +722,8 @@ def install_claude():
     merge_claude_settings()
 
 
-def copy_pi_settings():
-    """Copy the repo's global Pi settings into place."""
-    source = REPO_ROOT / "pi/settings.json"
-    target = HOME / ".pi/agent/settings.json"
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.is_symlink():
-        raise RuntimeError(f"refusing to overwrite symlink: {target}")
-    shutil.copy2(source, target)
-    print(f"copied pi settings to {target}")
-
-
 def install_pi():
     print("applying pi config")
-    copy_pi_settings()
     apply_links(links_for("pi"))
 
 

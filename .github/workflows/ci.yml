@@ -38,6 +38,7 @@ jobs:
       - name: validate installer
         run: |
           python3 -m py_compile install.py
+          python3 -m unittest install_test.py
           python3 install.py --verify-idempotent
 
       - name: validate github settings
