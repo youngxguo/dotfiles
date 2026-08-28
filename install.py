@@ -19,6 +19,7 @@ HOME = Path.home()
 LINUX_APT_UPDATED = False
 VERIFY_MODE = False
 BTOP_VERSION = "v1.4.7"
+GH_EXTENSIONS = ("dlvhdr/gh-dash",)
 BTOP_LINUX_RELEASES = {
     "aarch64": (
         "btop-aarch64-unknown-linux-musl.tar.gz",
@@ -517,6 +518,28 @@ def install_homebrew():
     return command_exists("brew")
 
 
+def install_github_cli():
+    print("installing github cli")
+    if VERIFY_MODE:
+        print("verify mode: skipping github cli package/extension bootstrap")
+        return
+    if not install_homebrew_only_package("gh"):
+        print("skipping github cli extensions: gh is not installed")
+        return
+
+    extension_output = subprocess.check_output(["gh", "extension", "list"], text=True)
+    installed_extensions = {
+        columns[1]
+        for line in extension_output.splitlines()
+        if len(columns := line.split("\t")) >= 2
+    }
+    for extension in GH_EXTENSIONS:
+        if extension in installed_extensions:
+            print(f"github cli extension {extension} already installed")
+        else:
+            run(["gh", "extension", "install", extension])
+
+
 def install_zsh_stack():
     print("installing zsh")
     if VERIFY_MODE:
@@ -768,7 +791,6 @@ def install_neovim():
     install_homebrew_only_package("tree-sitter-cli")
     install_homebrew_only_package("typescript-language-server")
     install_homebrew_only_package("basedpyright")
-    install_homebrew_only_package("gh")
     install_homebrew_only_package("chafa")
     install_homebrew_only_package("viu")
     install_homebrew_only_package("mercurial")
@@ -784,6 +806,7 @@ def install_neovim():
 
 def run_install_flow():
     install_homebrew()
+    install_github_cli()
     install_zsh_stack()
     install_ghostty()
     install_herdr()
