@@ -527,7 +527,17 @@ def install_github_cli():
         print("skipping github cli extensions: gh is not installed")
         return
 
-    extension_output = subprocess.check_output(["gh", "extension", "list"], text=True)
+    try:
+        extension_output = subprocess.check_output(
+            ["gh", "extension", "list"], text=True, stderr=subprocess.DEVNULL
+        )
+    except subprocess.CalledProcessError:
+        print(
+            "skipping github cli extensions: gh is not authenticated "
+            "(run `gh auth login`, then re-run install.py)"
+        )
+        return
+
     installed_extensions = {
         columns[1]
         for line in extension_output.splitlines()
@@ -537,7 +547,12 @@ def install_github_cli():
         if extension in installed_extensions:
             print(f"github cli extension {extension} already installed")
         else:
-            run(["gh", "extension", "install", extension])
+            try:
+                run(["gh", "extension", "install", extension])
+            except subprocess.CalledProcessError:
+                print(
+                    f"warning: unable to install gh extension {extension}; continuing"
+                )
 
 
 def install_zsh_stack():
