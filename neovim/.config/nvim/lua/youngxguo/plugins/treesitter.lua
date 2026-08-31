@@ -1,57 +1,29 @@
 return {
   {
     "nvim-treesitter/nvim-treesitter",
-    branch = "master",
+    -- `main` is the branch that supports Neovim 0.12; `master` is frozen at 0.11.
+    branch = "main",
+    lazy = false, -- `main` does not support lazy-loading
     build = ":TSUpdate",
-    dependencies = {
-      -- Pinned to master to match the classic nvim-treesitter API.
-      { "nvim-treesitter/nvim-treesitter-textobjects", branch = "master" },
-    },
     config = function()
-      -- NOTE: the config table must go to nvim-treesitter.configs; the top-level
-      -- require("nvim-treesitter").setup() takes no arguments and silently drops it.
-      require("nvim-treesitter.configs").setup({
-        ensure_installed = {
-          "javascript",
-          "typescript",
-          "tsx",
-          "lua",
-          "c",
-          "cpp",
-          "markdown",
-          "markdown_inline",
-        },
-        auto_install = true,
-        highlight = { enable = true },
-        incremental_selection = {
-          enable = true,
-          keymaps = {
-            init_selection = "<C-space>",
-            node_incremental = "<C-space>",
-            node_decremental = "<bs>",
-            scope_incremental = false,
-          },
-        },
-        textobjects = {
-          select = {
-            enable = true,
-            lookahead = true,
-            keymaps = {
-              ["af"] = "@function.outer",
-              ["if"] = "@function.inner",
-              ["ac"] = "@class.outer",
-              ["ic"] = "@class.inner",
-              ["aa"] = "@parameter.outer",
-              ["ia"] = "@parameter.inner",
-            },
-          },
-          move = {
-            enable = true,
-            set_jumps = true,
-            goto_next_start = { ["]f"] = "@function.outer" },
-            goto_previous_start = { ["[f"] = "@function.outer" },
-          },
-        },
+      local ts = require("nvim-treesitter")
+      local available = ts.get_available()
+
+      -- `main` dropped the module system, so highlighting is started per buffer.
+      -- Install the parser first if we don't have it yet; install() returns
+      -- immediately for parsers that are already there.
+      vim.api.nvim_create_autocmd("FileType", {
+        callback = function(ev)
+          local lang = vim.treesitter.language.get_lang(ev.match)
+          if not lang or not vim.list_contains(available, lang) then
+            return
+          end
+          ts.install({ lang }):await(vim.schedule_wrap(function()
+            if vim.api.nvim_buf_is_valid(ev.buf) then
+              pcall(vim.treesitter.start, ev.buf, lang)
+            end
+          end))
+        end,
       })
     end,
   },
