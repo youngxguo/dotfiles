@@ -56,6 +56,14 @@ key = "ctrl+l"
 type = "plugin_action"
 command = "herdr-splits.nav-right"
 
+# Open any git repo under ~/Documents/code as a new workspace, like tmux-sessionizer.
+[[keys.command]]
+key = "prefix+f"
+type = "popup"
+command = 'export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"; dir=$(fd -H -t d -d 3 "^\.git$" ~/Documents/code -x dirname | sort -u | fzf --prompt="new workspace > ") && [ -n "$dir" ] && herdr workspace create --cwd "$dir" --label "${dir##*/}" --focus'
+width = "70%"
+height = "50%"
+
 [ui]
 prompt_new_tab_name = true
 prompt_new_workspace_name = true

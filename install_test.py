@@ -49,6 +49,93 @@ class PiConfigInstallTest(unittest.TestCase):
                 )
 
 
+class HerdrInstallTest(unittest.TestCase):
+    def test_install_herdr_downloads_once_then_links_config(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-herdr-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            repo = root / "repo"
+            source = repo / "herdr/config.toml"
+            source.parent.mkdir(parents=True)
+            source.write_text("onboarding = false\n", encoding="utf-8")
+
+            target = home / ".config/herdr/config.toml"
+
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "REPO_ROOT", repo),
+                mock.patch.object(install, "command_exists", return_value=False),
+                mock.patch.object(install, "run") as run_mock,
+            ):
+                install.install_herdr()
+                self.assertEqual(len(run_mock.mock_calls), 1)
+                self.assertIn(
+                    install.HERDR_INSTALL_URL, run_mock.mock_calls[0].args[0][-1]
+                )
+                self.assertEqual(target.resolve(), source.resolve())
+
+                # the installer drops the binary in ~/.local/bin, which is not
+                # necessarily on PATH yet; a second run must not re-download it.
+                binary = home / ".local/bin/herdr"
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.touch()
+
+                run_mock.reset_mock()
+                install.install_herdr()
+                run_mock.assert_not_called()
+                self.assertTrue(target.is_symlink())
+
+
+class HerdrPluginInstallTest(unittest.TestCase):
+    def test_install_herdr_plugins_installs_missing_then_skips_installed(self):
+        repo, plugin_id = install.HERDR_PLUGINS[0]
+
+        with (
+            mock.patch.object(install, "herdr_command", return_value="herdr"),
+            mock.patch.object(
+                install.subprocess, "check_output", return_value="No plugins installed."
+            ),
+            mock.patch.object(install, "run") as run_mock,
+        ):
+            install.install_herdr_plugins()
+
+        # the herdr-side copy must be pinned to the commit lazy-lock.json already
+        # pins the neovim-side to, so the two halves cannot drift apart.
+        commit = install.lazy_lock_commit(repo.rsplit("/", 1)[-1])
+        self.assertIsNotNone(commit, "herdr-splits is missing from lazy-lock.json")
+        commands = [call.args[0] for call in run_mock.mock_calls]
+        self.assertIn(
+            ["herdr", "plugin", "install", repo, "--ref", commit, "-y"], commands
+        )
+
+        # a plugin id already in `herdr plugin list` must not be reinstalled;
+        # the reload still runs so a live server picks up the keybindings.
+        with (
+            mock.patch.object(install, "herdr_command", return_value="herdr"),
+            mock.patch.object(
+                install.subprocess,
+                "check_output",
+                side_effect=[
+                    f"- {plugin_id} (Herdr Splits) enabled\n",
+                    "status: running\n",
+                ],
+            ),
+            mock.patch.object(install, "run") as run_mock,
+        ):
+            install.install_herdr_plugins()
+
+        commands = [call.args[0] for call in run_mock.mock_calls]
+        self.assertEqual(commands, [["herdr", "server", "reload-config"]])
+
+    def test_install_herdr_plugins_skips_without_herdr(self):
+        with (
+            mock.patch.object(install, "herdr_command", return_value=None),
+            mock.patch.object(install, "run") as run_mock,
+        ):
+            install.install_herdr_plugins()
+        run_mock.assert_not_called()
+
+
 class NeovimPluginCommandTest(unittest.TestCase):
     def test_install_pins_plugins_to_the_lockfile(self):
         lua = " ".join(

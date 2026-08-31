@@ -21,6 +21,11 @@ VERIFY_MODE = False
 UPDATE_PLUGINS = False
 BTOP_VERSION = "v1.4.7"
 GH_EXTENSIONS = ("dlvhdr/gh-dash",)
+HERDR_INSTALL_URL = "https://herdr.dev/install.sh"
+# (owner/repo, plugin id). herdr/config.toml binds ctrl+hjkl to this plugin's
+# nav-* actions, and `herdr config check` validates syntax only — an unresolved
+# action is dropped silently, so without this the keys are dead on a new machine.
+HERDR_PLUGINS = (("lmilojevicc/herdr-splits.nvim", "herdr-splits"),)
 BTOP_LINUX_RELEASES = {
     "aarch64": (
         "btop-aarch64-unknown-linux-musl.tar.gz",
@@ -616,9 +621,98 @@ def install_ghostty():
     apply_links(links_for("ghostty"))
 
 
+def herdr_command():
+    # the upstream installer drops the binary in ~/.local/bin, which zsh/.zshrc
+    # adds to PATH but the shell running install.py may not have yet.
+    if command_exists("herdr"):
+        return "herdr"
+    fallback = HOME / ".local/bin/herdr"
+    return str(fallback) if fallback.is_file() else None
+
+
+def herdr_installed():
+    return herdr_command() is not None
+
+
+def lazy_lock_commit(plugin_name):
+    # herdr-splits ships both halves from one repo: the herdr-side actions and
+    # the neovim-side plugin have to speak the same protocol, so pin herdr's copy
+    # to whatever lazy already pinned instead of drifting onto the default branch.
+    lockfile = REPO_ROOT / "neovim/.config/nvim/lazy-lock.json"
+    try:
+        pins = json.loads(lockfile.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    entry = pins.get(plugin_name)
+    return entry.get("commit") if isinstance(entry, dict) else None
+
+
+def install_herdr_plugins():
+    herdr = herdr_command()
+    if herdr is None:
+        print("skipping herdr plugins: herdr is not installed")
+        return
+
+    try:
+        plugin_output = subprocess.check_output(
+            [herdr, "plugin", "list"], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, OSError):
+        print("skipping herdr plugins: unable to list installed plugins")
+        return
+
+    for repo, plugin_id in HERDR_PLUGINS:
+        if plugin_id in plugin_output:
+            print(f"herdr plugin {plugin_id} already installed")
+            continue
+        commit = lazy_lock_commit(repo.rsplit("/", 1)[-1])
+        pin = ["--ref", commit] if commit else []
+        try:
+            run([herdr, "plugin", "install", repo, *pin, "-y"])
+        except subprocess.CalledProcessError:
+            print(f"warning: unable to install herdr plugin {repo}; continuing")
+
+    # keybindings resolve plugin actions at load time, so a server that was
+    # already up keeps dropping ctrl+hjkl until it re-reads the config. on a
+    # fresh machine there is no server yet and the first launch reads it anyway.
+    try:
+        status = subprocess.check_output(
+            [herdr, "status", "server"], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return
+    if "status: running" not in status:
+        return
+    try:
+        run([herdr, "server", "reload-config"])
+    except subprocess.CalledProcessError:
+        print(
+            "warning: unable to reload herdr config; restart herdr to pick up plugins"
+        )
+
+
 def install_herdr():
+    print("installing herdr")
+    if VERIFY_MODE:
+        print("verify mode: skipping herdr bootstrap")
+    elif herdr_installed():
+        print("herdr already installed")
+    else:
+        # upstream's installer covers macos/linux on x86_64/aarch64, checks the
+        # release checksum, and installs to ~/.local/bin. homebrew only carries
+        # the stable channel, so this keeps both platforms on one path and lets
+        # `herdr update` follow the preview channel from herdr/config.toml.
+        try:
+            run(["sh", "-c", f"curl -fsSL {HERDR_INSTALL_URL} | sh"])
+        except subprocess.CalledProcessError:
+            print("warning: unable to install herdr; continuing")
+
     print("applying herdr config")
     apply_links(links_for("herdr"))
+
+    if not VERIFY_MODE:
+        print("installing herdr plugins")
+        install_herdr_plugins()
 
 
 def install_tmux():
