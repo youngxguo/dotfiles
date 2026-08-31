@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
 LINUX_APT_UPDATED = False
 VERIFY_MODE = False
+UPDATE_PLUGINS = False
 BTOP_VERSION = "v1.4.7"
 GH_EXTENSIONS = ("dlvhdr/gh-dash",)
 BTOP_LINUX_RELEASES = {
@@ -792,11 +793,49 @@ def install_codex():
         apply_links(pet_links)
 
 
+def neovim_lua_command(lua):
+    return ["nvim", "--headless", f"+lua {lua}", "+qa"]
+
+
+def neovim_plugin_commands(update=False):
+    """Return the headless nvim commands that bring plugins to the wanted state.
+
+    Installing and updating are deliberately separate. ``lazy.sync()`` is
+    clean + install + *update*, and update fetches the newest commit matching
+    each version spec and then rewrites lazy-lock.json — so running it here
+    would make a "fresh machine" install whatever landed upstream that morning
+    and leave the repo dirty on every run. The committed lockfile is the
+    contract instead: ``install`` clones missing plugins straight to their
+    locked commits, and ``restore`` pulls already-installed ones back to the
+    lock (it only touches installed plugins, which is why both are needed).
+    Moving the lock is then an explicit act via ``--update-plugins``, whose
+    diff you review and commit.
+    """
+    if update:
+        print("updating neovim plugins (this rewrites lazy-lock.json)")
+        plugins = [neovim_lua_command("require('lazy').sync({wait = true})")]
+    else:
+        print("installing neovim plugins at their locked commits")
+        plugins = [
+            neovim_lua_command(
+                "require('lazy').install({wait = true, lockfile = true})"
+            ),
+            neovim_lua_command("require('lazy').restore({wait = true})"),
+        ]
+    # parsers are not covered by lazy-lock.json; treesitter tracks its own
+    # revisions per parser and TSUpdateSync is the only way to fetch them.
+    return [*plugins, ["nvim", "--headless", "-c", "TSUpdateSync", "-c", "quitall"]]
+
+
 def install_neovim():
     if VERIFY_MODE:
         print("verify mode: skipping neovim package/bootstrap")
         apply_links(links_for("neovim"))
-        print("verify mode: skipping neovim sync")
+        # nvim reads $HOME from the environment, not our patched module global,
+        # so running it here would mutate the real plugin dir and lockfile that
+        # verify mode exists to avoid touching. neovim_plugin_commands is
+        # covered by install_test.py instead.
+        print("verify mode: skipping neovim plugin bootstrap")
         return
     install_package("neovim")
     install_package("ripgrep")
@@ -814,9 +853,8 @@ def install_neovim():
         print("skipping neovim config: nvim is not installed")
         return
     apply_links(links_for("neovim"))
-    print("syncing neovim plugins")
-    run(["nvim", "--headless", "+lua require('lazy').sync({wait = true})", "+qa"])
-    run(["nvim", "--headless", "-c", "TSUpdateSync", "-c", "quitall"])
+    for command in neovim_plugin_commands(update=UPDATE_PLUGINS):
+        run(command)
 
 
 def run_install_flow():
@@ -922,14 +960,25 @@ def parse_args():
         action="store_true",
         help="Run a safe two-pass install verification in a temporary HOME.",
     )
+    parser.add_argument(
+        "--update-plugins",
+        action="store_true",
+        help=(
+            "Update neovim plugins to the newest allowed commits and rewrite "
+            "lazy-lock.json. Without this, plugins are pinned to the lockfile."
+        ),
+    )
     return parser.parse_args()
 
 
 def main():
+    global UPDATE_PLUGINS
+
     args = parse_args()
     if args.verify_idempotent:
         verify_idempotent()
         return
+    UPDATE_PLUGINS = args.update_plugins
     run_install_flow()
 
 
