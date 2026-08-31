@@ -4,6 +4,19 @@ export ZSH="$HOME/.oh-my-zsh"
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="/usr/local/go/bin:$PATH"
 
+# homebrew: apple silicon uses /opt/homebrew and linuxbrew ~/.linuxbrew, neither
+# of which is on the default PATH, so brew-installed tools are invisible without
+# this. intel macs use /usr/local, which is already on PATH, but shellenv also
+# sets MANPATH/INFOPATH so run it there too.
+for _brew in /opt/homebrew/bin/brew /usr/local/bin/brew \
+             /home/linuxbrew/.linuxbrew/bin/brew "$HOME/.linuxbrew/bin/brew"; do
+  if [ -x "$_brew" ]; then
+    eval "$("$_brew" shellenv)"
+    break
+  fi
+done
+unset _brew
+
 # prompt: starship replaces the oh-my-zsh theme (config in starship/starship.toml)
 ZSH_THEME=""
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=10"
