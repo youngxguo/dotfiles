@@ -73,6 +73,11 @@ fi
 
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 
+# editor (EDITOR is what sops, crontab, less, etc. exec - the `vim` alias
+# below is interactive-only and never reaches them)
+export EDITOR=nvim
+export VISUAL=nvim
+
 # git
 export GIT_EDITOR=nvim
 
