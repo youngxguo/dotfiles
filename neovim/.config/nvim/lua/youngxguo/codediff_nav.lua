@@ -64,10 +64,20 @@ local function find_codediff_tab()
   return nil
 end
 
+-- Did this session start from a revision (<leader>gD) or the working tree
+-- (<leader>gd)? The side panel knows: an explorer opened with a base revision
+-- carries it. codediff renamed that accessor from `get_explorer` to
+-- `get_panel_view` once panels covered history views too, so probe for either
+-- and only fall back to the git context when the session has no panel at all --
+-- a plain working-tree session still records an `original_revision` (`:0` or
+-- HEAD), so that fallback cannot tell the two kinds apart on its own.
 local function session_has_revision(lifecycle, tabpage)
-  local explorer = lifecycle.get_explorer(tabpage)
-  if explorer then
-    return explorer.base_revision ~= nil
+  local get_panel = lifecycle.get_panel_view or lifecycle.get_explorer
+  if get_panel then
+    local panel = get_panel(tabpage)
+    if panel then
+      return panel.base_revision ~= nil
+    end
   end
 
   local context = lifecycle.get_git_context(tabpage)
