@@ -132,26 +132,15 @@ if [[ -n ${TMUX_PANE:-} ]]; then
   add-zsh-hook precmd _tmux_clear_ai_state
 fi
 
-# nvm — lazy-loaded to keep shell startup fast. The default node version stays
-# on PATH immediately (so node/npm work in scripts and subshells); the full nvm
-# machinery loads on first use of nvm/node/npm/npx.
+# nvm. --no-use skips nvm's default-version resolution, which is the slow part
+# of sourcing it (~600ms); PATH points at the default version directly instead,
+# so node/npm/npx are plain binaries and `nvm use` still works.
 export NVM_DIR="$HOME/.nvm"
-if [ -d "$NVM_DIR" ]; then
-  if [ -r "$NVM_DIR/alias/default" ]; then
-    _nvm_default="$(<"$NVM_DIR/alias/default")"
-    _nvm_default_bin=("$NVM_DIR"/versions/node/v${_nvm_default}*/bin(Nn[-1]))
-    [ -n "$_nvm_default_bin" ] && export PATH="$_nvm_default_bin:$PATH"
-    unset _nvm_default _nvm_default_bin
-  fi
-  _nvm_lazy() {
-    unset -f nvm node npm npx 2>/dev/null
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-  }
-  for _cmd in nvm node npm npx; do
-    eval "${_cmd}() { _nvm_lazy; ${_cmd} \"\$@\"; }"
-  done
-  unset _cmd
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  \. "$NVM_DIR/nvm.sh" --no-use
+  [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+  [ -r "$NVM_DIR/alias/default" ] &&
+    export PATH="$NVM_DIR/versions/node/v$(<"$NVM_DIR/alias/default")/bin:$PATH"
 fi
 
 # personal aliases/functions/secrets live outside the dotfiles repo
