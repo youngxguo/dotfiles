@@ -26,6 +26,10 @@ HERDR_INSTALL_URL = "https://herdr.dev/install.sh"
 # nav-* actions, and `herdr config check` validates syntax only — an unresolved
 # action is dropped silently, so without this the keys are dead on a new machine.
 HERDR_PLUGINS = (("lmilojevicc/herdr-splits.nvim", "herdr-splits"),)
+PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
+# pi's package.json engines field. npm refuses the install below it, and a
+# distro node is often older, so check it up front to say why pi was skipped.
+PI_MIN_NODE_VERSION = (22, 19, 0)
 BTOP_LINUX_RELEASES = {
     "aarch64": (
         "btop-aarch64-unknown-linux-musl.tar.gz",
@@ -47,7 +51,13 @@ LINUX_PACKAGE_OVERRIDES = {
         "dnf": "fd-find",
         "pacman": "fd",
         "zypper": "fd",
-    }
+    },
+    "node": {
+        "apt": "nodejs",
+        "dnf": "nodejs",
+        "pacman": "nodejs",
+        "zypper": "nodejs",
+    },
 }
 
 PACKAGE_BINARIES = {
@@ -844,7 +854,86 @@ def install_claude():
     merge_claude_settings()
 
 
+def node_version():
+    """Return the installed node version as a (major, minor, patch) tuple."""
+    if not command_exists("node"):
+        return None
+    try:
+        raw = subprocess.check_output(["node", "--version"], text=True).strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    parts = raw.lstrip("v").split("-", 1)[0].split(".")[:3]
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError:
+        return None
+
+
+def npm_global_prefix():
+    try:
+        prefix = subprocess.check_output(["npm", "prefix", "-g"], text=True).strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    return Path(prefix) if prefix else None
+
+
+def pi_installed():
+    # npm's global bin is not necessarily on PATH in the shell running this
+    # script (a linux system node puts it in /usr/bin, nvm under ~/.nvm), so
+    # fall back to the prefix npm would install into before reinstalling.
+    if command_exists("pi"):
+        return True
+    prefix = npm_global_prefix()
+    return prefix is not None and (prefix / "bin/pi").exists()
+
+
+def install_pi_cli():
+    if not command_exists("npm"):
+        install_package("node")
+        # debian and friends ship npm separately from the nodejs package.
+        if not command_exists("npm") and sys.platform.startswith("linux"):
+            install_package("npm")
+    if not command_exists("npm"):
+        print("skipping pi: npm is not available")
+        return
+
+    version = node_version()
+    wanted = ".".join(str(part) for part in PI_MIN_NODE_VERSION)
+    if version is None or version < PI_MIN_NODE_VERSION:
+        found = ".".join(str(part) for part in version) if version else "none"
+        print(f"skipping pi: node {wanted}+ is required (found {found})")
+        return
+
+    # upstream's curl installer is an interactive menu that also offers to edit
+    # the shell profile zsh/.zshrc already owns, so run the npm install it ends
+    # up performing instead. --ignore-scripts is upstream's documented quick
+    # start: pi needs no dependency lifecycle scripts.
+    cmd = ["npm", "install", "-g", "--ignore-scripts", PI_NPM_PACKAGE]
+    prefix = npm_global_prefix()
+    if prefix is not None and not os.access(prefix, os.W_OK):
+        # homebrew and nvm prefixes belong to the user; a linux system node
+        # installs globals under a root-owned /usr.
+        privileged = with_privilege(cmd)
+        if not privileged:
+            print("skipping pi: sudo is required to write to npm's global prefix")
+            return
+        cmd = privileged
+
+    try:
+        run(cmd)
+    except subprocess.CalledProcessError:
+        print("warning: unable to install pi; continuing")
+
+
 def install_pi():
+    print("installing pi")
+    if VERIFY_MODE:
+        print("verify mode: skipping pi bootstrap")
+    elif pi_installed():
+        print("pi already installed")
+    else:
+        install_pi_cli()
+
     print("applying pi config")
     apply_links(links_for("pi"))
 

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest import mock
 
@@ -28,6 +29,8 @@ class PiConfigInstallTest(unittest.TestCase):
             with (
                 mock.patch.object(install, "HOME", home),
                 mock.patch.object(install, "REPO_ROOT", repo),
+                mock.patch.object(install, "install_pi_cli"),
+                mock.patch.object(install, "pi_installed", return_value=True),
             ):
                 install.install_pi()
                 self.assertTrue(target.is_symlink())
@@ -47,6 +50,82 @@ class PiConfigInstallTest(unittest.TestCase):
                 self.assertEqual(
                     len(list(target.parent.glob("settings.json.bak.*"))), 1
                 )
+
+
+class PiCliInstallTest(unittest.TestCase):
+    @staticmethod
+    def pi_patches(home, repo, prefix, npm_installed):
+        """Patch install.py down to the two things a pi install depends on:
+        an npm on PATH and the prefix it installs into."""
+        return (
+            mock.patch.object(install, "HOME", home),
+            mock.patch.object(install, "REPO_ROOT", repo),
+            mock.patch.object(install, "npm_global_prefix", return_value=prefix),
+            mock.patch.object(install, "node_version", return_value=(22, 19, 0)),
+            mock.patch.object(
+                install,
+                "command_exists",
+                side_effect=lambda cmd: npm_installed and cmd == "npm",
+            ),
+        )
+
+    def test_install_pi_installs_the_cli_once(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-pi-cli-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            repo = root / "repo"
+            prefix = root / "prefix"
+            (prefix / "bin").mkdir(parents=True)
+            source = repo / "pi/settings.json"
+            source.parent.mkdir(parents=True)
+            source.write_text('{"theme": "dark"}\n', encoding="utf-8")
+            (repo / "pi/pi-lens-config.json").write_text("{}\n", encoding="utf-8")
+
+            with ExitStack() as stack:
+                for patch in self.pi_patches(home, repo, prefix, npm_installed=False):
+                    stack.enter_context(patch)
+                package_mock = stack.enter_context(
+                    mock.patch.object(install, "install_package")
+                )
+                run_mock = stack.enter_context(mock.patch.object(install, "run"))
+                install.install_pi()
+
+            # npm is missing, so node has to be bootstrapped before the install.
+            self.assertIn(mock.call("node"), package_mock.mock_calls)
+            run_mock.assert_not_called()
+
+            with ExitStack() as stack:
+                for patch in self.pi_patches(home, repo, prefix, npm_installed=True):
+                    stack.enter_context(patch)
+                run_mock = stack.enter_context(mock.patch.object(install, "run"))
+                install.install_pi()
+
+            self.assertEqual(
+                [call.args[0] for call in run_mock.mock_calls],
+                [["npm", "install", "-g", "--ignore-scripts", install.PI_NPM_PACKAGE]],
+            )
+            self.assertEqual(
+                (home / ".pi/agent/settings.json").resolve(), source.resolve()
+            )
+
+            # pi lands in npm's global prefix, which is not necessarily on PATH
+            # in the shell running install.py; a second run must not reinstall it.
+            (prefix / "bin/pi").touch()
+            with ExitStack() as stack:
+                for patch in self.pi_patches(home, repo, prefix, npm_installed=True):
+                    stack.enter_context(patch)
+                run_mock = stack.enter_context(mock.patch.object(install, "run"))
+                install.install_pi()
+            run_mock.assert_not_called()
+
+    def test_install_pi_cli_skips_an_old_node(self):
+        with (
+            mock.patch.object(install, "command_exists", return_value=True),
+            mock.patch.object(install, "node_version", return_value=(20, 19, 0)),
+            mock.patch.object(install, "run") as run_mock,
+        ):
+            install.install_pi_cli()
+        run_mock.assert_not_called()
 
 
 class HerdrInstallTest(unittest.TestCase):
