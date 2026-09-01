@@ -49,6 +49,13 @@ return {
     fzf_opts = {
       ["--layout"] = "reverse",
     },
+    -- The telescope profile rebinds ctrl-u to preview-page-up, which breaks
+    -- Cmd-Backspace (Ghostty sends it as ctrl-u) and fzf's own clear-to-start.
+    -- Restore it; Shift-Up still pages the preview up, ctrl-d still pages down.
+    keymap = {
+      builtin = { ["<C-u>"] = false },
+      fzf = { ["ctrl-u"] = "unix-line-discard" },
+    },
     files = {
       hidden = true,
       rg_opts = [[--color=never --hidden --files -g "!.git" -g "!node_modules/**" -g "!bazel-out/**" -g "!bazel-bin/**" -g "!bazel-testlogs/**" -g "!lcov-report/**" -g "!map_tiles/**" -g "!*.generated" -g "!data/py/**"]],

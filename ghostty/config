@@ -12,6 +12,11 @@ desktop-notifications = true
 # Send Option-Enter as Meta-Enter so tmux can distinguish it from Ctrl-J.
 keybind = alt+enter=text:\x1b\x0d
 
+# Cmd-Backspace: delete to the start of the line, like the rest of macOS. Send
+# Ctrl-U, which fzf (fzf-lua pickers), zsh, Neovim insert mode and Claude Code
+# all read as "kill to line start". Without this Ghostty sends a plain Backspace.
+keybind = super+backspace=text:\x15
+
 # Cmd 1-9: jump to the Nth tmux session or Herdr agent chat. Ghostty owns these
 # chords by default, so unbind both trigger forms and let the active multiplexer
 # receive the real Command-modified key. Herdr binds cmd+1..9 directly; tmux
