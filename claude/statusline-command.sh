@@ -19,16 +19,6 @@ else:
 print(display)
 ")
 
-# Session title, set by hooks/auto-name-session.sh or /rename. Claude Code
-# spreads session_name into the statusLine payload only once a name exists, so
-# this stays empty on unnamed sessions and the chip below is skipped.
-session_name=$(echo "$input" | python3 -c "
-import sys, json
-n = json.load(sys.stdin).get('session_name', '') or ''
-n = ' '.join(n.split())
-print(n[:119] + '\u2026' if len(n) > 120 else n)
-")
-
 # Paths for persistent cost tracking
 CLAUDE_DIR="$HOME/.claude"
 TRACKING_DIR="$CLAUDE_DIR/cost-tracking"
@@ -115,13 +105,6 @@ reset = '\033[0m'
 print(color + bar + reset + overflow, end='')
 "
 }
-
-# Session title on its own row above the metrics. A status line script may
-# print several rows and Claude Code renders each as its own line, so the title
-# gets the full width instead of competing with the bars below.
-if [ -n "$session_name" ]; then
-  printf "\033[01;34m%s\033[00m\n" "$session_name"
-fi
 
 # Model in bright magenta
 printf "\033[01;35m%s\033[00m" "$model"
