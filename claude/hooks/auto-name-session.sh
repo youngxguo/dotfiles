@@ -22,8 +22,9 @@ if [ -n "$session_id" ] && [ -f "$marker" ]; then
   exit 0
 fi
 
-# Derive a short title: first line, collapse whitespace, trim to 50 chars.
-title=$(printf '%s' "$prompt" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-50 | sed -E 's/ *$//')
+# Derive a title: first line, collapse whitespace, trim to 100 chars. The
+# statusline renders this on its own row, so it has the width for a longer name.
+title=$(printf '%s' "$prompt" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-100 | sed -E 's/ *$//')
 
 if [ -z "$title" ]; then
   exit 0
