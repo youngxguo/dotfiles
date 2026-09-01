@@ -910,6 +910,39 @@ def neovim_plugin_commands(update=False):
     return [*plugins, ["nvim", "--headless", "-c", "TSUpdateSync", "-c", "quitall"]]
 
 
+def ensure_typescript_fallback():
+    """Install the typescript that ts_ls falls back to when a project has none.
+
+    typescript-language-server drives a real typescript install and exits
+    during `initialize` without one, so a repo whose node_modules are not
+    installed - or a stray .ts file outside any package - takes the whole LSP
+    client down with an error. The neovim config points `tsserver.path` at this
+    copy; nothing else uses it.
+    """
+    target = HOME / ".local/share/nvim/ts-fallback"
+    if (target / "node_modules/typescript/lib/tsserver.js").exists():
+        print("neovim typescript fallback already installed")
+        return
+    if VERIFY_MODE:
+        print("verify mode: skipping neovim typescript fallback")
+        return
+    if not command_exists("npm"):
+        print("skipping neovim typescript fallback: npm is not available")
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            "npm",
+            "install",
+            "--prefix",
+            str(target),
+            "--no-audit",
+            "--no-fund",
+            "typescript@5",
+        ]
+    )
+
+
 def install_neovim():
     if VERIFY_MODE:
         print("verify mode: skipping neovim package/bootstrap")
@@ -927,6 +960,7 @@ def install_neovim():
     install_homebrew_only_package("ruff")
     install_homebrew_only_package("tree-sitter-cli")
     install_homebrew_only_package("typescript-language-server")
+    ensure_typescript_fallback()
     install_homebrew_only_package("basedpyright")
     install_homebrew_only_package("chafa")
     install_homebrew_only_package("viu")

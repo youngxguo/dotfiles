@@ -48,66 +48,19 @@ vim.api.nvim_create_autocmd('LspAttach', {
   end,
 })
 
-local function local_tsserver_path(root_dir)
-  if not root_dir or root_dir == '' then
-    return nil
-  end
-
-  local path = root_dir .. '/node_modules/typescript/lib/tsserver.js'
-  if vim.uv.fs_stat(path) then
-    return path
-  end
-
-  return nil
-end
-
-local function lsp_root_from_init(init_params, config)
-  if config and type(config.root_dir) == 'string' and config.root_dir ~= '' then
-    return config.root_dir
-  end
-
-  if init_params and init_params.rootPath and init_params.rootPath ~= '' then
-    return init_params.rootPath
-  end
-
-  if init_params and init_params.rootUri and init_params.rootUri ~= '' then
-    return vim.uri_to_fname(init_params.rootUri)
-  end
-
-  return nil
-end
-
-local ts_lsp_root_markers = { 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'tsconfig.json', 'package.json', '.git' }
-
-local function ts_lsp_root_dir(bufnr, cb)
-  local root_dir = vim.fs.root(bufnr, ts_lsp_root_markers)
-  cb(root_dir)
-end
-
--- https://github.com/neovim/nvim-lspconfig/blob/master/doc/configs.md
+-- ts_ls needs a real TypeScript install and exits at startup without one, which
+-- projects whose deps aren't installed hit. Point it at a private copy:
+-- install.py's ensure_typescript_fallback() keeps that copy in place.
 vim.lsp.config('ts_ls', {
-  filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
-  root_dir = ts_lsp_root_dir,
-  root_markers = ts_lsp_root_markers,
   cmd_env = { NODE_OPTIONS = '--max-old-space-size=8192' },
-  before_init = function(init_params, config)
-    local root_dir = lsp_root_from_init(init_params, config)
-    local tsserver_path = local_tsserver_path(root_dir)
-    if not tsserver_path then
-      return
-    end
-
-    config.init_options = vim.tbl_deep_extend('force', config.init_options or {}, {
-      tsserver = {
-        path = tsserver_path,
-      },
-    })
-  end,
   init_options = {
     preferences = {
       preferGoToSourceDefinition = true,
     },
     maxTsServerMemory = 8192,
+    tsserver = {
+      path = vim.fn.stdpath('data') .. '/ts-fallback/node_modules/typescript/lib/tsserver.js',
+    },
   },
 })
 
