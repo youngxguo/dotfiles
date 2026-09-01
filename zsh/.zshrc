@@ -96,6 +96,9 @@ alias gcoma="git commit --amend"
 alias vim="nvim"
 alias cx="codex"
 
+# claude
+alias claude="claude --chrome"
+
 # tmux: push the current git branch into the session's @git_branch option so the
 # sessions sidebar and status line read it instead of forking git on a timer.
 # Only fires when the branch changes (cheap next to starship's own per-prompt git
