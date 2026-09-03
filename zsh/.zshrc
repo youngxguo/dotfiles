@@ -90,6 +90,9 @@ alias gcm='git switch "$(git show-ref --verify --quiet refs/heads/main && printf
 alias gl="git log"
 alias gp="git push"
 alias gpu="git pull"
+# rebase the current branch onto the latest main via origin, so it works in
+# a worktree where local main is checked out elsewhere and can't be moved
+alias grm='git pull --rebase origin "$(git show-ref --verify --quiet refs/remotes/origin/main && printf main || printf master)"'
 alias gcomm="git commit -m"
 alias gcom="git commit"
 alias gcoma="git commit --amend"
