@@ -1,8 +1,8 @@
 #!/bin/sh
-# Claude Code statusline: model | prompt timer | session cost | daily/monthly
-# budget bars | context bar. Reads the statusLine JSON payload on stdin and
-# writes one line. install.py symlinks this to ~/.claude/statusline-command.sh;
-# claude/settings.json points statusLine here.
+# Claude Code statusline: model | git branch | prompt timer | session cost |
+# daily/monthly budget bars | context bar. Reads the statusLine JSON payload on
+# stdin and writes one line. install.py symlinks this to
+# ~/.claude/statusline-command.sh; claude/settings.json points statusLine here.
 input=$(cat)
 
 # Extract fields from JSON input using python3
@@ -108,6 +108,17 @@ print(color + bar + reset + overflow, end='')
 
 # Model in bright magenta
 printf "\033[01;35m%s\033[00m" "$model"
+
+# Git branch of the workspace, only when the cwd is inside a repo. Detached
+# HEAD shows the short SHA instead of a branch name.
+workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
+if [ -n "$workspace_dir" ] && [ -d "$workspace_dir" ]; then
+  git_branch=$(git -C "$workspace_dir" symbolic-ref --short -q HEAD 2>/dev/null \
+    || git -C "$workspace_dir" rev-parse --short HEAD 2>/dev/null)
+  if [ -n "$git_branch" ]; then
+    printf " | \033[01;32m %s\033[00m" "$git_branch"
+  fi
+fi
 
 # Elapsed time on the in-flight prompt, stamped by hooks/prompt-timer.sh on
 # UserPromptSubmit and removed on Stop, so it only shows while a turn runs.
