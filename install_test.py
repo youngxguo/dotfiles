@@ -344,6 +344,38 @@ class ClaudeInstallTest(unittest.TestCase):
             self.assertFalse((home / ".claude/skills").exists())
 
 
+class ClaudeSkillLinksTest(unittest.TestCase):
+    def test_repo_skills_are_linked_into_every_config_dir(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            repo = ClaudeInstallTest.make_repo(root)
+            skill = repo / "claude/skills/rebump"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: rebump\n---\n", encoding="utf-8"
+            )
+            (skill / "rebump.py").write_text("", encoding="utf-8")
+            # a stray dir without a SKILL.md is not a skill and gets no link.
+            (repo / "claude/skills/notes").mkdir()
+
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "REPO_ROOT", repo),
+            ):
+                links = install.links_for("claude")
+                install.apply_links(links)
+
+            for config_dir in (".claude", ".claude2", ".claude3", ".claude4"):
+                link = home / config_dir / "skills/rebump"
+                # the whole skill dir is linked, so scripts beside SKILL.md and
+                # ${CLAUDE_SKILL_DIR} resolve, and edits land without a reinstall.
+                self.assertTrue(link.is_symlink())
+                self.assertEqual(link.resolve(), skill.resolve())
+                self.assertTrue((link / "rebump.py").is_file())
+                self.assertFalse((home / config_dir / "skills/notes").exists())
+
+
 class NeovimPluginCommandTest(unittest.TestCase):
     def test_install_pins_plugins_to_the_lockfile(self):
         lua = " ".join(

@@ -462,6 +462,19 @@ def managed_links():
         links.append(
             ("claude", REPO_ROOT / "claude/CLAUDE.md", config_dir / "CLAUDE.md")
         )
+        # claude/skills/<name>/ holds the repo's own skills (SKILL.md plus any
+        # scripts beside it). skills are read from the config dir too, and a
+        # symlinked skill dir is supported, so each dir gets a link per skill.
+        # the herdr skill is generated into skills/herdr by
+        # install_claude_herdr_skill, not linked.
+        for skill_dir in sorted((REPO_ROOT / "claude/skills").glob("*/SKILL.md")):
+            links.append(
+                (
+                    "claude",
+                    skill_dir.parent,
+                    config_dir / "skills" / skill_dir.parent.name,
+                )
+            )
     links.append(
         (
             "claude",
