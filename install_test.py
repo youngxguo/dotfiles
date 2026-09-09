@@ -300,8 +300,8 @@ class ClaudeInstallTest(unittest.TestCase):
                 # `herdr --skill` call feeds every config dir.
                 skill_mock.assert_called_once()
                 self.assertEqual(skill_mock.call_args.args[0], ["herdr", "--skill"])
-                # every dir gets settings.json, but only the primary one takes
-                # permissions: the others carry their own permission modes.
+                # every dir gets the same settings.json keys, so c2/c3/c4 run
+                # with the primary dir's permission mode.
                 primary = json.loads(
                     (home / ".claude/settings.json").read_text(encoding="utf-8")
                 )
@@ -309,7 +309,9 @@ class ClaudeInstallTest(unittest.TestCase):
                     (home / ".claude2/settings.json").read_text(encoding="utf-8")
                 )
                 self.assertIn("permissions", primary)
-                self.assertNotIn("permissions", secondary)
+                self.assertEqual(
+                    secondary.get("permissions"), primary.get("permissions")
+                )
                 self.assertEqual(secondary.get("statusLine"), primary.get("statusLine"))
 
                 # an unchanged skill must not be rewritten, so a second run leaves

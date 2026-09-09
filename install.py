@@ -875,12 +875,10 @@ def ensure_codex_hooks():
     print(f"merged codex ai-state hooks into {target}")
 
 
-# settings.json keys the Claude template owns outright in ~/.claude. Everything
-# else in the live file is preserved so runtime-managed and machine-local state
-# stays local. The other config dirs only take the keys in
-# CLAUDE_SHARED_SETTINGS_KEYS so each can keep its own permission mode.
+# settings.json keys the Claude template owns outright in every config dir, so
+# c/c2/c3/c4 all run with the same permission mode. Everything else in the live
+# file is preserved so runtime-managed and machine-local state stays local.
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
-CLAUDE_SHARED_SETTINGS_KEYS = ("statusLine",)
 
 
 def claude_config_dirs():
@@ -889,8 +887,7 @@ def claude_config_dirs():
     zsh/.zshrc aliases claude2/3/4 to their own config dirs so several
     subscriptions can run side by side. claude resolves user-level CLAUDE.md
     and skills relative to that dir, so anything meant to be global has to
-    land in each one. settings.json is merged into each too, but permissions
-    only into ~/.claude: the other dirs carry their own permission modes.
+    land in each one. settings.json is merged into each too.
     """
     return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4)]
 
@@ -933,9 +930,8 @@ def install_claude_herdr_skill():
 def merge_claude_settings():
     """Merge repo-owned Claude settings into every claude config dir.
 
-    The template owns ``CLAUDE_SETTINGS_KEYS`` in ~/.claude and only
-    ``CLAUDE_SHARED_SETTINGS_KEYS`` in the other dirs, plus each hook event it
-    declares everywhere. Hook events it doesn't declare and every other live
+    The template owns ``CLAUDE_SETTINGS_KEYS`` in every dir, plus each hook
+    event it declares. Hook events it doesn't declare and every other live
     key pass through untouched. Hook commands reference ~/.claude paths, so
     one copy of the scripts serves every dir.
     """
@@ -950,12 +946,9 @@ def merge_claude_settings():
         return
 
     for config_dir in claude_config_dirs():
-        keys = (
-            CLAUDE_SETTINGS_KEYS
-            if config_dir == HOME / ".claude"
-            else CLAUDE_SHARED_SETTINGS_KEYS
+        merge_claude_settings_into(
+            template, config_dir / "settings.json", CLAUDE_SETTINGS_KEYS
         )
-        merge_claude_settings_into(template, config_dir / "settings.json", keys)
 
 
 def merge_claude_settings_into(template, target, keys):
