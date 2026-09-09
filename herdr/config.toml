@@ -65,7 +65,9 @@ width = "70%"
 height = "50%"
 
 [ui]
-prompt_new_tab_name = true
+# Auto Title names tabs; a name typed here would mark the tab as manual and
+# hide it from the plugin for good.
+prompt_new_tab_name = false
 prompt_new_workspace_name = true
 pane_gaps = false
 agent_panel_sort = "spaces"

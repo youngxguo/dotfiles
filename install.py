@@ -22,10 +22,20 @@ UPDATE_PLUGINS = False
 BTOP_VERSION = "v1.4.7"
 GH_EXTENSIONS = ("dlvhdr/gh-dash",)
 HERDR_INSTALL_URL = "https://herdr.dev/install.sh"
-# (owner/repo, plugin id). herdr/config.toml binds ctrl+hjkl to this plugin's
-# nav-* actions, and `herdr config check` validates syntax only — an unresolved
-# action is dropped silently, so without this the keys are dead on a new machine.
-HERDR_PLUGINS = (("lmilojevicc/herdr-splits.nvim", "herdr-splits"),)
+# (owner/repo, plugin id).
+# - herdr-splits: herdr/config.toml binds ctrl+hjkl to this plugin's nav-*
+#   actions, and `herdr config check` validates syntax only — an unresolved
+#   action is dropped silently, so without this the keys are dead on a new
+#   machine.
+# - auto-title: names tabs after what the agent in the pane is working on.
+#   built from source with go at install time. installed from a fork of
+#   kryptamine/herdr-auto-title whose main carries the
+#   HERDR_AUTO_TITLE_PREFER_AGENT patch herdr/auto-title.env relies on; drop
+#   back to upstream once that PR lands.
+HERDR_PLUGINS = (
+    ("lmilojevicc/herdr-splits.nvim", "herdr-splits"),
+    ("youngxguo/herdr-auto-title", "herdr.auto-title"),
+)
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
 # pi's package.json engines field. npm refuses the install below it, and a
 # distro node is often older, so check it up front to say why pi was skipped.
@@ -57,6 +67,15 @@ LINUX_PACKAGE_OVERRIDES = {
         "dnf": "nodejs",
         "pacman": "nodejs",
         "zypper": "nodejs",
+    },
+    # herdr-auto-title needs go 1.24+; debian/ubuntu's golang-go can lag behind
+    # that, in which case `herdr plugin install` fails and the tab titles stay
+    # as they are.
+    "go": {
+        "apt": "golang-go",
+        "dnf": "golang",
+        "pacman": "go",
+        "zypper": "go",
     },
 }
 
@@ -354,6 +373,20 @@ def link_file(source_path, target_path):
     target.symlink_to(source)
 
 
+def herdr_auto_title_config_path():
+    """Where the herdr-auto-title plugin reads its config.env.
+
+    The plugin resolves the directory with Go's os.UserConfigDir, which is
+    Application Support on macOS and ~/.config elsewhere; it is not the plugin
+    config dir `herdr plugin list` prints.
+    """
+    if sys.platform == "darwin":
+        base = HOME / "Library/Application Support"
+    else:
+        base = HOME / ".config"
+    return base / "herdr-auto-title/config.env"
+
+
 def managed_links():
     """Return every symlink managed by the setup flow.
 
@@ -366,6 +399,7 @@ def managed_links():
         ("zsh", REPO_ROOT / "starship/starship.toml", HOME / ".config/starship.toml"),
         ("ghostty", REPO_ROOT / "ghostty/config", HOME / ".config/ghostty/config"),
         ("herdr", REPO_ROOT / "herdr/config.toml", HOME / ".config/herdr/config.toml"),
+        ("herdr", REPO_ROOT / "herdr/auto-title.env", herdr_auto_title_config_path()),
     ]
 
     shader_dir = REPO_ROOT / "ghostty/shaders"
@@ -710,6 +744,9 @@ def install_herdr():
     apply_links(links_for("herdr"))
 
     if not VERIFY_MODE:
+        # herdr compiles auto-title from source when it installs it, so go has
+        # to be there first.
+        install_package("go")
         print("installing herdr plugins")
         install_herdr_plugins()
 

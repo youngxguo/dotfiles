@@ -1,3 +1,4 @@
+import sys
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -137,6 +138,10 @@ class HerdrInstallTest(unittest.TestCase):
             source = repo / "herdr/config.toml"
             source.parent.mkdir(parents=True)
             source.write_text("onboarding = false\n", encoding="utf-8")
+            auto_title_source = repo / "herdr/auto-title.env"
+            auto_title_source.write_text(
+                "HERDR_AUTO_TITLE_POSITION=false\n", encoding="utf-8"
+            )
 
             target = home / ".config/herdr/config.toml"
 
@@ -152,6 +157,22 @@ class HerdrInstallTest(unittest.TestCase):
                     install.HERDR_INSTALL_URL, run_mock.mock_calls[0].args[0][-1]
                 )
                 self.assertEqual(target.resolve(), source.resolve())
+                # the auto-title plugin reads its config from Go's UserConfigDir,
+                # not from herdr's plugin config dir.
+                auto_title_target = install.herdr_auto_title_config_path()
+                self.assertTrue(auto_title_target.is_relative_to(home))
+                if sys.platform == "darwin":
+                    self.assertEqual(
+                        auto_title_target,
+                        home / "Library/Application Support/herdr-auto-title/config.env",
+                    )
+                else:
+                    self.assertEqual(
+                        auto_title_target, home / ".config/herdr-auto-title/config.env"
+                    )
+                self.assertEqual(
+                    auto_title_target.resolve(), auto_title_source.resolve()
+                )
 
                 # the installer drops the binary in ~/.local/bin, which is not
                 # necessarily on PATH yet; a second run must not re-download it.
@@ -186,18 +207,21 @@ class HerdrPluginInstallTest(unittest.TestCase):
         self.assertIn(
             ["herdr", "plugin", "install", repo, "--ref", commit, "-y"], commands
         )
+        # plugins with no neovim half follow their default branch.
+        for other_repo, _ in install.HERDR_PLUGINS[1:]:
+            self.assertIn(["herdr", "plugin", "install", other_repo, "-y"], commands)
 
         # a plugin id already in `herdr plugin list` must not be reinstalled;
         # the reload still runs so a live server picks up the keybindings.
+        installed = "".join(
+            f"- {installed_id} enabled\n" for _, installed_id in install.HERDR_PLUGINS
+        )
         with (
             mock.patch.object(install, "herdr_command", return_value="herdr"),
             mock.patch.object(
                 install.subprocess,
                 "check_output",
-                side_effect=[
-                    f"- {plugin_id} (Herdr Splits) enabled\n",
-                    "status: running\n",
-                ],
+                side_effect=[installed, "status: running\n"],
             ),
             mock.patch.object(install, "run") as run_mock,
         ):
