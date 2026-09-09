@@ -174,14 +174,19 @@ if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
   fi
 fi
 
-# Inside herdr, hand the repo and branch to the agent sidebar: herdr/config.toml
-# shows them as the $repo and $branch tokens on the pane's third row, and herdr
-# has no built-in tokens for either on agent rows. The repo is the main
-# checkout's name even from a linked worktree (the common git dir's parent), so
-# worktrees of hsys all read "hsys". The branch carries the same nerd-font
-# glyph as the statusline (herdr's metadata sanitizer keeps glyphs, but strips
-# escape bytes). Backgrounded so the render never waits on the socket, and
-# re-sent every refresh so a restarted server picks it up.
+# Inside herdr, hand the repo, branch and PR to the agent sidebar:
+# herdr/config.toml shows them as the $repo, $branch and $pr_<state> tokens
+# under the title, and herdr has no built-in tokens for any of them on agent
+# rows. A token's color is fixed in the config, so the PR goes out as one of
+# pr_open, pr_draft, pr_merged or pr_closed (the rest cleared) and each has its
+# own fg there, matching the statusline's coloring by state. The
+# repo is the main checkout's name even from a linked worktree (the common git
+# dir's parent), so worktrees of hsys all read "hsys". The branch carries the
+# same nerd-font glyph as the statusline (herdr's metadata sanitizer keeps
+# glyphs, but strips escape bytes, so the PR cannot be a hyperlink here).
+# Backgrounded so the render never waits on the socket, and re-sent every
+# refresh so a restarted server picks it up. Runs after the PR lookup above so
+# $pr_label is set.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   # The session title, wrapped into $title1..3 so the sidebar shows it whole:
@@ -264,6 +269,17 @@ EOF
   else
     set -- "$@" --clear-token repo --clear-token branch
   fi
+  case $pr_state in
+    open | draft | merged) pr_token=pr_$pr_state ;;
+    *) pr_token=pr_closed ;;
+  esac
+  for state in open draft merged closed; do
+    if [ -n "$pr_label" ] && [ "pr_$state" = "$pr_token" ]; then
+      set -- "$@" --token "pr_$state= $pr_label"
+    else
+      set -- "$@" --clear-token "pr_$state"
+    fi
+  done
   nohup "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" --source claude-statusline "$@" \
     </dev/null >/dev/null 2>&1 &
 fi

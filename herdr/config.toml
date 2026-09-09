@@ -78,20 +78,31 @@ status_indicators = "dots"
 show_agent_labels_on_pane_borders = true
 
 # Agent entries: the agent's focus_agent number (cmd+N) and the session title
-# in bold, the title wrapped over up to three rows, then the repo and the
-# branch. herdr cuts a row at the sidebar's width and has no
-# wrap, so claude/statusline-command.sh reports the title pre-wrapped as
-# $title1..3 pane metadata, alongside $num, $repo and $branch (herdr has no repo or
-# branch token for agent rows; branch exists only for Spaces). The agent's name
-# is on the pane border and the workspace groups the entries, so neither gets
-# a row. Rows whose tokens have no value disappear.
+# in bold, the title wrapped over up to three rows, then the repo, then the
+# branch with its PR. herdr cuts a row at the sidebar's width and has no wrap,
+# so claude/statusline-command.sh reports the title pre-wrapped as $title1..3
+# pane metadata, alongside $num, $repo, $branch and the PR (herdr has no repo,
+# branch or PR token for agent rows; branch exists only for Spaces). A token's
+# color is fixed here, so the PR arrives as one of $pr_open, $pr_draft,
+# $pr_merged or $pr_closed, colored like GitHub does (green, grey, purple,
+# red); only the one matching the PR's state has a value. Sidebar tokens are
+# plain text, so the PR is not clickable here. Repo and branch drop the
+# default dim so they read at a glance. The agent's name is on the pane border
+# and the workspace groups the entries, so neither gets a row. Rows whose
+# tokens have no value disappear.
 [ui.sidebar.agents]
 rows = [
   ["state_icon", { token = "$num", bold = true, dim = false }, { token = "$title1", bold = true, dim = false }],
   [{ token = "$title2", bold = true, dim = false }],
   [{ token = "$title3", bold = true, dim = false }],
-  ["$repo"],
-  ["$branch"],
+  [{ token = "$repo", dim = false }],
+  [
+    { token = "$branch", dim = false },
+    { token = "$pr_open", dim = false, fg = "#3fb950" },
+    { token = "$pr_draft", dim = false, fg = "#8b949e" },
+    { token = "$pr_merged", dim = false, fg = "#a371f7" },
+    { token = "$pr_closed", dim = false, fg = "#f85149" },
+  ],
 ]
 
 [experimental]
