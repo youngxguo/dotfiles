@@ -212,11 +212,20 @@ class HerdrPluginInstallTest(unittest.TestCase):
         # plugins with no neovim half follow their default branch.
         for other_repo, _ in install.HERDR_PLUGINS[1:]:
             self.assertIn(["herdr", "plugin", "install", other_repo, "-y"], commands)
+        # plugins kept in this repo are linked from their checkout path.
+        for relative_path, _ in install.HERDR_LOCAL_PLUGINS:
+            plugin_dir = install.REPO_ROOT / relative_path
+            self.assertTrue((plugin_dir / "herdr-plugin.toml").is_file())
+            self.assertIn(["herdr", "plugin", "link", str(plugin_dir)], commands)
 
         # a plugin id already in `herdr plugin list` must not be reinstalled;
         # the reload still runs so a live server picks up the keybindings.
         installed = "".join(
-            f"- {installed_id} enabled\n" for _, installed_id in install.HERDR_PLUGINS
+            f"- {installed_id} enabled\n"
+            for _, installed_id in (
+                *install.HERDR_PLUGINS,
+                *install.HERDR_LOCAL_PLUGINS,
+            )
         )
         with (
             mock.patch.object(install, "herdr_command", return_value="herdr"),

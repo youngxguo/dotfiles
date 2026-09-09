@@ -36,6 +36,12 @@ HERDR_PLUGINS = (
     ("lmilojevicc/herdr-splits.nvim", "herdr-splits"),
     ("youngxguo/herdr-auto-title", "herdr.auto-title"),
 )
+# (path under this repo, plugin id). linked in place rather than installed so
+# edits here take effect without a reinstall.
+# - worktree-cleanup: herdr's close-workspace only drops herdr state and leaves
+#   the git worktree on disk; this hook removes the checkout on
+#   workspace.closed so closing the space is the cleanup step.
+HERDR_LOCAL_PLUGINS = (("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),)
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
 # pi's package.json engines field. npm refuses the install below it, and a
 # distro node is often older, so check it up front to say why pi was skipped.
@@ -723,6 +729,15 @@ def install_herdr_plugins():
             run([herdr, "plugin", "install", repo, *pin, "-y"])
         except subprocess.CalledProcessError:
             print(f"warning: unable to install herdr plugin {repo}; continuing")
+
+    for relative_path, plugin_id in HERDR_LOCAL_PLUGINS:
+        if plugin_id in plugin_output:
+            print(f"herdr plugin {plugin_id} already linked")
+            continue
+        try:
+            run([herdr, "plugin", "link", str(REPO_ROOT / relative_path)])
+        except subprocess.CalledProcessError:
+            print(f"warning: unable to link herdr plugin {relative_path}; continuing")
 
     # keybindings resolve plugin actions at load time, so a server that was
     # already up keeps dropping ctrl+hjkl until it re-reads the config. on a

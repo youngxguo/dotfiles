@@ -11,6 +11,8 @@ prefix = "ctrl+space"
 settings = ""
 workspace_picker = "prefix+s"
 new_workspace = "prefix+shift+c"
+# Closing a worktree workspace also removes its checkout: see
+# herdr/plugins/worktree-cleanup, linked by install.py.
 new_worktree = "prefix+shift+w"
 # Match tmux's prefix-$ rename-session binding.
 rename_workspace = "prefix+$"
