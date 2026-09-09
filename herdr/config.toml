@@ -58,6 +58,13 @@ key = "ctrl+l"
 type = "plugin_action"
 command = "herdr-splits.nav-right"
 
+# Open the focused pane's pull request in the browser: herdr/plugins/open-pr,
+# linked by install.py. Also in the pane's right-click menu.
+[[keys.command]]
+key = "prefix+p"
+type = "plugin_action"
+command = "young.open-pr.open-pr"
+
 # Open any git repo under ~/Documents/code as a new workspace, like tmux-sessionizer.
 [[keys.command]]
 key = "prefix+f"
@@ -86,7 +93,8 @@ show_agent_labels_on_pane_borders = true
 # color is fixed here, so the PR arrives as one of $pr_open, $pr_draft,
 # $pr_merged or $pr_closed, colored like GitHub does (green, grey, purple,
 # red); only the one matching the PR's state has a value. Sidebar tokens are
-# plain text, so the PR is not clickable here. Repo and branch drop the
+# plain text, so the PR is not clickable here: prefix+p (the open-pr plugin
+# action below) opens the focused pane's PR instead. Repo and branch drop the
 # default dim so they read at a glance. The agent's name is on the pane border
 # and the workspace groups the entries, so neither gets a row. Rows whose
 # tokens have no value disappear.

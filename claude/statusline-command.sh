@@ -183,10 +183,10 @@ fi
 # repo is the main checkout's name even from a linked worktree (the common git
 # dir's parent), so worktrees of hsys all read "hsys". The branch carries the
 # same nerd-font glyph as the statusline (herdr's metadata sanitizer keeps
-# glyphs, but strips escape bytes, so the PR cannot be a hyperlink here).
-# Backgrounded so the render never waits on the socket, and re-sent every
-# refresh so a restarted server picks it up. Runs after the PR lookup above so
-# $pr_label is set.
+# glyphs, but strips escape bytes, so the PR cannot be a hyperlink here; the
+# open-pr plugin action in herdr/plugins opens it instead). Backgrounded so the
+# render never waits on the socket, and re-sent every refresh so a restarted
+# server picks it up. Runs after the PR lookup below so $pr_label is set.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   # The session title, wrapped into $title1..3 so the sidebar shows it whole:

@@ -41,7 +41,14 @@ HERDR_PLUGINS = (
 # - worktree-cleanup: herdr's close-workspace only drops herdr state and leaves
 #   the git worktree on disk; this hook removes the checkout on
 #   workspace.closed so closing the space is the cleanup step.
-HERDR_LOCAL_PLUGINS = (("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),)
+# - open-pr: herdr/config.toml binds prefix+p to this plugin's open-pr action,
+#   which opens the focused pane's pull request in the browser. the sidebar
+#   shows the PR as plain text (herdr strips hyperlink escapes from pane
+#   metadata), so this is the click-through.
+HERDR_LOCAL_PLUGINS = (
+    ("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),
+    ("herdr/plugins/open-pr", "young.open-pr"),
+)
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
 # pi's package.json engines field. npm refuses the install below it, and a
 # distro node is often older, so check it up front to say why pi was skipped.
