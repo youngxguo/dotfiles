@@ -120,8 +120,8 @@ printf "\033[01;35m%s\033[00m" "$model"
 # the literal "HEAD", which is swapped for the short SHA.
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
 if [ -n "$workspace_dir" ] && [ -d "$workspace_dir" ]; then
-  { read -r repo_root; read -r git_branch; } <<EOF
-$(git -C "$workspace_dir" rev-parse --show-toplevel --abbrev-ref HEAD 2>/dev/null)
+  { read -r repo_root; read -r git_branch; read -r git_dir; read -r git_common_dir; } <<EOF
+$(git -C "$workspace_dir" rev-parse --show-toplevel --abbrev-ref HEAD --git-dir --git-common-dir 2>/dev/null)
 EOF
   if [ "$git_branch" = HEAD ]; then
     git_branch=$(git -C "$workspace_dir" rev-parse --short HEAD 2>/dev/null)
@@ -129,6 +129,99 @@ EOF
   if [ -n "$git_branch" ]; then
     printf " | \033[01;32m %s\033[00m" "$git_branch"
   fi
+fi
+
+# Inside herdr, hand the repo and branch to the agent sidebar: herdr/config.toml
+# shows them as the $repo and $branch tokens on the pane's third row, and herdr
+# has no built-in tokens for either on agent rows. The repo is the main
+# checkout's name even from a linked worktree (the common git dir's parent), so
+# worktrees of hsys all read "hsys". Nerd-font glyphs are stripped by herdr's
+# metadata sanitizer, hence emoji. Backgrounded so the render never waits on
+# the socket, and re-sent every refresh so a restarted server picks it up.
+if [ -n "$HERDR_PANE_ID" ]; then
+  herdr_bin=${HERDR_BIN_PATH:-herdr}
+  # The session title, wrapped into $title1..3 so the sidebar shows it whole:
+  # herdr cuts a row at the sidebar's width and cannot wrap. Read from the
+  # transcript's last title line, so a restarted server gets it back too.
+  # Claude Code writes an ai-title line when it generates a title from the
+  # first prompt (and again on accepting a plan), and a custom-title line for
+  # /rename or --name; the newest of either wins, as it does in Claude Code's
+  # own picker. The wrap width follows the sidebar: herdr saves its width to
+  # session.json next to the socket, and the rows lose 4 columns to the state
+  # dot and padding.
+  transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
+  herdr_session=${HERDR_SOCKET_PATH:+${HERDR_SOCKET_PATH%/*}/session.json}
+  : "${herdr_session:=$HOME/.config/herdr/session.json}"
+  # This agent's position in the sidebar, which is the key focus_agent
+  # (cmd+1..9 in herdr/config.toml) switches to it with. `herdr agent list`
+  # returns agents in workspace, tab, pane order, which is what the sidebar's
+  # "spaces" sort shows; only the first nine have a key.
+  agent_num=$("$herdr_bin" agent list 2>/dev/null | python3 -c "
+import json, os, sys
+try:
+    agents = json.load(sys.stdin)['result']['agents']
+except (ValueError, KeyError, TypeError):
+    agents = []
+for i, agent in enumerate(agents, 1):
+    if agent.get('pane_id') == os.environ.get('HERDR_PANE_ID') and i <= 9:
+        print(i)
+")
+  if [ -n "$agent_num" ]; then
+    set -- --token "num=$agent_num"
+  else
+    set -- --clear-token num
+  fi
+  if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+    # The first row also carries the number and a space, hence the indent.
+    title_rows=$(tail -c 262144 "$transcript" | HERDR_SESSION_FILE="$herdr_session" python3 -c "
+import json, os, sys, textwrap
+width = 26
+try:
+    width = int(json.load(open(os.environ['HERDR_SESSION_FILE'])).get('sidebar_width') or width)
+except (OSError, ValueError, TypeError):
+    pass
+title = ''
+for line in sys.stdin:
+    if '\"custom-title\"' not in line and '\"ai-title\"' not in line:
+        continue
+    try:
+        entry = json.loads(line)
+    except ValueError:
+        continue
+    if entry.get('type') == 'custom-title':
+        title = entry.get('customTitle') or title
+    elif entry.get('type') == 'ai-title':
+        title = entry.get('aiTitle') or title
+rows = textwrap.wrap(title, max(10, width - 4), initial_indent='  ', max_lines=3, placeholder='…')
+for part in rows:
+    print(part.strip())
+")
+    n=0
+    while IFS= read -r chunk; do
+      [ -n "$chunk" ] || continue
+      n=$((n + 1))
+      set -- "$@" --token "title$n=$chunk"
+    done <<EOF
+$title_rows
+EOF
+    while [ "$n" -lt 3 ]; do
+      n=$((n + 1))
+      set -- "$@" --clear-token "title$n"
+    done
+  fi
+  if [ -n "$git_branch" ]; then
+    if [ "$git_dir" = "$git_common_dir" ]; then
+      repo_name=${repo_root##*/}
+    else
+      repo_dir=${git_common_dir%/.git}
+      repo_name=${repo_dir##*/}
+    fi
+    set -- "$@" --token "repo=📁 $repo_name" --token "branch=🌿 $git_branch"
+  else
+    set -- "$@" --clear-token repo --clear-token branch
+  fi
+  nohup "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" --source claude-statusline "$@" \
+    </dev/null >/dev/null 2>&1 &
 fi
 
 # Pull request for the branch, colored by state: open green, draft grey, merged

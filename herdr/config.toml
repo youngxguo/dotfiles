@@ -75,6 +75,23 @@ agent_panel_sort = "spaces"
 status_indicators = "dots"
 show_agent_labels_on_pane_borders = true
 
+# Agent entries: the agent's focus_agent number (cmd+N) and the session title
+# in bold, the title wrapped over up to three rows, then the repo and the
+# branch. herdr cuts a row at the sidebar's width and has no
+# wrap, so claude/statusline-command.sh reports the title pre-wrapped as
+# $title1..3 pane metadata, alongside $num, $repo and $branch (herdr has no repo or
+# branch token for agent rows; branch exists only for Spaces). The agent's name
+# is on the pane border and the workspace groups the entries, so neither gets
+# a row. Rows whose tokens have no value disappear.
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", { token = "$num", bold = true, dim = false }, { token = "$title1", bold = true, dim = false }],
+  [{ token = "$title2", bold = true, dim = false }],
+  [{ token = "$title3", bold = true, dim = false }],
+  ["$repo"],
+  ["$branch"],
+]
+
 [experimental]
 kitty_graphics = true
 
