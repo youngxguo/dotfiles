@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code statusline: model | git branch | prompt timer | session cost |
+# Claude Code statusline: model | git branch + PR | prompt timer | session cost |
 # daily/monthly budget bars | context bar. Reads the statusLine JSON payload on
 # stdin and writes one line. install.py symlinks this to
 # ~/.claude/statusline-command.sh; claude/settings.json points statusLine here.
@@ -23,6 +23,18 @@ print(display)
 CLAUDE_DIR="$HOME/.claude"
 TRACKING_DIR="$CLAUDE_DIR/cost-tracking"
 mkdir -p "$TRACKING_DIR"
+
+# Run "$@" in the background when cache file $1 is missing or over a minute
+# old. Renders only ever read the cache, so they never wait on the network.
+# Touching the cache first acts as a lease: this script runs every second and a
+# refresh takes longer than that, so without it renders would stack up refreshes.
+refresh_if_stale() {
+  cache=$1; shift
+  if [ ! -f "$cache" ] || [ -n "$(find "$cache" -mmin +1 2>/dev/null)" ]; then
+    touch "$cache"
+    nohup "$@" </dev/null >/dev/null 2>&1 &
+  fi
+}
 
 # Claude Code's cost.total_cost_usd is scoped to the CLI process, not the
 # conversation, so it does NOT reset on /clear or /new (the process keeps
@@ -57,25 +69,19 @@ if [ -x "$CCUSAGE_REFRESH" ]; then
   # Derive daily budget from monthly budget / days in month
   DAILY_BUDGET=$(python3 -c "import calendar,datetime; d=datetime.date.today(); print(round($MONTHLY_BUDGET / calendar.monthrange(d.year, d.month)[1], 2))" 2>/dev/null || echo 50)
 
-  # Read daily/monthly totals from ccusage cache. Kick off a background refresh
-  # if the cache is stale or missing — statusline renders stay fast.
+  # Read daily/monthly totals from the ccusage cache.
   CACHE="$TRACKING_DIR/ccusage-cache.json"
-  REFRESH_TTL=60
-  read daily_cost monthly_cost cache_age <<EOF
+  read daily_cost monthly_cost <<EOF
 $(python3 -c "
-import json, time, os
+import json
 try:
     d = json.load(open('$CACHE'))
-    age = int(time.time() - d.get('updated_at', 0))
-    print(d.get('daily', 0.0), d.get('monthly', 0.0), age)
+    print(d.get('daily', 0.0), d.get('monthly', 0.0))
 except Exception:
-    print(0.0, 0.0, 999999)
+    print(0.0, 0.0)
 ")
 EOF
-
-  if [ "$cache_age" -gt "$REFRESH_TTL" ]; then
-    nohup "$CCUSAGE_REFRESH" </dev/null >/dev/null 2>&1 &
-  fi
+  refresh_if_stale "$CACHE" "$CCUSAGE_REFRESH"
 fi
 
 # Format a dollar amount to exactly 2 decimal places
@@ -109,14 +115,53 @@ print(color + bar + reset + overflow, end='')
 # Model in bright magenta
 printf "\033[01;35m%s\033[00m" "$model"
 
-# Git branch of the workspace, only when the cwd is inside a repo. Detached
-# HEAD shows the short SHA instead of a branch name.
+# Git branch of the workspace, only when the cwd is inside a repo. One rev-parse
+# yields the repo root (the PR cache key) and the branch; detached HEAD prints
+# the literal "HEAD", which is swapped for the short SHA.
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
 if [ -n "$workspace_dir" ] && [ -d "$workspace_dir" ]; then
-  git_branch=$(git -C "$workspace_dir" symbolic-ref --short -q HEAD 2>/dev/null \
-    || git -C "$workspace_dir" rev-parse --short HEAD 2>/dev/null)
+  { read -r repo_root; read -r git_branch; } <<EOF
+$(git -C "$workspace_dir" rev-parse --show-toplevel --abbrev-ref HEAD 2>/dev/null)
+EOF
+  if [ "$git_branch" = HEAD ]; then
+    git_branch=$(git -C "$workspace_dir" rev-parse --short HEAD 2>/dev/null)
+  fi
   if [ -n "$git_branch" ]; then
     printf " | \033[01;32m %s\033[00m" "$git_branch"
+  fi
+fi
+
+# Pull request for the branch, colored by state: open green, draft grey, merged
+# magenta, closed red. Looked up with `gh pr list --state all` so the PR keeps
+# showing after it merges or closes instead of vanishing. gh takes ~0.5s, so the
+# refresher runs in the background and writes a pre-rendered "<state> <number>"
+# line (empty when the branch has no PR) to a per-repo+branch cache file.
+if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
+  PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
+  pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
+  if [ ! -f "$pr_cache" ]; then
+    mkdir -p "$PR_CACHE_DIR"
+    # Prune caches untouched for 7+ days so the dir stays small.
+    find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
+  fi
+  refresh_if_stale "$pr_cache" sh -c '
+    cd "$1" && gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft \
+      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring)" \
+      > "$3.tmp" && mv -f "$3.tmp" "$3" || rm -f "$3.tmp"
+  ' _ "$workspace_dir" "$git_branch" "$pr_cache"
+
+  pr_state="" pr_number=""
+  [ -f "$pr_cache" ] && read -r pr_state pr_number < "$pr_cache"
+  if [ -n "$pr_number" ]; then
+    case $pr_state in
+      open) pr_color='01;32' ;;
+      draft) pr_color=90 ;;
+      merged) pr_color='01;35' ;;
+      *) pr_color='01;31' ;;
+    esac
+    pr_label="#$pr_number"
+    [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
+    printf " \033[%sm %s\033[00m" "$pr_color" "$pr_label"
   fi
 fi
 
