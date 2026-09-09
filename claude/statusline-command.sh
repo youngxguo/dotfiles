@@ -132,6 +132,48 @@ EOF
   fi
 fi
 
+# Pull request for the branch, colored by state: open green, draft grey, merged
+# magenta, closed red. Looked up with `gh pr list --state all` so the PR keeps
+# showing after it merges or closes instead of vanishing. gh takes ~0.5s, so the
+# refresher runs in the background and writes a pre-rendered
+# "<state> <number> <url>" line (empty when the branch has no PR) to a
+# per-repo+branch cache file. The label is an OSC 8 hyperlink to the PR, so a
+# terminal that supports them (Ghostty: cmd+click) opens it on GitHub.
+pr_state="" pr_number="" pr_url="" pr_label=""
+if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
+  PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
+  pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
+  if [ ! -f "$pr_cache" ]; then
+    mkdir -p "$PR_CACHE_DIR"
+    # Prune caches untouched for 7+ days so the dir stays small.
+    find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
+  fi
+  refresh_if_stale "$pr_cache" sh -c '
+    cd "$1" && gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft,url \
+      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring) + \" \" + .url" \
+      > "$3.tmp" && mv -f "$3.tmp" "$3" || rm -f "$3.tmp"
+  ' _ "$workspace_dir" "$git_branch" "$pr_cache"
+
+  [ -f "$pr_cache" ] && read -r pr_state pr_number pr_url < "$pr_cache"
+  if [ -n "$pr_number" ]; then
+    case $pr_state in
+      open) pr_color='01;32' ;;
+      draft) pr_color=90 ;;
+      merged) pr_color='01;35' ;;
+      *) pr_color='01;31' ;;
+    esac
+    pr_label="#$pr_number"
+    [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
+    pr_text=$pr_label
+    if [ -n "$pr_url" ]; then
+      # OSC 8: ESC ] 8 ; ; <url> ST <text> ESC ] 8 ; ; ST, with ESC \ as ST.
+      # $pr_label itself stays plain text for the herdr token below.
+      pr_text=$(printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$pr_url" "$pr_label")
+    fi
+    printf " \033[%sm %s\033[00m" "$pr_color" "$pr_text"
+  fi
+fi
+
 # Inside herdr, hand the repo and branch to the agent sidebar: herdr/config.toml
 # shows them as the $repo and $branch tokens on the pane's third row, and herdr
 # has no built-in tokens for either on agent rows. The repo is the main
@@ -224,40 +266,6 @@ EOF
   fi
   nohup "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" --source claude-statusline "$@" \
     </dev/null >/dev/null 2>&1 &
-fi
-
-# Pull request for the branch, colored by state: open green, draft grey, merged
-# magenta, closed red. Looked up with `gh pr list --state all` so the PR keeps
-# showing after it merges or closes instead of vanishing. gh takes ~0.5s, so the
-# refresher runs in the background and writes a pre-rendered "<state> <number>"
-# line (empty when the branch has no PR) to a per-repo+branch cache file.
-if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
-  PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
-  pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
-  if [ ! -f "$pr_cache" ]; then
-    mkdir -p "$PR_CACHE_DIR"
-    # Prune caches untouched for 7+ days so the dir stays small.
-    find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
-  fi
-  refresh_if_stale "$pr_cache" sh -c '
-    cd "$1" && gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft \
-      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring)" \
-      > "$3.tmp" && mv -f "$3.tmp" "$3" || rm -f "$3.tmp"
-  ' _ "$workspace_dir" "$git_branch" "$pr_cache"
-
-  pr_state="" pr_number=""
-  [ -f "$pr_cache" ] && read -r pr_state pr_number < "$pr_cache"
-  if [ -n "$pr_number" ]; then
-    case $pr_state in
-      open) pr_color='01;32' ;;
-      draft) pr_color=90 ;;
-      merged) pr_color='01;35' ;;
-      *) pr_color='01;31' ;;
-    esac
-    pr_label="#$pr_number"
-    [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
-    printf " \033[%sm %s\033[00m" "$pr_color" "$pr_label"
-  fi
 fi
 
 # Elapsed time on the in-flight prompt, stamped by hooks/prompt-timer.sh on
