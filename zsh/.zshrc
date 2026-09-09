@@ -101,10 +101,10 @@ alias cx="codex"
 alias gcb="git checkout -b"
 
 # claude
-alias claude="claude --chrome"
-alias claude2="CLAUDE_CONFIG_DIR=~/.claude2 claude --chrome"
-alias claude3="CLAUDE_CONFIG_DIR=~/.claude3 claude --chrome"
-alias claude4="CLAUDE_CONFIG_DIR=~/.claude4 claude --chrome"
+alias c="claude --chrome"
+alias c2="CLAUDE_CONFIG_DIR=~/.claude2 claude --chrome"
+alias c3="CLAUDE_CONFIG_DIR=~/.claude3 claude --chrome"
+alias c4="CLAUDE_CONFIG_DIR=~/.claude4 claude --chrome"
 
 # tmux: push the current git branch into the session's @git_branch option so the
 # sessions sidebar and status line read it instead of forking git on a timer.
