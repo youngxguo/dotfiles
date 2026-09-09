@@ -239,6 +239,46 @@ class HerdrPluginInstallTest(unittest.TestCase):
         run_mock.assert_not_called()
 
 
+class ClaudeInstallTest(unittest.TestCase):
+    @staticmethod
+    def make_repo(root):
+        repo = root / "repo"
+        (repo / "claude/hooks").mkdir(parents=True)
+        (repo / "claude/CLAUDE.md").write_text("# rules\n", encoding="utf-8")
+        (repo / "claude/statusline-command.sh").write_text("", encoding="utf-8")
+        (repo / "claude/settings.json").write_text("{}\n", encoding="utf-8")
+        return repo
+
+    def test_install_claude_covers_every_config_dir(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            repo = self.make_repo(root)
+
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "REPO_ROOT", repo),
+            ):
+                install.install_claude()
+
+                # claude2/3/4 launch with their own CLAUDE_CONFIG_DIR, so the
+                # user-level CLAUDE.md has to exist in each one.
+                config_dirs = install.claude_config_dirs()
+                self.assertEqual(
+                    [d.name for d in config_dirs],
+                    [".claude", ".claude2", ".claude3", ".claude4"],
+                )
+                for config_dir in config_dirs:
+                    self.assertEqual(
+                        (config_dir / "CLAUDE.md").resolve(),
+                        (repo / "claude/CLAUDE.md").resolve(),
+                    )
+                # only the primary dir gets settings.json: the others carry their
+                # own permission modes.
+                self.assertTrue((home / ".claude/settings.json").is_file())
+                self.assertFalse((home / ".claude2/settings.json").exists())
+
+
 class NeovimPluginCommandTest(unittest.TestCase):
     def test_install_pins_plugins_to_the_lockfile(self):
         lua = " ".join(

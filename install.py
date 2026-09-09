@@ -455,7 +455,13 @@ def managed_links():
         )
     )
 
-    links.append(("claude", REPO_ROOT / "claude/CLAUDE.md", HOME / ".claude/CLAUDE.md"))
+    # CLAUDE.md is read from CLAUDE_CONFIG_DIR, so the claude2/3/4 dirs need
+    # their own link. the statusline and hooks below are referenced from
+    # settings.json by ~/.claude path, so one copy serves every config dir.
+    for config_dir in claude_config_dirs():
+        links.append(
+            ("claude", REPO_ROOT / "claude/CLAUDE.md", config_dir / "CLAUDE.md")
+        )
     links.append(
         (
             "claude",
@@ -837,6 +843,18 @@ def ensure_codex_hooks():
 # settings.json keys the Claude template owns outright. Everything else in the
 # live file is preserved so runtime-managed and machine-local state stays local.
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
+
+
+def claude_config_dirs():
+    """Every CLAUDE_CONFIG_DIR claude can launch with.
+
+    zsh/.zshrc aliases claude2/3/4 to their own config dirs so several
+    subscriptions can run side by side. claude resolves user-level CLAUDE.md
+    and skills relative to that dir, so anything meant to be global has to
+    land in each one. settings.json is deliberately left to ~/.claude: the
+    other dirs carry their own permission modes.
+    """
+    return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4)]
 
 
 def merge_claude_settings():
