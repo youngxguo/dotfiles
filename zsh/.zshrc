@@ -98,6 +98,7 @@ alias gcom="git commit"
 alias gcoma="git commit --amend"
 alias vim="nvim"
 alias cx="codex"
+alias gcb="git checkout -b"
 
 # claude
 alias claude="claude --chrome"
