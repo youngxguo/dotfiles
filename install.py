@@ -857,6 +857,41 @@ def claude_config_dirs():
     return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4)]
 
 
+def install_claude_herdr_skill():
+    """Write `herdr --skill` into each claude config dir's skills folder.
+
+    herdr ships the skill inside the binary and it tracks the installed CLI's
+    command surface, so it is generated here rather than vendored (a committed
+    copy drifts as soon as `herdr update` runs). Rerun install.py after
+    updating herdr to refresh it.
+    """
+    herdr = herdr_command()
+    if herdr is None:
+        print("skipping claude herdr skill: herdr is not installed")
+        return
+    try:
+        skill = subprocess.check_output(
+            [herdr, "--skill"], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, OSError):
+        print("skipping claude herdr skill: `herdr --skill` failed")
+        return
+    if not skill.lstrip().startswith("---"):
+        print("skipping claude herdr skill: `herdr --skill` did not return a skill")
+        return
+
+    for config_dir in claude_config_dirs():
+        target = config_dir / "skills/herdr/SKILL.md"
+        if target.is_symlink():
+            raise RuntimeError(f"refusing to overwrite symlink: {target}")
+        if target.is_file() and target.read_text(encoding="utf-8") == skill:
+            print(f"claude herdr skill already current: {target}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(skill, encoding="utf-8")
+        print(f"wrote claude herdr skill to {target}")
+
+
 def merge_claude_settings():
     """Merge repo-owned Claude settings while preserving runtime-managed keys.
 
@@ -907,6 +942,7 @@ def install_claude():
     print("applying claude config")
     apply_links(links_for("claude"))
     merge_claude_settings()
+    install_claude_herdr_skill()
 
 
 def node_version():

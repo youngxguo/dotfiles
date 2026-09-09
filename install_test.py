@@ -240,6 +240,8 @@ class HerdrPluginInstallTest(unittest.TestCase):
 
 
 class ClaudeInstallTest(unittest.TestCase):
+    SKILL = "---\nname: herdr\ndescription: control herdr\n---\n\n# Herdr\n"
+
     @staticmethod
     def make_repo(root):
         repo = root / "repo"
@@ -258,11 +260,15 @@ class ClaudeInstallTest(unittest.TestCase):
             with (
                 mock.patch.object(install, "HOME", home),
                 mock.patch.object(install, "REPO_ROOT", repo),
+                mock.patch.object(install, "herdr_command", return_value="herdr"),
+                mock.patch.object(
+                    install.subprocess, "check_output", return_value=self.SKILL
+                ) as skill_mock,
             ):
                 install.install_claude()
 
                 # claude2/3/4 launch with their own CLAUDE_CONFIG_DIR, so the
-                # user-level CLAUDE.md has to exist in each one.
+                # user-level CLAUDE.md and skills have to exist in each one.
                 config_dirs = install.claude_config_dirs()
                 self.assertEqual(
                     [d.name for d in config_dirs],
@@ -273,10 +279,58 @@ class ClaudeInstallTest(unittest.TestCase):
                         (config_dir / "CLAUDE.md").resolve(),
                         (repo / "claude/CLAUDE.md").resolve(),
                     )
+                    skill = config_dir / "skills/herdr/SKILL.md"
+                    self.assertFalse(skill.is_symlink())
+                    self.assertEqual(skill.read_text(encoding="utf-8"), self.SKILL)
+                # the skill is generated from the binary, not vendored, so one
+                # `herdr --skill` call feeds every config dir.
+                skill_mock.assert_called_once()
+                self.assertEqual(skill_mock.call_args.args[0], ["herdr", "--skill"])
                 # only the primary dir gets settings.json: the others carry their
                 # own permission modes.
                 self.assertTrue((home / ".claude/settings.json").is_file())
                 self.assertFalse((home / ".claude2/settings.json").exists())
+
+                # an unchanged skill must not be rewritten, so a second run leaves
+                # the tree exactly as it was.
+                skill_path = home / ".claude/skills/herdr/SKILL.md"
+                before = skill_path.stat().st_mtime_ns
+                install.install_claude()
+                self.assertEqual(skill_path.stat().st_mtime_ns, before)
+
+                # a newer herdr rewrites it in place.
+                skill_mock.return_value = self.SKILL + "\n## New section\n"
+                install.install_claude()
+                self.assertTrue(
+                    skill_path.read_text(encoding="utf-8").endswith("## New section\n")
+                )
+
+    def test_install_claude_herdr_skill_skips_without_herdr(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "herdr_command", return_value=None),
+                mock.patch.object(install.subprocess, "check_output") as skill_mock,
+            ):
+                install.install_claude_herdr_skill()
+            skill_mock.assert_not_called()
+            self.assertFalse((home / ".claude/skills").exists())
+
+    def test_install_claude_herdr_skill_rejects_non_skill_output(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "herdr_command", return_value="herdr"),
+                mock.patch.object(
+                    install.subprocess, "check_output", return_value="usage: herdr\n"
+                ),
+            ):
+                install.install_claude_herdr_skill()
+            self.assertFalse((home / ".claude/skills").exists())
 
 
 class NeovimPluginCommandTest(unittest.TestCase):
