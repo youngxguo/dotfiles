@@ -165,7 +165,8 @@ class HerdrInstallTest(unittest.TestCase):
                 if sys.platform == "darwin":
                     self.assertEqual(
                         auto_title_target,
-                        home / "Library/Application Support/herdr-auto-title/config.env",
+                        home
+                        / "Library/Application Support/herdr-auto-title/config.env",
                     )
                 else:
                     self.assertEqual(
