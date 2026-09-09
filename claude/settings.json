@@ -32,14 +32,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/auto-name-session.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "~/.claude/hooks/prompt-timer.sh start"
           }
         ]
