@@ -5,3 +5,5 @@ any time he gets a new machine, we should be able to run `install.py` and have e
 there are a variety of tools and setup here, not all of which might be directly used at any given time (for example vscode isn't really used anymore)
 
 everything should be agnostic to macos and linux
+
+everything should also try to be agnostic to the work environment. this is for personal but also professional work. no professional work configs should leak into this repo for example.
