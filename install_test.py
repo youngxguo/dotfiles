@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -248,7 +249,10 @@ class ClaudeInstallTest(unittest.TestCase):
         (repo / "claude/hooks").mkdir(parents=True)
         (repo / "claude/CLAUDE.md").write_text("# rules\n", encoding="utf-8")
         (repo / "claude/statusline-command.sh").write_text("", encoding="utf-8")
-        (repo / "claude/settings.json").write_text("{}\n", encoding="utf-8")
+        (repo / "claude/settings.json").write_text(
+            '{"permissions": {"defaultMode": "plan"}, "statusLine": {"type": "command"}}\n',
+            encoding="utf-8",
+        )
         return repo
 
     def test_install_claude_covers_every_config_dir(self):
@@ -286,10 +290,17 @@ class ClaudeInstallTest(unittest.TestCase):
                 # `herdr --skill` call feeds every config dir.
                 skill_mock.assert_called_once()
                 self.assertEqual(skill_mock.call_args.args[0], ["herdr", "--skill"])
-                # only the primary dir gets settings.json: the others carry their
-                # own permission modes.
-                self.assertTrue((home / ".claude/settings.json").is_file())
-                self.assertFalse((home / ".claude2/settings.json").exists())
+                # every dir gets settings.json, but only the primary one takes
+                # permissions: the others carry their own permission modes.
+                primary = json.loads(
+                    (home / ".claude/settings.json").read_text(encoding="utf-8")
+                )
+                secondary = json.loads(
+                    (home / ".claude2/settings.json").read_text(encoding="utf-8")
+                )
+                self.assertIn("permissions", primary)
+                self.assertNotIn("permissions", secondary)
+                self.assertEqual(secondary.get("statusLine"), primary.get("statusLine"))
 
                 # an unchanged skill must not be rewritten, so a second run leaves
                 # the tree exactly as it was.
