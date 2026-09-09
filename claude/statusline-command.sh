@@ -117,7 +117,8 @@ printf "\033[01;35m%s\033[00m" "$model"
 
 # Git branch of the workspace, only when the cwd is inside a repo. One rev-parse
 # yields the repo root (the PR cache key) and the branch; detached HEAD prints
-# the literal "HEAD", which is swapped for the short SHA.
+# the literal "HEAD", which is swapped for the short SHA. The glyph is
+# nf-dev-git_branch (U+E725), the one neovim's statusline puts before the branch.
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
 if [ -n "$workspace_dir" ] && [ -d "$workspace_dir" ]; then
   { read -r repo_root; read -r git_branch; read -r git_dir; read -r git_common_dir; } <<EOF
@@ -127,7 +128,7 @@ EOF
     git_branch=$(git -C "$workspace_dir" rev-parse --short HEAD 2>/dev/null)
   fi
   if [ -n "$git_branch" ]; then
-    printf " | \033[01;32m %s\033[00m" "$git_branch"
+    printf " | \033[01;32m %s\033[00m" "$git_branch"
   fi
 fi
 
@@ -135,9 +136,10 @@ fi
 # shows them as the $repo and $branch tokens on the pane's third row, and herdr
 # has no built-in tokens for either on agent rows. The repo is the main
 # checkout's name even from a linked worktree (the common git dir's parent), so
-# worktrees of hsys all read "hsys". Nerd-font glyphs are stripped by herdr's
-# metadata sanitizer, hence emoji. Backgrounded so the render never waits on
-# the socket, and re-sent every refresh so a restarted server picks it up.
+# worktrees of hsys all read "hsys". The branch carries the same nerd-font
+# glyph as the statusline (herdr's metadata sanitizer keeps glyphs, but strips
+# escape bytes). Backgrounded so the render never waits on the socket, and
+# re-sent every refresh so a restarted server picks it up.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   # The session title, wrapped into $title1..3 so the sidebar shows it whole:
@@ -216,7 +218,7 @@ EOF
       repo_dir=${git_common_dir%/.git}
       repo_name=${repo_dir##*/}
     fi
-    set -- "$@" --token "repo=📁 $repo_name" --token "branch=🌿 $git_branch"
+    set -- "$@" --token "repo=📁 $repo_name" --token "branch= $git_branch"
   else
     set -- "$@" --clear-token repo --clear-token branch
   fi
