@@ -1,25 +1,19 @@
 onboarding = false
 
-# Match the tmux hierarchy: workspaces are sessions and tabs are windows.
 [terminal]
 new_cwd = "follow"
 
 [keys]
 prefix = "ctrl+space"
 
-# Session/workspace controls.
 settings = ""
 workspace_picker = "prefix+s"
 new_workspace = "prefix+shift+c"
-# Closing a worktree workspace also removes its checkout: see
-# herdr/plugins/worktree-cleanup, linked by install.py.
 new_worktree = "prefix+shift+w"
-# Match tmux's prefix-$ rename-session binding.
 rename_workspace = "prefix+$"
 switch_workspace = ""
 focus_agent = "cmd+1..9"
 
-# Vim-style workspace navigation inside the workspace picker.
 navigate_workspace_up = "k"
 navigate_workspace_down = "j"
 
@@ -28,11 +22,8 @@ rename_tab = "prefix+comma"
 previous_tab = "shift+left"
 next_tab = "shift+right"
 
-# Pane splits match tmux: a vertical divider opens right; a horizontal divider
-# opens down.
 split_vertical = ["prefix+backslash", "prefix+percent"]
 split_horizontal = ["prefix+minus", "prefix+double_quote"]
-# Prefix navigation remains available even if a plugin action is unavailable.
 focus_pane_left = "prefix+h"
 focus_pane_down = "prefix+j"
 focus_pane_up = "prefix+k"
@@ -58,14 +49,11 @@ key = "ctrl+l"
 type = "plugin_action"
 command = "herdr-splits.nav-right"
 
-# Open the focused pane's pull request in the browser: herdr/plugins/open-pr,
-# linked by install.py. Also in the pane's right-click menu.
 [[keys.command]]
 key = "prefix+p"
 type = "plugin_action"
 command = "young.open-pr.open-pr"
 
-# Open any git repo under ~/Documents/code as a new workspace, like tmux-sessionizer.
 [[keys.command]]
 key = "prefix+f"
 type = "popup"
@@ -74,8 +62,8 @@ width = "70%"
 height = "50%"
 
 [ui]
-# Auto Title names tabs; a name typed here would mark the tab as manual and
-# hide it from the plugin for good.
+# A tab name typed at the prompt marks the tab manual and hides it from Auto
+# Title for good.
 prompt_new_tab_name = false
 prompt_new_workspace_name = true
 pane_gaps = false
@@ -84,20 +72,9 @@ agent_panel_sort = "spaces"
 status_indicators = "dots"
 show_agent_labels_on_pane_borders = true
 
-# Agent entries: the agent's focus_agent number (cmd+N) and the session title
-# in bold, the title wrapped over up to three rows, then the repo, then the
-# branch with its PR. herdr cuts a row at the sidebar's width and has no wrap,
-# so claude/statusline-command.sh reports the title pre-wrapped as $title1..3
-# pane metadata, alongside $num, $repo, $branch and the PR (herdr has no repo,
-# branch or PR token for agent rows; branch exists only for Spaces). A token's
-# color is fixed here, so the PR arrives as one of $pr_open, $pr_draft,
-# $pr_merged or $pr_closed, colored like GitHub does (green, grey, purple,
-# red); only the one matching the PR's state has a value. Sidebar tokens are
-# plain text, so the PR is not clickable here: prefix+p (the open-pr plugin
-# action below) opens the focused pane's PR instead. Repo and branch drop the
-# default dim so they read at a glance. The agent's name is on the pane border
-# and the workspace groups the entries, so neither gets a row. Rows whose
-# tokens have no value disappear.
+# Pane metadata from claude/statusline-command.sh: herdr has no repo, branch or
+# PR token for agent rows, cannot wrap a row (hence $title1..3) and fixes a
+# token's color here (hence one $pr_<state> token per PR state).
 [ui.sidebar.agents]
 rows = [
   ["state_icon", { token = "$num", bold = true, dim = false }, { token = "$title1", bold = true, dim = false }],

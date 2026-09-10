@@ -94,8 +94,6 @@ end
 local function is_active()
   local winid = tonumber(vim.g.statusline_winid)
   if winid == nil then
-    -- With a global statusline (laststatus=3), Neovim may not expose statusline_winid
-    -- the same way. Treat it as active so the mode block still renders.
     return vim.o.laststatus == 3
   end
   return vim.api.nvim_get_current_win() == winid

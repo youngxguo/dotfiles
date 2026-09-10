@@ -1,8 +1,6 @@
 return {
   "ibhagwan/fzf-lua",
   dependencies = { "nvim-tree/nvim-web-devicons" },
-  -- Loaded on first use: the keys below, plus any require("fzf-lua") call
-  -- (the <C-p> map, LSP keymaps, command palette) which lazy.nvim resolves.
   cmd = "FzfLua",
   keys = {
     { "<leader><leader>", function() require("fzf-lua").commands() end, desc = "FzfLua commands" },
@@ -49,9 +47,8 @@ return {
     fzf_opts = {
       ["--layout"] = "reverse",
     },
-    -- The telescope profile rebinds ctrl-u to preview-page-up, which breaks
-    -- Cmd-Backspace (Ghostty sends it as ctrl-u) and fzf's own clear-to-start.
-    -- Restore it; Shift-Up still pages the preview up, ctrl-d still pages down.
+    -- The telescope profile rebinds ctrl-u to preview-page-up; Ghostty sends
+    -- Cmd-Backspace as ctrl-u.
     keymap = {
       builtin = { ["<C-u>"] = false },
       fzf = { ["ctrl-u"] = "unix-line-discard" },

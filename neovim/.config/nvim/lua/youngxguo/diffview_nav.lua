@@ -1,22 +1,13 @@
--- Diffview navigation helpers: focus an already-open Diffview / file-history
--- tab if one exists (refreshing it), otherwise open a fresh one. Exposed as
--- functions so the diffview spec keys and the command palette share them.
-
 local M = {}
 
--- Pick the diff layout based on how wide the editor is. Diffview's
--- "diff2_horizontal" puts the two buffers side by side; "diff2_vertical"
--- stacks them top/bottom. Side-by-side only reads well when there's room for
--- two code buffers next to the file panel, so in a narrow window (e.g. a
--- small tmux pane) we stack them instead and each buffer keeps a usable width.
 local MIN_COLUMNS_FOR_SIDE_BY_SIDE = 100
 
 local function want_horizontal()
   return vim.o.columns >= MIN_COLUMNS_FOR_SIDE_BY_SIDE
 end
 
--- Steer the layout Diffview uses the next time it opens a view. Diffview reads
--- `view.default.layout` once, at open time, so this only affects fresh views.
+-- Diffview reads `view.default.layout` once, at open time, so this only affects
+-- fresh views.
 local function apply_layout()
   local ok, config = pcall(require, "diffview.config")
   if not ok then
@@ -30,10 +21,8 @@ local function apply_layout()
   cfg.view.file_history.layout = layout
 end
 
--- Flip an already-open Diffview between side-by-side and stacked so it tracks
--- the current editor width. Diffview only honours the default layout when a
--- view first opens, so for a live view we reuse its own `cycle_layout` action,
--- which toggles diff2_horizontal <-> diff2_vertical for standard 2-pane diffs.
+-- For a live view Diffview's own `cycle_layout` action toggles
+-- diff2_horizontal <-> diff2_vertical for standard 2-pane diffs.
 local function relayout_open_view()
   local ok_lib, lib = pcall(require, "diffview.lib")
   if not ok_lib then
@@ -47,7 +36,6 @@ local function relayout_open_view()
     return
   end
 
-  -- Only auto-flip the plain 2-pane diff; leave merge-tool layouts alone.
   if class.name ~= "diff2_horizontal" and class.name ~= "diff2_vertical" then
     return
   end
@@ -57,11 +45,10 @@ local function relayout_open_view()
     return
   end
 
-  apply_layout() -- keep the default in sync for the next opened file/view
+  apply_layout()
   pcall(require("diffview.actions").cycle_layout)
 end
 
--- React to the editor itself being resized (terminal window, tmux pane, etc.).
 vim.api.nvim_create_autocmd("VimResized", {
   group = vim.api.nvim_create_augroup("youngxguo_diffview_relayout", { clear = true }),
   callback = function()
@@ -128,7 +115,6 @@ local function focus_view(predicate, on_focus)
   return true
 end
 
--- Open the working-tree diff, or focus + refresh an existing one.
 function M.open_diff()
   if focus_view(function(view, ctx)
     return is_view(view, ctx.DiffView)
@@ -146,7 +132,6 @@ function M.close()
   vim.cmd("DiffviewClose")
 end
 
--- Open file history, or focus + refresh an existing (multi-file) history view.
 function M.open_history()
   if focus_view(function(view, ctx)
     return is_view(view, ctx.FileHistoryView) and view.panel and not view.panel.single_file

@@ -89,7 +89,6 @@ class AccountTest(unittest.TestCase):
         self.assertEqual(self.accounts[0].fable_used, 75.0)
 
     def test_target_is_emptiest_session_window_that_is_not_blocked(self):
-        # c3 has the emptiest 5h window but its weekly cap is spent; c4 is next.
         target = rebump.choose_target(
             self.accounts, exclude=self.accounts[0].config_dir
         )
@@ -253,7 +252,6 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual(fine.reason, "not limited")
                 self.assertFalse(fine.actionable)
 
-                # --force moves a healthy pane, but never onto its own account.
                 self.assertEqual(forced[0].to_label, "c2")
                 self.assertIsNone(forced[1].to_label)
                 self.assertIn("already on", forced[1].reason)

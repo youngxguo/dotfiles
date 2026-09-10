@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""herdr plugin action: open the focused pane's pull request in the browser.
-
-resolves the pane herdr invoked the action for (HERDR_PANE_ID, else the
-current pane), takes its foreground working directory, and runs
-`gh pr view --web` there, which opens the PR for the checked-out branch. a
-pane with no PR gets a herdr notification instead of a browser tab.
-"""
-
 import json
 import os
 import subprocess
@@ -37,7 +29,6 @@ def herdr_json(*args):
 
 
 def find_key(node, keys):
-    """Depth-first search for the first present key in a herdr JSON reply."""
     if isinstance(node, dict):
         for key in keys:
             if node.get(key):
@@ -55,12 +46,8 @@ def find_key(node, keys):
 
 
 def pane_cwd():
-    """The invoked pane's working directory.
-
-    herdr sets HERDR_PANE_ID when the action runs against a pane (its
-    right-click menu). from a keybinding or the CLI there is only the context
-    JSON, whose focused_pane_cwd is the pane the user is looking at.
-    """
+    """herdr sets HERDR_PANE_ID only from a pane's right-click menu; a keybinding
+    or the CLI passes just the context JSON."""
     pane_id = os.environ.get("HERDR_PANE_ID")
     if pane_id:
         try:

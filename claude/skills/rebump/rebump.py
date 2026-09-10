@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""Move rate-limited Claude Code sessions in herdr onto a subscription with headroom.
-
-zsh/.zshrc aliases c2/c3/c4 to their own CLAUDE_CONFIG_DIR (~/.claude2/3/4) so
-several subscriptions run side by side. When one of them hits its 5-hour or
-weekly limit, every Claude Code session running under it stalls on
-"You've hit your session limit". Getting each one going again by hand means:
-find the pane, note the session id, copy the transcript into another config
-dir (claude --resume only searches its own CLAUDE_CONFIG_DIR), quit claude,
-relaunch it under the other alias with --resume, click through the first-run
-dialogs that dir shows for a folder it has never opened, and tell it to carry on.
-
-This script does that for every claude pane herdr knows about:
-
-    rebump.py plan            # read-only: usage per account, panes, proposed moves
-    rebump.py plan --json
-    rebump.py apply           # perform every proposed move
-    rebump.py apply --to claude3 --pane w2E:p1
-    rebump.py apply --force --pane w2E:p1 --to c4   # move a pane that is not stuck
-
-Usage comes from `cusage` (claude-usage-all in the hsys checkout, sourced by the
-shell), herdr state from the `herdr` CLI, and each pane's account from the
-CLAUDE_CONFIG_DIR in its claude process's environment. The pane running this
-script is never restarted: it would kill the caller.
-"""
+"""Move rate-limited Claude Code sessions in herdr onto a subscription with headroom."""
 
 from __future__ import annotations
 
@@ -43,28 +20,20 @@ from pathlib import Path
 
 HOME = Path.home()
 DEFAULT_CONFIG_DIR = HOME / ".claude"
-# Accounts whose 5-hour window is past this are not offered as a destination:
-# moving a session there just moves the stall.
 SESSION_FULL_PERCENT = 90.0
 NUDGE = (
     "This session hit a Claude usage limit and was resumed under another "
     "subscription. Pick up exactly where you left off and finish the task that "
     "was in progress."
 )
-# Flags that pin a session; the relaunch supplies its own --resume.
 SESSION_FLAGS_WITH_VALUE = {"--resume", "-r", "--session-id", "--teleport"}
 SESSION_FLAGS = {"--continue", "-c", "--fork-session"}
-
-
-# --------------------------------------------------------------------------
-# Accounts (cusage)
-# --------------------------------------------------------------------------
 
 
 @dataclass
 class Account:
     label: str
-    config_dir: str  # resolved path, default account included
+    config_dir: str
     email: str | None = None
     error: str | None = None
     weekly_blocked: bool = False
@@ -84,7 +53,6 @@ class Account:
 
 
 def normalize_config_dir(raw: str | None) -> str:
-    """Resolve a CLAUDE_CONFIG_DIR value; unset means ~/.claude."""
     if not raw:
         return str(DEFAULT_CONFIG_DIR.resolve())
     return str(Path(os.path.expandvars(os.path.expanduser(raw))).resolve())
@@ -105,11 +73,8 @@ def account_email(config_dir: str) -> str | None:
 
 
 def run_cusage(timeout: int) -> dict:
-    """`cusage --json` via an interactive zsh, where the hsys helpers are sourced.
-
-    The shell rc may print to stdout before the JSON, so parse from the first
-    line that opens an object.
-    """
+    """cusage is a function sourced by the interactive zsh rc, which may print
+    to stdout before the JSON."""
     shell = os.environ.get("SHELL") or "/bin/zsh"
     try:
         proc = subprocess.run(
@@ -163,12 +128,8 @@ def accounts_from_usage(report: dict) -> list[Account]:
 
 
 def resolve_account(accounts: list[Account], name: str) -> Account:
-    """Match --to by cusage label, alias-style name (claude3, c3) or config dir.
-
-    cusage labels an account after whichever alias sorts first, so the same
-    subscription can read `c3` one day and `claude3` the next; the config dir is
-    the stable identity.
-    """
+    """cusage labels an account after whichever alias sorts first, so the same
+    subscription can read `c3` one day and `claude3` the next."""
     for account in accounts:
         if account.label == name:
             return account
@@ -188,17 +149,11 @@ def resolve_account(accounts: list[Account], name: str) -> Account:
 
 
 def choose_target(accounts: list[Account], exclude: str) -> Account | None:
-    """The account to move to: emptiest 5-hour window, then most Fable left."""
     candidates = [a for a in accounts if a.usable and a.config_dir != exclude]
     candidates.sort(
         key=lambda a: (a.session_used or 0.0, -(100.0 - (a.fable_used or 0.0)))
     )
     return candidates[0] if candidates else None
-
-
-# --------------------------------------------------------------------------
-# herdr
-# --------------------------------------------------------------------------
 
 
 def herdr(*args: str, check: bool = True, timeout: int = 60) -> dict:
@@ -239,7 +194,6 @@ def pane_claude_process(pane_id: str) -> dict | None:
 
 
 def process_env(pid: int) -> dict[str, str]:
-    """The environment of a live process, on Linux (procfs) or macOS (ps eww)."""
     environ = Path(f"/proc/{pid}/environ")
     if environ.exists():
         try:
@@ -264,23 +218,14 @@ def process_env(pid: int) -> dict[str, str]:
     return env
 
 
-# --------------------------------------------------------------------------
-# Transcripts
-# --------------------------------------------------------------------------
-
-
 def find_transcript(config_dir: str, session_id: str) -> Path | None:
     hits = glob.glob(str(Path(config_dir) / "projects" / "*" / f"{session_id}.jsonl"))
     return Path(hits[0]) if hits else None
 
 
 def limit_message(transcript: Path) -> str | None:
-    """The rate-limit text if the transcript's last assistant turn is one.
-
-    Claude Code records the limit as a synthetic assistant message carrying
-    error=rate_limit and quotaLimits.status=rejected; a later real assistant
-    turn means the session got going again.
-    """
+    """Claude Code records a limit as a synthetic assistant message carrying
+    error=rate_limit and quotaLimits.status=rejected."""
     try:
         with transcript.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
@@ -311,7 +256,6 @@ def limit_message(transcript: Path) -> str | None:
 
 
 def copy_transcript(source: Path, target_dir: str) -> Path:
-    """Copy the transcript and its sidecar dir into the same project slug."""
     dest = Path(target_dir) / "projects" / source.parent.name / source.name
     dest.parent.mkdir(parents=True, exist_ok=True)
     if not dest.exists() or source.stat().st_mtime > dest.stat().st_mtime:
@@ -320,11 +264,6 @@ def copy_transcript(source: Path, target_dir: str) -> Path:
     if sidecar.is_dir():
         shutil.copytree(sidecar, dest.with_suffix(""), dirs_exist_ok=True)
     return dest
-
-
-# --------------------------------------------------------------------------
-# Plan
-# --------------------------------------------------------------------------
 
 
 @dataclass
@@ -352,7 +291,6 @@ class Move:
 
 
 def relaunch_argv(argv: list[str], session_id: str) -> list[str]:
-    """The original command line, minus session flags, plus --resume <id>."""
     out: list[str] = []
     skip = False
     for token in argv:
@@ -445,11 +383,6 @@ def relaunch_command(move: Move) -> str:
     )
 
 
-# --------------------------------------------------------------------------
-# Apply
-# --------------------------------------------------------------------------
-
-
 def wait_for(predicate, timeout: float, interval: float = 0.5) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -470,11 +403,9 @@ def pane_screen(pane_id: str) -> str:
 
 
 def dismiss_startup_dialogs(pane_id: str, log) -> bool:
-    """Click through the first-run dialogs a config dir shows for a folder it
-    has never opened: the folder-trust question, the bypass-permissions
-    warning, the Chrome extension notice. The session's old account had
-    already been through them. herdr classifies these as idle, so the screen
-    is the only signal. Returns True when any dialog was answered."""
+    """A config dir shows folder-trust, bypass-permissions and Chrome-extension
+    dialogs for a folder it has never opened; herdr classifies them as idle, so
+    the screen is the only signal."""
     answered = False
     for _ in range(5):
         screen = pane_screen(pane_id)
@@ -550,11 +481,6 @@ def apply_move(move: Move, nudge: str | None, log) -> str:
         log("  nudged")
         return "resumed and nudged"
     return "resumed"
-
-
-# --------------------------------------------------------------------------
-# Output
-# --------------------------------------------------------------------------
 
 
 def fmt_pct(value: float | None) -> str:

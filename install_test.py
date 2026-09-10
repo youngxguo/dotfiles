@@ -57,8 +57,6 @@ class PiConfigInstallTest(unittest.TestCase):
 class PiCliInstallTest(unittest.TestCase):
     @staticmethod
     def pi_patches(home, repo, prefix, npm_installed):
-        """Patch install.py down to the two things a pi install depends on:
-        an npm on PATH and the prefix it installs into."""
         return (
             mock.patch.object(install, "HOME", home),
             mock.patch.object(install, "REPO_ROOT", repo),
@@ -92,7 +90,6 @@ class PiCliInstallTest(unittest.TestCase):
                 run_mock = stack.enter_context(mock.patch.object(install, "run"))
                 install.install_pi()
 
-            # npm is missing, so node has to be bootstrapped before the install.
             self.assertIn(mock.call("node"), package_mock.mock_calls)
             run_mock.assert_not_called()
 
@@ -110,8 +107,6 @@ class PiCliInstallTest(unittest.TestCase):
                 (home / ".pi/agent/settings.json").resolve(), source.resolve()
             )
 
-            # pi lands in npm's global prefix, which is not necessarily on PATH
-            # in the shell running install.py; a second run must not reinstall it.
             (prefix / "bin/pi").touch()
             with ExitStack() as stack:
                 for patch in self.pi_patches(home, repo, prefix, npm_installed=True):
@@ -158,8 +153,6 @@ class HerdrInstallTest(unittest.TestCase):
                     install.HERDR_INSTALL_URL, run_mock.mock_calls[0].args[0][-1]
                 )
                 self.assertEqual(target.resolve(), source.resolve())
-                # the auto-title plugin reads its config from Go's UserConfigDir,
-                # not from herdr's plugin config dir.
                 auto_title_target = install.herdr_auto_title_config_path()
                 self.assertTrue(auto_title_target.is_relative_to(home))
                 if sys.platform == "darwin":
@@ -176,8 +169,6 @@ class HerdrInstallTest(unittest.TestCase):
                     auto_title_target.resolve(), auto_title_source.resolve()
                 )
 
-                # the installer drops the binary in ~/.local/bin, which is not
-                # necessarily on PATH yet; a second run must not re-download it.
                 binary = home / ".local/bin/herdr"
                 binary.parent.mkdir(parents=True, exist_ok=True)
                 binary.touch()
@@ -201,25 +192,19 @@ class HerdrPluginInstallTest(unittest.TestCase):
         ):
             install.install_herdr_plugins()
 
-        # the herdr-side copy must be pinned to the commit lazy-lock.json already
-        # pins the neovim-side to, so the two halves cannot drift apart.
         commit = install.lazy_lock_commit(repo.rsplit("/", 1)[-1])
         self.assertIsNotNone(commit, "herdr-splits is missing from lazy-lock.json")
         commands = [call.args[0] for call in run_mock.mock_calls]
         self.assertIn(
             ["herdr", "plugin", "install", repo, "--ref", commit, "-y"], commands
         )
-        # plugins with no neovim half follow their default branch.
         for other_repo, _ in install.HERDR_PLUGINS[1:]:
             self.assertIn(["herdr", "plugin", "install", other_repo, "-y"], commands)
-        # plugins kept in this repo are linked from their checkout path.
         for relative_path, _ in install.HERDR_LOCAL_PLUGINS:
             plugin_dir = install.REPO_ROOT / relative_path
             self.assertTrue((plugin_dir / "herdr-plugin.toml").is_file())
             self.assertIn(["herdr", "plugin", "link", str(plugin_dir)], commands)
 
-        # a plugin id already in `herdr plugin list` must not be reinstalled;
-        # the reload still runs so a live server picks up the keybindings.
         installed = "".join(
             f"- {installed_id} enabled\n"
             for _, installed_id in (
@@ -281,8 +266,6 @@ class ClaudeInstallTest(unittest.TestCase):
             ):
                 install.install_claude()
 
-                # claude2/3/4 launch with their own CLAUDE_CONFIG_DIR, so the
-                # user-level CLAUDE.md and skills have to exist in each one.
                 config_dirs = install.claude_config_dirs()
                 self.assertEqual(
                     [d.name for d in config_dirs],
@@ -296,12 +279,8 @@ class ClaudeInstallTest(unittest.TestCase):
                     skill = config_dir / "skills/herdr/SKILL.md"
                     self.assertFalse(skill.is_symlink())
                     self.assertEqual(skill.read_text(encoding="utf-8"), self.SKILL)
-                # the skill is generated from the binary, not vendored, so one
-                # `herdr --skill` call feeds every config dir.
                 skill_mock.assert_called_once()
                 self.assertEqual(skill_mock.call_args.args[0], ["herdr", "--skill"])
-                # every dir gets the same settings.json keys, so c2/c3/c4 run
-                # with the primary dir's permission mode.
                 primary = json.loads(
                     (home / ".claude/settings.json").read_text(encoding="utf-8")
                 )
@@ -314,14 +293,11 @@ class ClaudeInstallTest(unittest.TestCase):
                 )
                 self.assertEqual(secondary.get("statusLine"), primary.get("statusLine"))
 
-                # an unchanged skill must not be rewritten, so a second run leaves
-                # the tree exactly as it was.
                 skill_path = home / ".claude/skills/herdr/SKILL.md"
                 before = skill_path.stat().st_mtime_ns
                 install.install_claude()
                 self.assertEqual(skill_path.stat().st_mtime_ns, before)
 
-                # a newer herdr rewrites it in place.
                 skill_mock.return_value = self.SKILL + "\n## New section\n"
                 install.install_claude()
                 self.assertTrue(
@@ -368,7 +344,6 @@ class ClaudeSkillLinksTest(unittest.TestCase):
                 "---\nname: rebump\n---\n", encoding="utf-8"
             )
             (skill / "rebump.py").write_text("", encoding="utf-8")
-            # a stray dir without a SKILL.md is not a skill and gets no link.
             (repo / "claude/skills/notes").mkdir()
 
             with (
@@ -380,8 +355,6 @@ class ClaudeSkillLinksTest(unittest.TestCase):
 
             for config_dir in (".claude", ".claude2", ".claude3", ".claude4"):
                 link = home / config_dir / "skills/rebump"
-                # the whole skill dir is linked, so scripts beside SKILL.md and
-                # ${CLAUDE_SKILL_DIR} resolve, and edits land without a reinstall.
                 self.assertTrue(link.is_symlink())
                 self.assertEqual(link.resolve(), skill.resolve())
                 self.assertTrue((link / "rebump.py").is_file())
@@ -394,14 +367,8 @@ class NeovimPluginCommandTest(unittest.TestCase):
             " ".join(command) for command in install.neovim_plugin_commands()
         )
 
-        # lazy.sync() is clean + install + *update*, and update rewrites
-        # lazy-lock.json to whatever it just fetched. A setup run must not move
-        # the pins, or the committed lockfile stops describing what a new
-        # machine gets.
         self.assertNotIn("sync(", lua)
         self.assertIn("install({wait = true, lockfile = true})", lua)
-        # restore only touches already-installed plugins, so install must run
-        # first for this to work on a machine with an empty plugin dir.
         self.assertIn("restore({wait = true})", lua)
 
     def test_update_plugins_uses_sync(self):
@@ -428,8 +395,6 @@ class NeovimPluginCommandTest(unittest.TestCase):
             config.mkdir(parents=True)
             (config / "init.lua").write_text("", encoding="utf-8")
 
-            # verify mode runs against a temporary HOME, but nvim would read the
-            # real $HOME from the environment and mutate the actual plugin dir.
             with (
                 mock.patch.object(install, "HOME", root / "home"),
                 mock.patch.object(install, "REPO_ROOT", repo),

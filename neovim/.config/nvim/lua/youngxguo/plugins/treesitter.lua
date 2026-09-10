@@ -9,9 +9,8 @@ return {
       local ts = require("nvim-treesitter")
       local available = ts.get_available()
 
-      -- `main` dropped the module system, so highlighting is started per buffer.
-      -- Install the parser first if we don't have it yet; install() returns
-      -- immediately for parsers that are already there.
+      -- `main` dropped the module system, so highlighting is started per buffer;
+      -- install() returns immediately for parsers that are already there.
       vim.api.nvim_create_autocmd("FileType", {
         callback = function(ev)
           local lang = vim.treesitter.language.get_lang(ev.match)

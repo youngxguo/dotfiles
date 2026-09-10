@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Status-right AI idle indicator. The state is still owned by each agent pane's
-# @ai_state option; this only renders the idle sessions as their list-order
-# numbers so the bottom-right bar stays compact.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null

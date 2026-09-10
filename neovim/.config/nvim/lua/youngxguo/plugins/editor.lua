@@ -19,8 +19,6 @@ return {
     },
   },
 
-  -- Jump anywhere on screen by typing a label. NOTE: this rebinds `s`/`S` in
-  -- normal/visual/operator mode (use `cl` for the old `s` = substitute char).
   {
     "folke/flash.nvim",
     event = "VeryLazy",
@@ -33,8 +31,6 @@ return {
     },
   },
 
-  -- Per-directory session restore (window layout, buffers, cursor). Auto-saves
-  -- on exit; restore on demand with the keymaps below.
   {
     "folke/persistence.nvim",
     event = "BufReadPre",

@@ -1,11 +1,6 @@
 #!/bin/sh
-# Claude Code statusline: model | git branch | prompt timer | session cost |
-# daily/monthly budget bars | context bar. Reads the statusLine JSON payload on
-# stdin and writes one line. install.py symlinks this to
-# ~/.claude/statusline-command.sh; claude/settings.json points statusLine here.
 input=$(cat)
 
-# Extract fields from JSON input using python3
 session_cost=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('cost', {}).get('total_cost_usd', 0) or 0)")
 used_pct=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); v=d.get('context_window',{}).get('used_percentage'); print(v if v is not None else '')")
 model=$(echo "$input" | python3 -c "
@@ -19,15 +14,10 @@ else:
 print(display)
 ")
 
-# Paths for persistent cost tracking
 CLAUDE_DIR="$HOME/.claude"
 TRACKING_DIR="$CLAUDE_DIR/cost-tracking"
 mkdir -p "$TRACKING_DIR"
 
-# Run "$@" in the background when cache file $1 is missing or over a minute
-# old. Renders only ever read the cache, so they never wait on the network.
-# Touching the cache first acts as a lease: this script runs every second and a
-# refresh takes longer than that, so without it renders would stack up refreshes.
 refresh_if_stale() {
   cache=$1; shift
   if [ ! -f "$cache" ] || [ -n "$(find "$cache" -mmin +1 2>/dev/null)" ]; then
@@ -36,12 +26,8 @@ refresh_if_stale() {
   fi
 }
 
-# Claude Code's cost.total_cost_usd is scoped to the CLI process, not the
-# conversation, so it does NOT reset on /clear or /new (the process keeps
-# running; only the session_id rotates). Derive a per-session cost by
-# snapshotting the process total the first time each new session_id is seen,
-# then displaying the delta. On /new the fresh session_id snapshots the current
-# total, so the displayed figure drops to ~0 and climbs with the new session.
+# Claude Code's cost.total_cost_usd is per CLI process, not per conversation: it
+# does not reset on /clear or /new; only session_id rotates.
 session_id=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))")
 if [ -n "$session_id" ]; then
   BASELINE_DIR="$TRACKING_DIR/session-baselines"
@@ -49,27 +35,21 @@ if [ -n "$session_id" ]; then
   baseline_file="$BASELINE_DIR/$session_id"
   if [ ! -f "$baseline_file" ]; then
     printf '%s' "$session_cost" > "$baseline_file"
-    # Prune baselines untouched for 7+ days so the dir stays small.
     find "$BASELINE_DIR" -type f -mtime +7 -delete 2>/dev/null
   fi
   baseline=$(cat "$baseline_file" 2>/dev/null)
   session_cost=$(python3 -c "print(max(0.0, float('$session_cost') - float('$baseline' or 0)))")
 fi
 
-# Daily/monthly budget bars are fed by the ccusage cache refresher. It is
-# machine-local, so skip those bars where it is absent.
 CCUSAGE_REFRESH="$CLAUDE_DIR/ccusage-refresh.sh"
 if [ -x "$CCUSAGE_REFRESH" ]; then
-  # Read monthly budget from config file, default 1500
   MONTHLY_BUDGET=1500
   if [ -f "$CLAUDE_DIR/monthly-budget" ]; then
     MONTHLY_BUDGET=$(cat "$CLAUDE_DIR/monthly-budget" | tr -d '[:space:]')
   fi
 
-  # Derive daily budget from monthly budget / days in month
   DAILY_BUDGET=$(python3 -c "import calendar,datetime; d=datetime.date.today(); print(round($MONTHLY_BUDGET / calendar.monthrange(d.year, d.month)[1], 2))" 2>/dev/null || echo 50)
 
-  # Read daily/monthly totals from the ccusage cache.
   CACHE="$TRACKING_DIR/ccusage-cache.json"
   read daily_cost monthly_cost <<EOF
 $(python3 -c "
@@ -84,14 +64,12 @@ EOF
   refresh_if_stale "$CACHE" "$CCUSAGE_REFRESH"
 fi
 
-# Format a dollar amount to exactly 2 decimal places
 fmt_cost() {
   python3 -c "print('%.2f' % float('${1}'))"
 }
 
 session_cost_fmt=$(fmt_cost "$session_cost")
 
-# Build a colored 5-char bar with overflow indicator
 build_bar() {
   pct=$1
   python3 -c "
@@ -112,13 +90,8 @@ print(color + bar + reset + overflow, end='')
 "
 }
 
-# Model in bright magenta
 printf "\033[01;35m%s\033[00m" "$model"
 
-# Git branch of the workspace, only when the cwd is inside a repo. One rev-parse
-# yields the repo root (the PR cache key) and the branch; detached HEAD prints
-# the literal "HEAD", which is swapped for the short SHA. The glyph is
-# nf-dev-git_branch (U+E725), the one neovim's statusline puts before the branch.
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
 if [ -n "$workspace_dir" ] && [ -d "$workspace_dir" ]; then
   { read -r repo_root; read -r git_branch; read -r git_dir; read -r git_common_dir; } <<EOF
@@ -132,20 +105,12 @@ EOF
   fi
 fi
 
-# Pull request for the branch, for the herdr sidebar below. It is not printed
-# here: Claude Code's own footer line already shows "PR #<n>" next to the
-# permission mode, so a label in the statusline showed the PR twice. Looked up
-# with `gh pr list --state all` so the PR keeps showing after it merges or
-# closes instead of vanishing. gh takes ~0.5s, so the refresher runs in the
-# background and writes a pre-rendered "<state> <number> <url>" line (empty
-# when the branch has no PR) to a per-repo+branch cache file.
 pr_state="" pr_number="" pr_url="" pr_label=""
 if [ -n "$HERDR_PANE_ID" ] && [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
   PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
   pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
   if [ ! -f "$pr_cache" ]; then
     mkdir -p "$PR_CACHE_DIR"
-    # Prune caches untouched for 7+ days so the dir stays small.
     find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
   fi
   refresh_if_stale "$pr_cache" sh -c '
@@ -161,37 +126,20 @@ if [ -n "$HERDR_PANE_ID" ] && [ -n "$git_branch" ] && command -v gh >/dev/null 2
   fi
 fi
 
-# Inside herdr, hand the repo, branch and PR to the agent sidebar:
-# herdr/config.toml shows them as the $repo, $branch and $pr_<state> tokens
-# under the title, and herdr has no built-in tokens for any of them on agent
-# rows. A token's color is fixed in the config, so the PR goes out as one of
-# pr_open, pr_draft, pr_merged or pr_closed (the rest cleared) and each has its
-# own fg there. The repo is the main checkout's name even from a linked
-# worktree (the common git dir's parent), so worktrees of hsys all read "hsys".
-# The branch carries the same nerd-font glyph as the statusline. herdr's
-# metadata sanitizer keeps glyphs but strips escape bytes, so the PR cannot be
-# a hyperlink here; the open-pr plugin action in herdr/plugins opens it
-# instead. Backgrounded so the render never waits on the socket, and re-sent
-# every refresh so a restarted server picks it up. Runs after the PR lookup
-# above so $pr_label is set.
+# herdr has no repo, branch or PR token for agent rows, so they go out as pane
+# metadata. A token's color is fixed in herdr/config.toml, so the PR is sent as
+# one of pr_open, pr_draft, pr_merged or pr_closed. herdr strips escape bytes
+# from metadata, so the PR cannot be a hyperlink.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
-  # The session title, wrapped into $title1..3 so the sidebar shows it whole:
-  # herdr cuts a row at the sidebar's width and cannot wrap. Read from the
-  # transcript's last title line, so a restarted server gets it back too.
-  # Claude Code writes an ai-title line when it generates a title from the
-  # first prompt (and again on accepting a plan), and a custom-title line for
-  # /rename or --name; the newest of either wins, as it does in Claude Code's
-  # own picker. The wrap width follows the sidebar: herdr saves its width to
-  # session.json next to the socket, and the rows lose 4 columns to the state
-  # dot and padding.
+  # herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
+  # to session.json next to the socket. Claude Code writes an ai-title transcript
+  # line when it titles a session and a custom-title line for /rename or --name.
   transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
   herdr_session=${HERDR_SOCKET_PATH:+${HERDR_SOCKET_PATH%/*}/session.json}
   : "${herdr_session:=$HOME/.config/herdr/session.json}"
-  # This agent's position in the sidebar, which is the key focus_agent
-  # (cmd+1..9 in herdr/config.toml) switches to it with. `herdr agent list`
-  # returns agents in workspace, tab, pane order, which is what the sidebar's
-  # "spaces" sort shows; only the first nine have a key.
+  # `herdr agent list` returns agents in workspace, tab, pane order, the
+  # sidebar's "spaces" sort; focus_agent (cmd+1..9) reaches only the first nine.
   agent_num=$("$herdr_bin" agent list 2>/dev/null | python3 -c "
 import json, os, sys
 try:
@@ -208,10 +156,10 @@ for i, agent in enumerate(agents, 1):
     set -- --clear-token num
   fi
   if [ -n "$transcript" ] && [ -f "$transcript" ]; then
-    # The first row also carries the number and a space, hence the indent.
     title_rows=$(tail -c 262144 "$transcript" | HERDR_SESSION_FILE="$herdr_session" python3 -c "
 import json, os, sys, textwrap
 width = 26
+state_dot_and_padding = 4
 try:
     width = int(json.load(open(os.environ['HERDR_SESSION_FILE'])).get('sidebar_width') or width)
 except (OSError, ValueError, TypeError):
@@ -228,7 +176,7 @@ for line in sys.stdin:
         title = entry.get('customTitle') or title
     elif entry.get('type') == 'ai-title':
         title = entry.get('aiTitle') or title
-rows = textwrap.wrap(title, max(10, width - 4), initial_indent='  ', max_lines=3, placeholder='…')
+rows = textwrap.wrap(title, max(10, width - state_dot_and_padding), initial_indent='  ', max_lines=3, placeholder='…')
 for part in rows:
     print(part.strip())
 ")
@@ -271,9 +219,6 @@ EOF
     </dev/null >/dev/null 2>&1 &
 fi
 
-# Elapsed time on the in-flight prompt, stamped by hooks/prompt-timer.sh on
-# UserPromptSubmit and removed on Stop, so it only shows while a turn runs.
-# Ticks because statusLine.refreshInterval=1 re-runs this script every second.
 timer_file="$CLAUDE_DIR/prompt-timer/$session_id"
 if [ -n "$session_id" ] && [ -f "$timer_file" ]; then
   elapsed_fmt=$(python3 -c "
@@ -292,26 +237,22 @@ if s >= 0:
   fi
 fi
 
-# Session cost in bright cyan
 printf " | \033[01;36msession:\$%s\033[00m" "$session_cost_fmt"
 
 if [ -x "$CCUSAGE_REFRESH" ]; then
   daily_cost_fmt=$(fmt_cost "$daily_cost")
   monthly_cost_fmt=$(fmt_cost "$monthly_cost")
 
-  # Daily cost with bar
   daily_budget_int=$(python3 -c "print(int(float('$DAILY_BUDGET')))")
   daily_pct=$(python3 -c "print(float('$daily_cost') / float('$DAILY_BUDGET') * 100)")
   daily_bar=$(build_bar "$daily_pct")
   printf " | \$%s/\$%s today %s" "$daily_cost_fmt" "$daily_budget_int" "$daily_bar"
 
-  # Monthly cost with bar
   monthly_pct=$(python3 -c "print(float('$monthly_cost') / float('$MONTHLY_BUDGET') * 100)")
   monthly_bar=$(build_bar "$monthly_pct")
   printf " | \$%s/\$%s mo %s" "$monthly_cost_fmt" "$MONTHLY_BUDGET" "$monthly_bar"
 fi
 
-# Context window utilization bar, only shown when data is available
 if [ -n "$used_pct" ]; then
   ctx_bar=$(build_bar "$used_pct")
   pct_int=$(python3 -c "print(int(float('$used_pct')))")

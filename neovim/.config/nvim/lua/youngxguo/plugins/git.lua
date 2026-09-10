@@ -69,8 +69,6 @@ return {
       "DiffviewRefresh",
     },
     keys = {
-      -- Working-tree diff swapped to codediff.nvim (inline). Diffview stays for
-      -- history (<leader>gl) and Neogit's integration.
       { "<leader>gl", function() require("youngxguo.diffview_nav").open_history() end, desc = "Git history (Diffview)" },
       { "<leader>gL", function() require("fzf-lua").git_bcommits() end, desc = "Git log current file" },
     },
@@ -100,7 +98,6 @@ return {
     },
   },
 
-  -- Primary working-tree diff (replaced diffview on <leader>gd).
   {
     "esmuellert/codediff.nvim",
     cmd = "CodeDiff",
@@ -110,7 +107,7 @@ return {
     },
     opts = {
       diff = {
-        layout = "inline", -- unified diffs by default; toggle with `t`
+        layout = "inline",
         compute_moves = false,
       },
       explorer = {

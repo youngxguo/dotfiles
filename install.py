@@ -22,36 +22,18 @@ UPDATE_PLUGINS = False
 BTOP_VERSION = "v1.4.7"
 GH_EXTENSIONS = ("dlvhdr/gh-dash",)
 HERDR_INSTALL_URL = "https://herdr.dev/install.sh"
-# (owner/repo, plugin id).
-# - herdr-splits: herdr/config.toml binds ctrl+hjkl to this plugin's nav-*
-#   actions, and `herdr config check` validates syntax only — an unresolved
-#   action is dropped silently, so without this the keys are dead on a new
-#   machine.
-# - auto-title: names tabs after what the agent in the pane is working on.
-#   built from source with go at install time. installed from a fork of
-#   kryptamine/herdr-auto-title whose main carries the
-#   HERDR_AUTO_TITLE_PREFER_AGENT patch herdr/auto-title.env relies on; drop
-#   back to upstream once that PR lands.
 HERDR_PLUGINS = (
     ("lmilojevicc/herdr-splits.nvim", "herdr-splits"),
+    # HERDR_AUTO_TITLE_PREFER_AGENT is pending upstream:
+    # https://github.com/kryptamine/herdr-auto-title/pull/60
     ("youngxguo/herdr-auto-title", "herdr.auto-title"),
 )
-# (path under this repo, plugin id). linked in place rather than installed so
-# edits here take effect without a reinstall.
-# - worktree-cleanup: herdr's close-workspace only drops herdr state and leaves
-#   the git worktree on disk; this hook removes the checkout on
-#   workspace.closed so closing the space is the cleanup step.
-# - open-pr: herdr/config.toml binds prefix+p to this plugin's open-pr action,
-#   which opens the focused pane's pull request in the browser. the sidebar
-#   shows the PR as plain text (herdr strips hyperlink escapes from pane
-#   metadata), so this is the click-through.
 HERDR_LOCAL_PLUGINS = (
     ("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),
     ("herdr/plugins/open-pr", "young.open-pr"),
 )
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
-# pi's package.json engines field. npm refuses the install below it, and a
-# distro node is often older, so check it up front to say why pi was skipped.
+# pi's package.json engines field.
 PI_MIN_NODE_VERSION = (22, 19, 0)
 BTOP_LINUX_RELEASES = {
     "aarch64": (
@@ -81,9 +63,6 @@ LINUX_PACKAGE_OVERRIDES = {
         "pacman": "nodejs",
         "zypper": "nodejs",
     },
-    # herdr-auto-title needs go 1.24+; debian/ubuntu's golang-go can lag behind
-    # that, in which case `herdr plugin install` fails and the tab titles stay
-    # as they are.
     "go": {
         "apt": "golang-go",
         "dnf": "golang",
@@ -387,12 +366,9 @@ def link_file(source_path, target_path):
 
 
 def herdr_auto_title_config_path():
-    """Where the herdr-auto-title plugin reads its config.env.
-
-    The plugin resolves the directory with Go's os.UserConfigDir, which is
-    Application Support on macOS and ~/.config elsewhere; it is not the plugin
-    config dir `herdr plugin list` prints.
-    """
+    """herdr-auto-title resolves its config dir with Go's os.UserConfigDir:
+    Application Support on macOS, ~/.config elsewhere. It is not the plugin
+    config dir `herdr plugin list` prints."""
     if sys.platform == "darwin":
         base = HOME / "Library/Application Support"
     else:
@@ -401,12 +377,6 @@ def herdr_auto_title_config_path():
 
 
 def managed_links():
-    """Return every symlink managed by the setup flow.
-
-    Dynamic categories (ghostty assets, tmux scripts) are enumerated from
-    whatever currently exists in the repo; targets read the module-global
-    ``HOME`` at call time so verify mode works.
-    """
     links = [
         ("zsh", REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc"),
         ("zsh", REPO_ROOT / "starship/starship.toml", HOME / ".config/starship.toml"),
@@ -468,18 +438,10 @@ def managed_links():
         )
     )
 
-    # CLAUDE.md is read from CLAUDE_CONFIG_DIR, so the claude2/3/4 dirs need
-    # their own link. the statusline and hooks below are referenced from
-    # settings.json by ~/.claude path, so one copy serves every config dir.
     for config_dir in claude_config_dirs():
         links.append(
             ("claude", REPO_ROOT / "claude/CLAUDE.md", config_dir / "CLAUDE.md")
         )
-        # claude/skills/<name>/ holds the repo's own skills (SKILL.md plus any
-        # scripts beside it). skills are read from the config dir too, and a
-        # symlinked skill dir is supported, so each dir gets a link per skill.
-        # the herdr skill is generated into skills/herdr by
-        # install_claude_herdr_skill, not linked.
         for skill_dir in sorted((REPO_ROOT / "claude/skills").glob("*/SKILL.md")):
             links.append(
                 (
@@ -544,7 +506,6 @@ def links_for(category):
 
 
 def apply_links(links):
-    """Symlink each configured source to its target; return count applied."""
     applied = 0
     for source, target in links:
         if not Path(source).exists():
@@ -687,12 +648,10 @@ def install_ghostty():
 
 
 def herdr_command():
-    # the upstream installer drops the binary in ~/.local/bin, which zsh/.zshrc
-    # adds to PATH but the shell running install.py may not have yet.
     if command_exists("herdr"):
         return "herdr"
-    fallback = HOME / ".local/bin/herdr"
-    return str(fallback) if fallback.is_file() else None
+    installer_binary = HOME / ".local/bin/herdr"
+    return str(installer_binary) if installer_binary.is_file() else None
 
 
 def herdr_installed():
@@ -746,9 +705,6 @@ def install_herdr_plugins():
         except subprocess.CalledProcessError:
             print(f"warning: unable to link herdr plugin {relative_path}; continuing")
 
-    # keybindings resolve plugin actions at load time, so a server that was
-    # already up keeps dropping ctrl+hjkl until it re-reads the config. on a
-    # fresh machine there is no server yet and the first launch reads it anyway.
     try:
         status = subprocess.check_output(
             [herdr, "status", "server"], text=True, stderr=subprocess.DEVNULL
@@ -772,10 +728,6 @@ def install_herdr():
     elif herdr_installed():
         print("herdr already installed")
     else:
-        # upstream's installer covers macos/linux on x86_64/aarch64, checks the
-        # release checksum, and installs to ~/.local/bin. homebrew only carries
-        # the stable channel, so this keeps both platforms on one path and lets
-        # `herdr update` follow the preview channel from herdr/config.toml.
         try:
             run(["sh", "-c", f"curl -fsSL {HERDR_INSTALL_URL} | sh"])
         except subprocess.CalledProcessError:
@@ -805,7 +757,6 @@ def install_vscode():
 
 
 def ensure_codex_hooks():
-    """Merge the repo's agent-state hooks into ``~/.codex/hooks.json``."""
     fragment_path = REPO_ROOT / "codex/ai-state-hooks.json"
     try:
         fragment = json.loads(fragment_path.read_text(encoding="utf-8"))
@@ -875,31 +826,16 @@ def ensure_codex_hooks():
     print(f"merged codex ai-state hooks into {target}")
 
 
-# settings.json keys the Claude template owns outright in every config dir, so
-# c/c2/c3/c4 all run with the same permission mode. Everything else in the live
-# file is preserved so runtime-managed and machine-local state stays local.
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
 
 
 def claude_config_dirs():
-    """Every CLAUDE_CONFIG_DIR claude can launch with.
-
-    zsh/.zshrc aliases claude2/3/4 to their own config dirs so several
-    subscriptions can run side by side. claude resolves user-level CLAUDE.md
-    and skills relative to that dir, so anything meant to be global has to
-    land in each one. settings.json is merged into each too.
-    """
+    """claude resolves user-level CLAUDE.md, skills and settings.json relative
+    to CLAUDE_CONFIG_DIR, so global config has to land in each dir."""
     return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4)]
 
 
 def install_claude_herdr_skill():
-    """Write `herdr --skill` into each claude config dir's skills folder.
-
-    herdr ships the skill inside the binary and it tracks the installed CLI's
-    command surface, so it is generated here rather than vendored (a committed
-    copy drifts as soon as `herdr update` runs). Rerun install.py after
-    updating herdr to refresh it.
-    """
     herdr = herdr_command()
     if herdr is None:
         print("skipping claude herdr skill: herdr is not installed")
@@ -928,13 +864,6 @@ def install_claude_herdr_skill():
 
 
 def merge_claude_settings():
-    """Merge repo-owned Claude settings into every claude config dir.
-
-    The template owns ``CLAUDE_SETTINGS_KEYS`` in every dir, plus each hook
-    event it declares. Hook events it doesn't declare and every other live
-    key pass through untouched. Hook commands reference ~/.claude paths, so
-    one copy of the scripts serves every dir.
-    """
     source = REPO_ROOT / "claude/settings.json"
     try:
         template = json.loads(source.read_text(encoding="utf-8"))
@@ -989,7 +918,6 @@ def install_claude():
 
 
 def node_version():
-    """Return the installed node version as a (major, minor, patch) tuple."""
     if not command_exists("node"):
         return None
     try:
@@ -1012,9 +940,6 @@ def npm_global_prefix():
 
 
 def pi_installed():
-    # npm's global bin is not necessarily on PATH in the shell running this
-    # script (a linux system node puts it in /usr/bin, nvm under ~/.nvm), so
-    # fall back to the prefix npm would install into before reinstalling.
     if command_exists("pi"):
         return True
     prefix = npm_global_prefix()
@@ -1038,15 +963,11 @@ def install_pi_cli():
         print(f"skipping pi: node {wanted}+ is required (found {found})")
         return
 
-    # upstream's curl installer is an interactive menu that also offers to edit
-    # the shell profile zsh/.zshrc already owns, so run the npm install it ends
-    # up performing instead. --ignore-scripts is upstream's documented quick
-    # start: pi needs no dependency lifecycle scripts.
+    # --ignore-scripts is upstream's documented quick start: pi needs no
+    # dependency lifecycle scripts.
     cmd = ["npm", "install", "-g", "--ignore-scripts", PI_NPM_PACKAGE]
     prefix = npm_global_prefix()
     if prefix is not None and not os.access(prefix, os.W_OK):
-        # homebrew and nvm prefixes belong to the user; a linux system node
-        # installs globals under a root-owned /usr.
         privileged = with_privilege(cmd)
         if not privileged:
             print("skipping pi: sudo is required to write to npm's global prefix")
@@ -1073,7 +994,6 @@ def install_pi():
 
 
 def ensure_codex_local_config():
-    """Seed a local Codex config when one does not already exist."""
     target = HOME / ".codex/config.toml"
     template = REPO_ROOT / "codex/config.example.toml"
 
@@ -1104,19 +1024,9 @@ def neovim_lua_command(lua):
 
 
 def neovim_plugin_commands(update=False):
-    """Return the headless nvim commands that bring plugins to the wanted state.
-
-    Installing and updating are deliberately separate. ``lazy.sync()`` is
-    clean + install + *update*, and update fetches the newest commit matching
-    each version spec and then rewrites lazy-lock.json — so running it here
-    would make a "fresh machine" install whatever landed upstream that morning
-    and leave the repo dirty on every run. The committed lockfile is the
-    contract instead: ``install`` clones missing plugins straight to their
-    locked commits, and ``restore`` pulls already-installed ones back to the
-    lock (it only touches installed plugins, which is why both are needed).
-    Moving the lock is then an explicit act via ``--update-plugins``, whose
-    diff you review and commit.
-    """
+    """lazy.sync() is clean + install + update and rewrites lazy-lock.json.
+    lazy.install() clones missing plugins at their locked commits; lazy.restore()
+    resets only already-installed ones to the lock, so both are needed."""
     if update:
         print("updating neovim plugins (this rewrites lazy-lock.json)")
         plugins = [neovim_lua_command("require('lazy').sync({wait = true})")]
@@ -1134,14 +1044,8 @@ def neovim_plugin_commands(update=False):
 
 
 def ensure_typescript_fallback():
-    """Install the typescript that ts_ls falls back to when a project has none.
-
-    typescript-language-server drives a real typescript install and exits
-    during `initialize` without one, so a repo whose node_modules are not
-    installed - or a stray .ts file outside any package - takes the whole LSP
-    client down with an error. The neovim config points `tsserver.path` at this
-    copy; nothing else uses it.
-    """
+    """typescript-language-server exits during `initialize` without a real
+    typescript install, taking the LSP client down with it."""
     target = HOME / ".local/share/nvim/ts-fallback"
     if (target / "node_modules/typescript/lib/tsserver.js").exists():
         print("neovim typescript fallback already installed")
@@ -1170,10 +1074,6 @@ def install_neovim():
     if VERIFY_MODE:
         print("verify mode: skipping neovim package/bootstrap")
         apply_links(links_for("neovim"))
-        # nvim reads $HOME from the environment, not our patched module global,
-        # so running it here would mutate the real plugin dir and lockfile that
-        # verify mode exists to avoid touching. neovim_plugin_commands is
-        # covered by install_test.py instead.
         print("verify mode: skipping neovim plugin bootstrap")
         return
     install_package("neovim")

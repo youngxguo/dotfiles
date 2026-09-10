@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Tests for .tmux-ai-status.sh: render idle AI sessions as compact status-right
-# numbers, using the same live pane @ai_state aggregation as the sidebar.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -1,7 +1,5 @@
 vim.diagnostic.config({
   underline = true,
-  -- Off: recomputing diagnostics on every keystroke is noisy/laggy in large
-  -- TS files. They refresh when you stop typing instead.
   update_in_insert = false,
   virtual_text = { spacing = 4, prefix = '●' },
   signs = {
@@ -14,8 +12,6 @@ vim.diagnostic.config({
   },
   severity_sort = true,
 })
-
--- blink.cmp auto-injects capabilities on nvim 0.11 via its plugin file
 
 vim.api.nvim_create_autocmd('LspAttach', {
   desc = 'LSP actions',

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Canonical tmux Solarized dark palette. Sourced by ~/.tmux-lib.sh for ANSI
-# output and applied to the tmux server by ~/.tmux.conf via tmux_load_palette.
 
 TMUX_PALETTE_BASE03="#002b36"
 TMUX_PALETTE_BASE02="#073642"
@@ -17,7 +15,6 @@ tmux_hex_to_rgb() {
   printf '%d;%d;%d' "0x${hex:0:2}" "0x${hex:2:2}" "0x${hex:4:2}"
 }
 
-# Push palette into tmux @solarized_* options. Usage: tmux_load_palette tmux [args...]
 tmux_load_palette() {
   local tmux=("$@")
   "${tmux[@]}" set-option -g @solarized_base03 "$TMUX_PALETTE_BASE03"
@@ -39,12 +36,7 @@ tmux_apply_literal_colours() {
   "${tmux[@]}" set-window-option -g clock-mode-colour "$TMUX_PALETTE_YELLOW"
 }
 
-# Run directly (not sourced) to push the palette into the tmux server — this is how
-# ~/.tmux.conf loads it. The conf can't `source` this: tmux's run-shell executes
-# under /bin/sh (dash on Debian/Ubuntu), which has no `source` and can't parse the
-# array/substring helpers above, so it returned 127 and left every @solarized_*
-# unset — the status bar then drew with empty colours. The bash shebang makes the
-# kernel run this under bash when it's invoked as a command, so the helpers work.
+# tmux's run-shell executes under /bin/sh, which cannot `source` this bash script.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   tmux_load_palette tmux && tmux_apply_literal_colours tmux
 fi

@@ -1,13 +1,10 @@
-# zsh
 export ZSH="$HOME/.oh-my-zsh"
 
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="/usr/local/go/bin:$PATH"
 
-# homebrew: apple silicon uses /opt/homebrew and linuxbrew ~/.linuxbrew, neither
-# of which is on the default PATH, so brew-installed tools are invisible without
-# this. intel macs use /usr/local, which is already on PATH, but shellenv also
-# sets MANPATH/INFOPATH so run it there too.
+# brew shellenv also sets MANPATH and INFOPATH, so run it even where brew is
+# already on PATH.
 for _brew in /opt/homebrew/bin/brew /usr/local/bin/brew \
              /home/linuxbrew/.linuxbrew/bin/brew "$HOME/.linuxbrew/bin/brew"; do
   if [ -x "$_brew" ]; then
@@ -17,13 +14,11 @@ for _brew in /opt/homebrew/bin/brew /usr/local/bin/brew \
 done
 unset _brew
 
-# prompt: starship replaces the oh-my-zsh theme (config in starship/starship.toml)
 ZSH_THEME=""
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=10"
 
-# basic plugins
 # zsh-syntax-highlighting wraps ZLE widgets last, so it must load before
-# zsh-autosuggestions — keep autosuggestions at the end of the list.
+# zsh-autosuggestions.
 plugins=(
   zsh-syntax-highlighting
   zsh-autosuggestions
@@ -31,20 +26,17 @@ plugins=(
 
 source $ZSH/oh-my-zsh.sh
 
-# starship prompt (overrides the oh-my-zsh theme)
 command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
 
-# history
 HISTSIZE=100000
 SAVEHIST=100000
-setopt HIST_IGNORE_ALL_DUPS   # keep only the most recent copy of a command
-setopt HIST_IGNORE_SPACE      # skip commands typed with a leading space
-setopt HIST_REDUCE_BLANKS     # collapse superfluous whitespace before saving
-setopt HIST_VERIFY            # show expanded history line instead of running it
-setopt SHARE_HISTORY          # live-share history across running shells
-setopt EXTENDED_HISTORY       # record timestamps
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_IGNORE_SPACE
+setopt HIST_REDUCE_BLANKS
+setopt HIST_VERIFY
+setopt SHARE_HISTORY
+setopt EXTENDED_HISTORY
 
-# fzf — Ctrl+R / Ctrl+T / Esc-c (repeat `source ~/.zshrc`: no-op)
 if [[ -z ${_dotfiles_fzf_rc-} && -o zle ]] && (( ${+commands[fzf]} )); then
   () {
     emulate -L zsh
@@ -58,13 +50,11 @@ if [[ -z ${_dotfiles_fzf_rc-} && -o zle ]] && (( ${+commands[fzf]} )); then
     else
       source <(command fzf --zsh 2>/dev/null)
     fi
-    # fzf's option save/restore re-sets every zsh option on load; on zsh 5.9
-    # that includes the unchangeable `zle`/`monitor`, which print a harmless
-    # "can't change option" to stderr. Drop just those lines; keep real errors.
+    # fzf re-sets every zsh option on load; on zsh 5.9 that includes the
+    # unchangeable zle and monitor, which print "can't change option" to stderr.
   } 2> >(grep -v "can't change option:" >&2)
   _dotfiles_fzf_rc=1
 fi
-# fzf: use fd (faster, respects .gitignore) for Ctrl+T and Esc-c
 if (( ${+commands[fd]} )); then
   export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
   export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
@@ -73,15 +63,11 @@ fi
 
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 
-# editor (EDITOR is what sops, crontab, less, etc. exec - the `vim` alias
-# below is interactive-only and never reaches them)
 export EDITOR=nvim
 export VISUAL=nvim
 
-# git
 export GIT_EDITOR=nvim
 
-# git aliases
 alias gs="git status"
 alias gd="git diff"
 alias gdc="git diff --cached"
@@ -90,8 +76,6 @@ alias gcm='git switch "$(git show-ref --verify --quiet refs/heads/main && printf
 alias gl="git log"
 alias gp="git push"
 alias gpu="git pull"
-# rebase the current branch onto the latest main via origin, so it works in
-# a worktree where local main is checked out elsewhere and can't be moved
 alias grm='git pull --rebase origin "$(git show-ref --verify --quiet refs/remotes/origin/main && printf main || printf master)"'
 alias gcomm="git commit -m"
 alias gcom="git commit"
@@ -100,16 +84,11 @@ alias vim="nvim"
 alias cx="codex"
 alias gcb="git checkout -b"
 
-# claude
 alias c="claude --chrome"
 alias c2="CLAUDE_CONFIG_DIR=~/.claude2 claude --chrome"
 alias c3="CLAUDE_CONFIG_DIR=~/.claude3 claude --chrome"
 alias c4="CLAUDE_CONFIG_DIR=~/.claude4 claude --chrome"
 
-# tmux: push the current git branch into the session's @git_branch option so the
-# sessions sidebar and status line read it instead of forking git on a timer.
-# Only fires when the branch changes (cheap next to starship's own per-prompt git
-# check); chpwd covers `cd`, precmd catches an in-place `git checkout`.
 if [[ -n ${TMUX_PANE:-} ]]; then
   autoload -Uz add-zsh-hook
   _tmux_push_branch() {
@@ -128,12 +107,6 @@ if [[ -n ${TMUX_PANE:-} ]]; then
   add-zsh-hook chpwd _tmux_push_branch
   add-zsh-hook precmd _tmux_push_branch
 
-  # When a shell prompt reappears in this pane, any agent that was running here is
-  # gone, so retire its AI badge. This is the self-heal for agents whose own hooks
-  # can't (Codex has no exit hook) or didn't fire (a crash/kill mid-turn): the
-  # pane's @ai_state would otherwise sit there idle forever. The show-options guard
-  # keeps the normal case — a shell that never ran an agent — to a single cheap
-  # query with no extra work; only a leftover state pays for the clear + redraw.
   _tmux_clear_ai_state() {
     emulate -L zsh
     [[ -n $(command tmux show-options -pqv -t "$TMUX_PANE" @ai_state 2>/dev/null) ]] || return
@@ -142,9 +115,8 @@ if [[ -n ${TMUX_PANE:-} ]]; then
   add-zsh-hook precmd _tmux_clear_ai_state
 fi
 
-# nvm. --no-use skips nvm's default-version resolution, which is the slow part
-# of sourcing it (~600ms); PATH points at the default version directly instead,
-# so node/npm/npx are plain binaries and `nvm use` still works.
+# --no-use skips nvm's default-version resolution, the slow (~600ms) part of
+# sourcing it.
 export NVM_DIR="$HOME/.nvm"
 if [ -s "$NVM_DIR/nvm.sh" ]; then
   \. "$NVM_DIR/nvm.sh" --no-use
@@ -153,5 +125,4 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
     export PATH="$NVM_DIR/versions/node/v$(<"$NVM_DIR/alias/default")/bin:$PATH"
 fi
 
-# personal aliases/functions/secrets live outside the dotfiles repo
 [ -r "$HOME/.personal-plugins/.shell_config" ] && source "$HOME/.personal-plugins/.shell_config"

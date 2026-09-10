@@ -1,6 +1,5 @@
 vim.g.mapleader = " "
 
--- nvim-tree loads lazily now, so disable netrw here (before it would load).
 vim.g.loaded_netrw = 1
 vim.g.loaded_netrwPlugin = 1
 

@@ -1,38 +1,4 @@
 #!/usr/bin/env bash
-# Push-based AI idle/thinking state for the sessions sidebar. Agent CLIs call this
-# from their own hooks instead of the sidebar polling pane contents:
-#   - Claude Code: UserPromptSubmit -> thinking, Stop -> idle, SessionEnd -> clear
-#                  (see the hooks block in claude/settings.json, symlinked by install.py)
-#   - Codex:       UserPromptSubmit -> thinking, Stop -> idle
-#                  (see codex/ai-state-hooks.json, merged in by install.py)
-#
-# State lives on the PANE the agent runs in (@ai_state = thinking|idle, unset when
-# no agent is there). $TMUX_PANE is inherited by the hook, so it points at that
-# pane. Keeping the truth on the pane is what lets it self-heal — a badge can't
-# outlive the agent:
-#   - the agent exits back to a shell -> the shell's precmd hook clears the pane
-#     (~/.zshrc), which also covers Codex (it has no exit hook) and hard crashes;
-#   - the pane is killed outright       -> tmux drops the pane option with the pane.
-# The sidebar aggregates the live pane states per session every time it renders, so
-# nothing has to poll to retire a stale badge. We also mirror the aggregate onto
-# the session (@session_ai_idle / @session_ai_thinking) for the `prefix s` tree
-# menu, which can only read session-scoped options.
-#
-# A transition into `idle` also fires a desktop notification, so finishing a turn
-# pings you — but only for a session you're NOT currently watching. Repeated idle
-# signals are harmless; only the first one should ping.
-#
-# Every invocation also republishes the session's @git_branch from the agent
-# pane's directory, so a branch the agent checks out mid-turn reaches the sidebar:
-# the shell precmd hook that normally pushes it can't fire while an agent holds
-# the pane (see sync_branch).
-#
-# Subcommands (the target pane is always $TMUX_PANE):
-#   thinking   mark the pane busy   (set thinking)
-#   idle       mark the pane idle    (set idle, notify)
-#   clear      clear the pane         (agent gone)
-#
-# install.py symlinks this to ~/.tmux-ai-state.sh via its `.tmux-*.sh` glob.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
@@ -40,9 +6,6 @@ source "$SCRIPT_DIR/.tmux-lib.sh"
 TMUX_BIN="$(tmux_resolve_bin)"
 SIDEBAR="$SCRIPT_DIR/.tmux-sidebar.sh"
 
-# Hooks run inside the agent's pane, so $TMUX_PANE points at it. Without it we
-# can't attribute state — bail quietly (agent run outside tmux, or one ssh hop
-# away where the local tmux socket isn't reachable).
 pane="${TMUX_PANE:-}"
 [ -n "$pane" ] || exit 0
 session="$("$TMUX_BIN" display-message -p -t "$pane" '#{session_id}' 2>/dev/null)" || exit 0
@@ -53,10 +16,8 @@ set_thinking() { "$TMUX_BIN" set-option -pqt "$pane" @ai_state thinking; }
 clear_pane()   { "$TMUX_BIN" set-option -pqut "$pane" @ai_state; }
 pane_state()   { "$TMUX_BIN" show-options -pqv -t "$pane" @ai_state 2>/dev/null; }
 
-# Re-derive the session-level mirror from the live pane states, so the tree menu
-# (prefix s) and any other session-scoped reader stay in step with the panes.
-# thinking outranks idle (any busy pane => the session reads busy); neither set
-# clears both flags.
+# choose-tree formats can only read session-scoped options, so mirror the pane
+# states onto the session.
 sync_session() {
   local any_think=0 any_idle=0 st
   while IFS= read -r st; do
@@ -74,12 +35,6 @@ sync_session() {
   fi
 }
 
-# Republish the session's @git_branch from the agent pane's working directory, so
-# the sidebar's branch label follows a checkout made while the agent held the pane.
-# The shell precmd hook (~/.zshrc) that normally pushes the branch can't fire here
-# — no shell prompt is drawn while the agent runs — so we re-derive it on each turn
-# boundary instead. Mirrors that hook's set/unset of the same session option; a
-# path that isn't a repo clears it.
 sync_branch() {
   local path branch
   path="$("$TMUX_BIN" display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null)"
@@ -92,10 +47,8 @@ sync_branch() {
   fi
 }
 
-# Mirror the old poller's idle ping: "❕ AI Idle / • (N) name branch" via OSC 9 to
-# every client tty, so it surfaces on the attached terminal (incl. over ssh).
-# Skip it when the just-idled session is the one you're already attached to —
-# you don't need a notification for the pane in front of you.
+osc9_notify() { printf '\033]9;%s\a' "$1"; }
+
 notify_idle() {
   local attached name path idx branch label msg ctty
   attached="$("$TMUX_BIN" display-message -p -t "$pane" '#{session_attached}' 2>/dev/null)"
@@ -107,7 +60,7 @@ notify_idle() {
   label="(${idx:-?}) ${name}${branch:+ $branch}"
   msg="❕ AI Idle"$'\n'" • ${label}"
   while IFS= read -r ctty; do
-    [ -n "$ctty" ] && printf '\033]9;%s\a' "$msg" > "$ctty" 2>/dev/null || true
+    [ -n "$ctty" ] && osc9_notify "$msg" > "$ctty" 2>/dev/null || true
   done < <("$TMUX_BIN" list-clients -F '#{client_tty}' 2>/dev/null)
 }
 
@@ -122,9 +75,6 @@ case "${1:-}" in
   *) printf 'usage: %s {thinking|idle|clear}\n' "${0##*/}" >&2; exit 2 ;;
 esac
 
-# Refresh the session mirror and git branch, then wake the visible rail(s) so the
-# change shows immediately. The status refresh picks up ~/.tmux-ai-status.sh's
-# compact bottom-right idle numbers without waiting for status-interval.
 sync_session
 sync_branch
 "$TMUX_BIN" refresh-client -S >/dev/null 2>&1 || true

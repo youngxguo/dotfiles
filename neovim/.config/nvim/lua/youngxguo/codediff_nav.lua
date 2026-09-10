@@ -1,14 +1,8 @@
--- codediff navigation helpers: open working-tree diffs in the inline (unified)
--- layout with the explorer visible. `t` can still toggle an open view to the
--- side-by-side layout.
-
 local M = {}
 
 local DEFAULT_LAYOUT = "inline"
 
--- Steer the layout + explorer state codediff uses for the next view it opens.
--- Returns the layout so callers can also pass the matching command flag.
-local function apply()
+local function apply_view_defaults()
   local layout = DEFAULT_LAYOUT
 
   local ok, config = pcall(require, "codediff.config")
@@ -24,9 +18,9 @@ local function apply()
   return layout
 end
 
--- Default to compact mode (folds unchanged regions, like Diffview) so multi-hunk
--- files are obvious at a glance. Toggle back to the full file with `gc`.
---
+local COMPACT_POLL_INTERVAL_MS = 50
+local COMPACT_POLL_MAX_ATTEMPTS = 40
+
 -- codediff computes the diff asynchronously, so `stored_diff_result.changes` is
 -- briefly nil after CodeDiffOpen fires; calling compact.enable() too early bails
 -- with "No changes to compact". There's no diff-ready event, so poll for it.
@@ -41,16 +35,13 @@ local function enable_compact(tabpage, attempts)
   local session = lifecycle.get_session(tabpage)
   if session and session.stored_diff_result and session.stored_diff_result.changes then
     pcall(compact.enable, tabpage)
-  elseif attempts < 40 then -- ~2s cap at 50ms steps
+  elseif attempts < COMPACT_POLL_MAX_ATTEMPTS then
     vim.defer_fn(function()
       enable_compact(tabpage, attempts + 1)
-    end, 50)
+    end, COMPACT_POLL_INTERVAL_MS)
   end
 end
 
--- codediff keys its sessions by tabpage, so a diff view lives in exactly one
--- tab. Scan the tab list for a CodeDiff session already open anywhere in this
--- Neovim instance.
 local function find_codediff_tab()
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
   if not ok then
@@ -64,13 +55,9 @@ local function find_codediff_tab()
   return nil
 end
 
--- Did this session start from a revision (<leader>gD) or the working tree
--- (<leader>gd)? The side panel knows: an explorer opened with a base revision
--- carries it. codediff renamed that accessor from `get_explorer` to
--- `get_panel_view` once panels covered history views too, so probe for either
--- and only fall back to the git context when the session has no panel at all --
--- a plain working-tree session still records an `original_revision` (`:0` or
--- HEAD), so that fallback cannot tell the two kinds apart on its own.
+-- codediff renamed `get_explorer` to `get_panel_view`. A plain working-tree
+-- session also records an `original_revision` (`:0` or HEAD), so the git
+-- context alone cannot tell a history session from a working-tree one.
 local function session_has_revision(lifecycle, tabpage)
   local get_panel = lifecycle.get_panel_view or lifecycle.get_explorer
   if get_panel then
@@ -91,9 +78,6 @@ local function activate_existing(layout, wants_revision)
     return false
   end
 
-  -- Toggle a matching session when already sitting in its tab. If the shortcut
-  -- requests the other diff kind, close this session and let the caller replace
-  -- it instead.
   if lifecycle.get_session(current) ~= nil then
     if session_has_revision(lifecycle, current) == wants_revision then
       vim.cmd("CodeDiff --" .. layout)
@@ -102,9 +86,6 @@ local function activate_existing(layout, wants_revision)
     return not lifecycle.close(current)
   end
 
-  -- A matching CodeDiff tab in another tab should be focused instead of
-  -- duplicated. Replace a different kind so <leader>gd and <leader>gD can
-  -- switch between the working-tree and trunk views.
   local existing = find_codediff_tab()
   if existing then
     if session_has_revision(lifecycle, existing) == wants_revision then
@@ -122,7 +103,6 @@ local function command(layout, revision)
     return
   end
 
-  -- The full status is only needed for the ordinary working-tree explorer.
   if not revision then
     require("youngxguo.codediff_perf").request_full_status()
   end
@@ -155,9 +135,8 @@ vim.api.nvim_create_autocmd("User", {
   end,
 })
 
--- Open the working-tree diff in the unified layout.
 function M.open_diff()
-  local layout = apply()
+  local layout = apply_view_defaults()
   command(layout)
 end
 
@@ -168,9 +147,6 @@ local function git_ref_exists(dir, ref)
   return result.code == 0
 end
 
--- Resolve the repository's locally known trunk branch. Prefer origin's default
--- branch, then conventional remote-tracking and local branch names. This stays
--- entirely local; users can fetch separately when they want a newer trunk tip.
 local function trunk_ref(dir)
   local remote_head = vim.system({
     "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD",
@@ -189,9 +165,8 @@ local function trunk_ref(dir)
   end
 end
 
--- Show committed changes on the current branch since it diverged from trunk.
 function M.open_trunk_diff()
-  local layout = apply()
+  local layout = apply_view_defaults()
   if activate_existing(layout, true) then
     return
   end

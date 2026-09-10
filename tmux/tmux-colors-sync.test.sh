@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Verify ~/.tmux-palette.sh is the sole hex source and covers every @solarized_*
-# reference in ~/.tmux.conf.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

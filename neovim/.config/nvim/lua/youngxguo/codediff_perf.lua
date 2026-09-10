@@ -17,21 +17,22 @@ local function pending_full_status_requests()
   return tonumber(vim.g[FULL_STATUS_REQUESTS]) or 0
 end
 
+local UNCONSUMED_FULL_STATUS_REQUEST_TTL_MS = 10000
+
+local function expire_unconsumed_full_status_request()
+  local pending = pending_full_status_requests()
+  if pending > 0 then
+    vim.g[FULL_STATUS_REQUESTS] = pending - 1
+  end
+end
+
 function M.request_full_status()
   if pending_full_status_requests() > 0 then
     return
   end
 
   vim.g[FULL_STATUS_REQUESTS] = 1
-
-  -- If the request does not get consumed (for example :CodeDiff toggled an
-  -- existing tab closed), do not let a later automatic refresh inherit it.
-  vim.defer_fn(function()
-    local pending = pending_full_status_requests()
-    if pending > 0 then
-      vim.g[FULL_STATUS_REQUESTS] = pending - 1
-    end
-  end, 10000)
+  vim.defer_fn(expire_unconsumed_full_status_request, UNCONSUMED_FULL_STATUS_REQUEST_TTL_MS)
 end
 
 local function consume_full_status_request()
@@ -308,10 +309,6 @@ local function patch_explorer_keymaps()
 end
 
 local function patch_explorer_status_prefix()
-  -- codediff.nvim only renders explorer file status at the right edge today.
-  -- Keep this as a narrow private-renderer shim: let codediff build the row,
-  -- then move the final status segment before the filename so narrow sidebars
-  -- still show M/A/D/?? without horizontal scrolling.
   local nodes = require("codediff.ui.explorer.nodes")
   if nodes._youngxguo_status_prefix_patched then
     return

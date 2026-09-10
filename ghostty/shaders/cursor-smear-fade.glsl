@@ -5,7 +5,6 @@ float getSdfRectangle(in vec2 p, in vec2 xy, in vec2 b)
 }
 
 // Based on Inigo Quilez's 2D distance functions article: https://iquilezles.org/articles/distfunctions2d/
-// Potencially optimized by eliminating conditionals and loops to enhance performance and reduce branching
 
 float seg(in vec2 p, in vec2 a, in vec2 b, inout float s, float d) {
  vec2 e = b - a;
@@ -44,29 +43,27 @@ float antialising(float distance) {
  return 1. - smoothstep(0., normalize(vec2(2., 2.), 0.).x, distance);
 }
 
-// Soft exponential halo from an SDF edge: 1 at the edge, decaying outward, 0 inside the shape.
 float glow(float d, float radius) {
  return exp(-max(d, 0.0) / radius) * step(0.0, d);
 }
 
 float determineStartVertexFactor(vec2 a, vec2 b) {
- // Conditions using step
- float condition1 = step(b.x, a.x) * step(a.y, b.y); // a.x < b.x && a.y > b.y
- float condition2 = step(a.x, b.x) * step(b.y, a.y); // a.x > b.x && a.y < b.y
-
- // If neither condition is met, return 1 (else case)
+ float condition1 = step(b.x, a.x) * step(a.y, b.y);
+ float condition2 = step(a.x, b.x) * step(b.y, a.y);
  return 1.0 - max(condition1, condition2);
 }
 
 vec2 getRectangleCenter(vec4 rectangle) {
  return vec2(rectangle.x + (rectangle.z / 2.), rectangle.y - (rectangle.w / 2.));
 }
-// --- Tunables -------------------------------------------------------------
-const float DURATION = 0.20; // IN SECONDS — keep short for a snappy feel
-const float EASE_POWER = 2.0; // higher = snappier trail collapse
-const float GLOW_RADIUS = 0.02; // halo falloff width in normalized units (bump for more bloom)
-const float GLOW_STRENGTH = 0.25; // brightness of the additive glow halo
-// --------------------------------------------------------------------------
+const float DURATION_SECONDS = 0.20;
+const float EASE_POWER = 2.0;
+const float GLOW_RADIUS = 0.02;
+const float GLOW_STRENGTH = 0.25;
+
+vec3 screenBlend(vec3 base, vec3 light) {
+ return 1.0 - (1.0 - base) * (1.0 - light);
+}
 
 float ease(float x) {
  return pow(1.0 - x, EASE_POWER);
@@ -77,21 +74,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
  #if !defined(WEB)
  fragColor = texture(iChannel0, fragCoord.xy / iResolution.xy);
  #endif
- // Normalization for fragCoord to a space of -1 to 1;
  vec2 vu = normalize(fragCoord, 1.);
  vec2 offsetFactor = vec2(-.5, 0.5);
 
- // Normalization for cursor position and size;
- // cursor xy has the postion in a space of -1 to 1;
- // zw has the width and height
  vec4 currentCursor = vec4(normalize(iCurrentCursor.xy, 1.), normalize(iCurrentCursor.zw, 0.));
  vec4 previousCursor = vec4(normalize(iPreviousCursor.xy, 1.), normalize(iPreviousCursor.zw, 0.));
 
- // When drawing a parellelogram between cursors for the trail i need to determine where to start at the top-left or top-right vertex of the cursor
  float vertexFactor = determineStartVertexFactor(currentCursor.xy, previousCursor.xy);
  float invertedVertexFactor = 1.0 - vertexFactor;
 
- // Set every vertex of my parellogram
  vec2 v0 = vec2(currentCursor.x + currentCursor.z * vertexFactor, currentCursor.y - currentCursor.w);
  vec2 v1 = vec2(currentCursor.x + currentCursor.z * invertedVertexFactor, currentCursor.y);
  vec2 v2 = vec2(previousCursor.x + currentCursor.z * invertedVertexFactor, previousCursor.y);
@@ -100,35 +91,26 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
  float sdfCurrentCursor = getSdfRectangle(vu, currentCursor.xy - (currentCursor.zw * offsetFactor), currentCursor.zw * 0.5);
  float sdfTrail = getSdfParallelogram(vu, v0, v1, v2, v3);
 
- float progress = clamp((iTime - iTimeCursorChange) / DURATION, 0.0, 1.0);
+ float progress = clamp((iTime - iTimeCursorChange) / DURATION_SECONDS, 0.0, 1.0);
  float easedProgress = ease(progress);
- // Distance between cursors determine the total length of the parallelogram;
  vec2 centerCC = getRectangleCenter(currentCursor);
  vec2 centerCP = getRectangleCenter(previousCursor);
  float lineLength = distance(centerCC, centerCP);
 
  vec4 newColor = vec4(fragColor);
- // Compute fade factor based on distance along the trail
  float fadeFactor = 1.0 - smoothstep(lineLength, sdfCurrentCursor, easedProgress * lineLength);
 
- // Position along the trail (0 at the cursor, 1 at the far end) — used by the glow taper.
  float trailT = clamp(sdfCurrentCursor / max(lineLength, 1e-4), 0.0, 1.0);
 
- // Blend trail with fade effect. Fade the OPACITY toward the cursor color (not the
- // RGB), so the trail dissolves into the background instead of darkening to black.
  newColor = mix(newColor, iCurrentCursorColor, antialising(sdfTrail) * fadeFactor);
- // Draw current cursor
  newColor = mix(newColor, iCurrentCursorColor, antialising(sdfCurrentCursor));
  newColor = mix(newColor, fragColor, step(sdfCurrentCursor, 0.));
  fragColor = mix(fragColor, newColor, step(sdfCurrentCursor, easedProgress * lineLength));
 
- // Additive glow halo around the cursor and trail — soft edges that bleed light.
- // Modulated by easedProgress so it pulses on each move and snaps away once settled.
  float glowTaper = 1.0 - trailT;
  float trailGlow = glow(sdfTrail, GLOW_RADIUS) * glowTaper;
  float cursorGlow = glow(sdfCurrentCursor, GLOW_RADIUS);
- // Bloom in the cursor's own color, around both the cursor and the trail.
  vec3 glowColor = iCurrentCursorColor.rgb * (trailGlow + cursorGlow);
  glowColor = clamp(glowColor * GLOW_STRENGTH * easedProgress, 0.0, 1.0);
- fragColor.rgb = 1.0 - (1.0 - fragColor.rgb) * (1.0 - glowColor); // screen blend
+ fragColor.rgb = screenBlend(fragColor.rgb, glowColor);
 }

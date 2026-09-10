@@ -109,7 +109,6 @@ async function readNumstat(
 		if (mergeBase.code === 0 && mergeBase.stdout.trim()) base = mergeBase.stdout.trim();
 	}
 
-	// A single base commit includes committed, staged, and unstaged branch changes.
 	const result = await pi.exec(
 		"git",
 		["--no-optional-locks", "diff", "--no-ext-diff", "--numstat", base, "--"],
@@ -117,7 +116,7 @@ async function readNumstat(
 	);
 	if (result.code === 0) return result.stdout;
 
-	// An unborn branch has no HEAD. Its index is still useful for line totals.
+	// An unborn branch has no HEAD.
 	const staged = await pi.exec(
 		"git",
 		["--no-optional-locks", "diff", "--cached", "--no-ext-diff", "--numstat", "--"],

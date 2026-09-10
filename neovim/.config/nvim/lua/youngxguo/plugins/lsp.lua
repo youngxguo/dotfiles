@@ -1,6 +1,3 @@
--- Server setup, keymaps and diagnostics config live in after/plugin/lsp.lua:
--- they are event-driven (LspAttach) and must run after nvim-lspconfig loads,
--- so they are not colocated here.
 return {
   { "neovim/nvim-lspconfig" },
 
@@ -15,7 +12,6 @@ return {
       completion = {
         documentation = { auto_show = true },
       },
-      -- Inline signature help (parameter hints) while typing call arguments.
       signature = { enabled = true },
       cmdline = {
         enabled = true,
@@ -117,8 +113,6 @@ return {
     end,
     config = function(_, opts)
       require("fidget").setup(opts)
-      -- Route general vim.notify messages through fidget's themed surface,
-      -- alongside the LSP progress display.
       vim.notify = require("fidget").notify
     end,
   },

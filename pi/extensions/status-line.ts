@@ -1,7 +1,3 @@
-/**
- * Agent activity status rendered by the custom footer.
- */
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {

@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""herdr event hook: remove the git worktree behind a closed workspace.
-
-herdr's close-workspace action only drops herdr state; the checkout under
-worktrees.directory stays on disk. this runs on `workspace.closed` and
-removes that checkout so closing the space is the cleanup step.
-
-only touches linked worktrees whose checkout lives under the herdr worktrees
-directory, so worktrees created by hand elsewhere are left alone. runs a
-non-forced `git worktree remove`: a checkout with uncommitted changes is kept
-and a notification says so. branches are never deleted.
-"""
-
 import json
 import os
 import subprocess
@@ -36,7 +24,6 @@ def notify(title, body):
 
 
 def find_worktree(node):
-    """Depth-first search for a worktree provenance dict in the event payload."""
     if isinstance(node, dict):
         if "checkout_path" in node and "is_linked_worktree" in node:
             return node

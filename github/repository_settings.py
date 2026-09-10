@@ -7,8 +7,6 @@ import sys
 from typing import cast
 from urllib.parse import quote
 
-# GitHub does not read repository settings from a tracked file, so apply this
-# version-controlled policy through the authenticated GitHub CLI.
 REPOSITORY_SETTINGS: dict[str, object] = {
     "allow_squash_merge": True,
     "allow_merge_commit": False,
@@ -19,8 +17,6 @@ REPOSITORY_SETTINGS: dict[str, object] = {
 }
 
 RULESET_NAME = "default branch"
-# Required checks remain repository-specific, but they never require a branch
-# to be updated with the latest default branch before merging.
 MANAGED_RULE_TYPES = {
     "deletion",
     "non_fast_forward",
@@ -56,7 +52,6 @@ def ruleset_for(
     *,
     allow_direct_push: bool = False,
 ) -> dict[str, object]:
-    # Preserve repository-specific rules this shared policy does not manage.
     preserved_rules: list[dict[str, object]] = []
     if existing_ruleset is not None:
         existing_rules = existing_ruleset.get("rules")
@@ -222,8 +217,6 @@ def sync_repository(repository: str, *, allow_direct_push: bool = False) -> None
             ruleset_for(ruleset, allow_direct_push=allow_direct_push),
         )
 
-    # Rulesets are the source of truth. Remove any legacy branch-protection PR
-    # requirement after the replacement rule is active so direct mode works.
     remove_legacy_pull_request_rule(repository)
 
     print(f"{repository}: repository settings and ruleset synced")

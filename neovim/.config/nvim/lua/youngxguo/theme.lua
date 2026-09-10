@@ -1,7 +1,3 @@
--- Shared Solarized palette and highlight overrides.
--- Required by the colorscheme spec (to apply on load) and the bufferline spec
--- (to build its highlight table). Keeping it here lets both reference one source.
-
 local M = {}
 
 M.solarized_ui = {
@@ -22,7 +18,6 @@ M.solarized_ui = {
 }
 
 function M.apply_diff_highlights()
-  -- Background-only diff colors preserve syntax highlighting in Diffview buffers.
   vim.api.nvim_set_hl(0, "DiffAdd", { bg = "#003a20" })
   vim.api.nvim_set_hl(0, "DiffDelete", { bg = "#3a0a10" })
   vim.api.nvim_set_hl(0, "DiffChange", { bg = "#002a40" })
@@ -50,7 +45,6 @@ function M.apply_ui_highlights()
   vim.api.nvim_set_hl(0, "LineNr", { fg = c.base01 })
   vim.api.nvim_set_hl(0, "CursorLineNr", { fg = c.cyan, bg = c.base02, bold = true })
 
-  -- Standard float groups are shared by native LSP windows and plugins.
   vim.api.nvim_set_hl(0, "NormalFloat", { fg = c.base1, bg = c.base03 })
   vim.api.nvim_set_hl(0, "FloatBorder", { fg = c.cyan, bg = c.base03 })
 
@@ -65,7 +59,6 @@ function M.apply_ui_highlights()
   vim.api.nvim_set_hl(0, "YoungFidgetDebug", { fg = c.base01, bg = fidget_bg })
   vim.api.nvim_set_hl(0, "YoungFidgetSeparator", { fg = c.base01, bg = fidget_bg })
 
-  -- indent-blankline active-scope guide, tied to the tabline/bufferline accent.
   vim.api.nvim_set_hl(0, "IblScope", { fg = c.blue })
 end
 

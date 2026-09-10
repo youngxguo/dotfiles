@@ -166,10 +166,6 @@ is_target_window() {
   return 1
 }
 
-# In-place mode: set up the windows in the current session and stay put. The
-# window the user is in is claimed for the first name (e.g. renamed to "agents")
-# rather than left alongside, so a fresh one-window session becomes exactly the
-# requested set.
 if [ -n "$target_session" ]; then
   if ! session_exists "$target_session"; then
     printf 'session does not exist: %s\n' "$target_session" >&2
@@ -183,8 +179,6 @@ if [ -n "$target_session" ]; then
       curname="$(capture_tmux display-message -p -t "$target_window" '#{window_name}' 2>/dev/null || true)"
     fi
 
-    # Only reuse the current window if it isn't already one of the other
-    # requested windows; otherwise create the first one fresh.
     if [ -n "$target_window" ] && ! is_target_window "$curname"; then
       run_tmux rename-window -t "$target_window" "$first"
     else
@@ -199,8 +193,7 @@ if [ -n "$target_session" ]; then
   exit 0
 fi
 
-# Standalone mode: create (or re-use) a session named after the directory.
-# tmux forbids "." and ":" in session names; fold them to "_".
+# tmux forbids "." and ":" in session names.
 session="${name:-$(basename "$dir")}"
 session="${session//[.:]/_}"
 

@@ -1,4 +1,3 @@
-# Live Codex config contains local paths and account/plugin state.
 codex/config.toml
 .claude/
 __pycache__/
