@@ -43,8 +43,14 @@ jobs:
 
       - name: validate claude skills
         run: |
-          python3 -m py_compile claude/skills/rebump/rebump.py
-          python3 -m unittest claude/skills/rebump/rebump_test.py
+          for script in claude/skills/*/*.py; do
+            [ -f "$script" ] || continue
+            python3 -m py_compile "$script"
+          done
+          for test in claude/skills/*/*_test.py; do
+            [ -f "$test" ] || continue
+            python3 -m unittest "$test"
+          done
 
       - name: validate github settings
         run: |
