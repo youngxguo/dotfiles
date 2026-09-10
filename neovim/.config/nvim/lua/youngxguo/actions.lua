@@ -44,6 +44,16 @@ function M.yank_git_link()
   end
 end
 
+-- Diffview, fugitive and Octo diffs are not gitsigns buffers, so fall back to
+-- Vim's own diff navigation whenever the window is in diff mode.
+function M.nav_hunk(direction)
+  if vim.wo.diff then
+    pcall(vim.cmd.normal, { direction == "next" and "]c" or "[c", bang = true })
+    return
+  end
+  require("gitsigns").nav_hunk(direction)
+end
+
 local function blame_sha_for_current_line()
   local file = vim.fn.expand("%:p")
   local lnum = vim.fn.line(".")

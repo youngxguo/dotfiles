@@ -85,8 +85,8 @@ vim.keymap.set("n", "<leader>yf", actions.yank_file_path, { silent = true, desc 
 
 vim.keymap.set({ "n", "v" }, "<leader>yl", actions.yank_git_link, { silent = true, desc = "Yank git line link" })
 
-vim.keymap.set("n", "<leader>gj", function() require("gitsigns").nav_hunk("next") end, { silent = true, desc = "Next git change" })
-vim.keymap.set("n", "<leader>gk", function() require("gitsigns").nav_hunk("prev") end, { silent = true, desc = "Previous git change" })
+vim.keymap.set("n", "<leader>gj", function() actions.nav_hunk("next") end, { silent = true, desc = "Next git change" })
+vim.keymap.set("n", "<leader>gk", function() actions.nav_hunk("prev") end, { silent = true, desc = "Previous git change" })
 
 vim.keymap.set("n", "<leader>gc", actions.git_blame_commit_diffview, { silent = true, desc = "Git blame commit in Diffview" })
 
