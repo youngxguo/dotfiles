@@ -44,9 +44,29 @@ function M.yank_git_link()
   end
 end
 
+-- codediff renders its inline layout as a single ordinary buffer (extmarks, no
+-- 'diff' option and no gitsigns), so neither fallback below reaches it; ask the
+-- plugin to move instead whenever the tab holds a codediff session.
+local function nav_codediff_hunk(direction)
+  local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
+  if not ok or lifecycle.get_session(vim.api.nvim_get_current_tabpage()) == nil then
+    return false
+  end
+  local navigation = require("codediff.ui.view.navigation")
+  if direction == "next" then
+    navigation.next_hunk()
+  else
+    navigation.prev_hunk()
+  end
+  return true
+end
+
 -- Diffview, fugitive and Octo diffs are not gitsigns buffers, so fall back to
 -- Vim's own diff navigation whenever the window is in diff mode.
 function M.nav_hunk(direction)
+  if nav_codediff_hunk(direction) then
+    return
+  end
   if vim.wo.diff then
     pcall(vim.cmd.normal, { direction == "next" and "]c" or "[c", bang = true })
     return
