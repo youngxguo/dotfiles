@@ -88,11 +88,17 @@ class AccountTest(unittest.TestCase):
         self.assertEqual(self.accounts[0].session_used, 100.0)
         self.assertEqual(self.accounts[0].fable_used, 75.0)
 
-    def test_target_is_emptiest_session_window_that_is_not_blocked(self):
+    def test_target_has_the_most_fable_headroom_and_is_not_blocked(self):
         target = rebump.choose_target(
             self.accounts, exclude=self.accounts[0].config_dir
         )
         self.assertEqual(target.label, "c4")
+
+    def test_fable_headroom_outranks_the_session_window(self):
+        c2, c4 = self.accounts[1], self.accounts[3]
+        c2.session_used, c2.fable_used = 70.0, 20.0
+        c4.session_used, c4.fable_used = 10.0, 60.0
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
 
     def test_target_excludes_the_source_account(self):
         c4 = self.accounts[3]
@@ -115,6 +121,81 @@ class AccountTest(unittest.TestCase):
         )
         with self.assertRaises(SystemExit):
             rebump.resolve_account(self.accounts, "claude9")
+
+
+class PickTest(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(rebump, "account_email", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.accounts = rebump.accounts_from_usage(USAGE)
+
+    def test_picks_the_emptiest_usable_account(self):
+        self.assertEqual(rebump.pick_account(self.accounts, None).label, "c4")
+
+    def test_named_account_is_honoured_only_with_headroom(self):
+        self.assertEqual(rebump.pick_account(self.accounts, "c2").label, "c2")
+        with self.assertRaises(SystemExit) as caught:
+            rebump.pick_account(self.accounts, "c3")
+        self.assertIn("weekly cap", str(caught.exception))
+        with self.assertRaises(SystemExit) as caught:
+            rebump.pick_account(self.accounts, "claude")
+        self.assertIn("100%", str(caught.exception))
+
+    def test_spent_fable_cap_disqualifies_an_account(self):
+        c4 = self.accounts[3]
+        c4.fable_used = 100.0
+        self.assertEqual(rebump.pick_account(self.accounts, None).label, "c2")
+        with self.assertRaises(SystemExit) as caught:
+            rebump.pick_account(self.accounts, "c4")
+        self.assertIn("fable weekly cap", str(caught.exception))
+
+    def test_refuses_when_every_account_is_spent(self):
+        for account in self.accounts:
+            account.session_used = 100.0
+        with self.assertRaises(SystemExit) as caught:
+            rebump.pick_account(self.accounts, None)
+        self.assertIn("no account has headroom", str(caught.exception))
+
+    def test_pick_prints_env_assignment_and_skips_herdr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            usage = Path(tmp) / "usage.json"
+            usage.write_text(json.dumps(USAGE))
+            with (
+                mock.patch.object(rebump.shutil, "which", return_value=None),
+                mock.patch("sys.stdout") as out,
+                mock.patch("sys.stderr"),
+            ):
+                code = rebump.main(["pick", "--usage", str(usage)])
+        self.assertEqual(code, 0)
+        printed = "".join(c.args[0] for c in out.write.call_args_list)
+        self.assertEqual(
+            printed.strip(),
+            f"CLAUDE_CONFIG_DIR={rebump.normalize_config_dir('~/.claude4')}",
+        )
+
+
+class UsageCacheTest(unittest.TestCase):
+    def test_fresh_cache_is_reused_and_stale_cache_is_refreshed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = []
+
+            def fake_cusage(timeout):
+                calls.append(timeout)
+                return {"accounts": [{"label": f"run{len(calls)}"}]}
+
+            with (
+                mock.patch.dict(os.environ, {"XDG_CACHE_HOME": tmp}),
+                mock.patch.object(rebump, "run_cusage", side_effect=fake_cusage),
+            ):
+                first = rebump.load_usage(None, 300, 1)
+                cached = rebump.load_usage(None, 300, 1)
+                fresh = rebump.load_usage(None, 0, 1)
+            self.assertEqual(first["accounts"][0]["label"], "run1")
+            self.assertEqual(cached, first)
+            self.assertEqual(fresh["accounts"][0]["label"], "run2")
+            self.assertEqual(len(calls), 2)
+            self.assertTrue((Path(tmp) / "rebump/usage.json").is_file())
 
 
 class RelaunchTest(unittest.TestCase):
@@ -237,6 +318,11 @@ class PlanTest(unittest.TestCase):
                 ):
                     moves = rebump.build_plan(accounts, panes, None)
                     forced = rebump.build_plan(accounts, panes, "c2", force=True)
+                    accounts[1].fable_used = 100.0
+                    fable_spent = rebump.build_plan(accounts, panes, None)[1]
+                    accounts[1].fable_used = 25.0
+                self.assertIn("fable weekly cap is spent", fable_spent.reason)
+                self.assertEqual(fable_spent.to_label, "c4")
 
                 stuck, fine = moves
                 self.assertEqual(stuck.from_label, "claude1")

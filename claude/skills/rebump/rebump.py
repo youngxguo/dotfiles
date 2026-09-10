@@ -21,6 +21,7 @@ from pathlib import Path
 HOME = Path.home()
 DEFAULT_CONFIG_DIR = HOME / ".claude"
 SESSION_FULL_PERCENT = 90.0
+PICK_MAX_AGE = 300
 NUDGE = (
     "This session hit a Claude usage limit and was resumed under another "
     "subscription. Pick up exactly where you left off and finish the task that "
@@ -44,12 +45,21 @@ class Account:
     fable_resets: str | None = None
 
     @property
+    def spent(self) -> str | None:
+        """Why a session cannot run on this account right now, or None."""
+        if self.error:
+            return self.error
+        if self.weekly_blocked:
+            return "weekly cap is spent"
+        if (self.session_used or 0.0) >= SESSION_FULL_PERCENT:
+            return f"5h window is at {fmt_pct(self.session_used)}"
+        if (self.fable_used or 0.0) >= 100.0:
+            return "fable weekly cap is spent"
+        return None
+
+    @property
     def usable(self) -> bool:
-        return (
-            self.error is None
-            and not self.weekly_blocked
-            and (self.session_used or 0.0) < SESSION_FULL_PERCENT
-        )
+        return self.spent is None
 
 
 def normalize_config_dir(raw: str | None) -> str:
@@ -103,6 +113,32 @@ def run_cusage(timeout: int) -> dict:
     )
 
 
+def usage_cache_path() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or str(HOME / ".cache")
+    return Path(base) / "rebump" / "usage.json"
+
+
+def load_usage(usage_file: str | None, max_age: int, timeout: int) -> dict:
+    """cusage takes about half a minute, so a coordinator starting several
+    agents in a row reuses the last report while it is younger than max_age."""
+    if usage_file:
+        return json.loads(Path(usage_file).read_text(encoding="utf-8"))
+    cache = usage_cache_path()
+    if max_age > 0:
+        try:
+            if time.time() - cache.stat().st_mtime < max_age:
+                return json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    report = run_cusage(timeout)
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(report), encoding="utf-8")
+    except OSError:
+        pass
+    return report
+
+
 def accounts_from_usage(report: dict) -> list[Account]:
     accounts = []
     for entry in report.get("accounts", []):
@@ -148,12 +184,26 @@ def resolve_account(accounts: list[Account], name: str) -> Account:
     )
 
 
-def choose_target(accounts: list[Account], exclude: str) -> Account | None:
+def choose_target(accounts: list[Account], exclude: str = "") -> Account | None:
+    """Fable is the model we want to run, and its weekly cap cannot be waited
+    out the way a 5-hour window can, so Fable headroom ranks first."""
     candidates = [a for a in accounts if a.usable and a.config_dir != exclude]
-    candidates.sort(
-        key=lambda a: (a.session_used or 0.0, -(100.0 - (a.fable_used or 0.0)))
-    )
+    candidates.sort(key=lambda a: (a.fable_used or 0.0, a.session_used or 0.0))
     return candidates[0] if candidates else None
+
+
+def pick_account(accounts: list[Account], to_label: str | None) -> Account:
+    """The account a new claude session should start on, or exit 1 so the
+    caller does not launch claude into a spent subscription."""
+    if to_label:
+        account = resolve_account(accounts, to_label)
+        if account.usable:
+            return account
+        raise SystemExit(f"{account.label} has no headroom: {account.spent}")
+    account = choose_target(accounts)
+    if account is None:
+        raise SystemExit("no account has headroom; wait for a window to reset")
+    return account
 
 
 def herdr(*args: str, check: bool = True, timeout: int = 60) -> dict:
@@ -339,6 +389,8 @@ def build_plan(
                 reasons.append(f"{account.label} weekly cap is spent")
             elif (account.session_used or 0.0) >= 100.0:
                 reasons.append(f"{account.label} 5h window is at 100%")
+            elif (account.fable_used or 0.0) >= 100.0:
+                reasons.append(f"{account.label} fable weekly cap is spent")
         if force and not reasons:
             reasons.append("--force")
         if not reasons:
@@ -501,7 +553,7 @@ def fmt_resets(iso: str | None) -> str:
     return f"{hours}h{rem // 60:02d}m"
 
 
-def render(accounts: list[Account], moves: list[Move]) -> str:
+def render_accounts(accounts: list[Account]) -> str:
     lines = ["accounts"]
     for a in accounts:
         if a.error:
@@ -514,8 +566,11 @@ def render(accounts: list[Account], moves: list[Move]) -> str:
             f"week {fmt_pct(a.week_used):>4}  fable {fmt_pct(a.fable_used):>4}"
             f"{flags}"
         )
-    lines.append("")
-    lines.append("claude panes in herdr")
+    return "\n".join(lines)
+
+
+def render_panes(moves: list[Move]) -> str:
+    lines = ["claude panes in herdr"]
     if not moves:
         lines.append("  none")
     for m in moves:
@@ -540,14 +595,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "action",
         nargs="?",
-        choices=("plan", "apply"),
+        choices=("plan", "apply", "pick"),
         default="plan",
-        help="plan is read-only (default); apply performs the moves",
+        help="plan is read-only (default); apply performs the moves; pick prints "
+        "CLAUDE_CONFIG_DIR=<dir> for the account a new session should start on",
     )
     parser.add_argument(
         "--to",
-        help="account to move to, by cusage label, alias (claude3, c3) or config "
-        "dir (default: the emptiest 5-hour window)",
+        help="account to move to or pick, by cusage label, alias (claude3, c3) or "
+        "config dir (default: the most Fable headroom, then the emptiest 5-hour "
+        "window)",
     )
     parser.add_argument(
         "--pane", action="append", help="only these pane ids (repeatable)"
@@ -567,19 +624,42 @@ def main(argv: list[str] | None = None) -> int:
         default=NUDGE,
         help="prompt sent after the resume; empty string sends nothing",
     )
+    parser.add_argument(
+        "--max-age",
+        type=int,
+        help="reuse the last cusage report if it is younger than this many "
+        f"seconds (default: {PICK_MAX_AGE} for pick, 0 otherwise)",
+    )
     parser.add_argument("--timeout", type=int, default=240, help="cusage timeout")
     args = parser.parse_args(argv)
 
-    if shutil.which("herdr") is None:
-        raise SystemExit("herdr is not on PATH")
-    if args.usage:
-        report = json.loads(Path(args.usage).read_text(encoding="utf-8"))
-    else:
-        report = run_cusage(args.timeout)
+    if args.max_age is None:
+        args.max_age = PICK_MAX_AGE if args.action == "pick" else 0
+    report = load_usage(args.usage, args.max_age, args.timeout)
     accounts = accounts_from_usage(report)
     if not accounts:
         raise SystemExit("cusage reported no accounts")
 
+    if args.action == "pick":
+        account = pick_account(accounts, args.to)
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "accounts": [asdict(a) for a in accounts],
+                        "pick": asdict(account),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(render_accounts(accounts), file=sys.stderr)
+            print(f"  -> {account.label}", file=sys.stderr)
+            print(f"CLAUDE_CONFIG_DIR={account.config_dir}")
+        return 0
+
+    if shutil.which("herdr") is None:
+        raise SystemExit("herdr is not on PATH")
     panes = claude_panes()
     if args.pane:
         panes = [p for p in panes if p["pane_id"] in set(args.pane)]
@@ -600,7 +680,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     else:
-        print(render(accounts, moves))
+        print(render_accounts(accounts))
+        print()
+        print(render_panes(moves))
 
     if args.action == "plan":
         return 0
