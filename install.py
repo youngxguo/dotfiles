@@ -69,6 +69,10 @@ LINUX_PACKAGE_OVERRIDES = {
         "pacman": "go",
         "zypper": "go",
     },
+    "imagemagick": {
+        "dnf": "ImageMagick",
+        "zypper": "ImageMagick",
+    },
 }
 
 PACKAGE_BINARIES = {
@@ -80,6 +84,7 @@ PACKAGE_BINARIES = {
     "typescript-language-server": ("typescript-language-server",),
     "basedpyright": ("basedpyright-langserver",),
     "gh": ("gh",),
+    "imagemagick": ("magick", "convert"),
     "chafa": ("chafa",),
     "viu": ("viu",),
     "mercurial": ("hg",),
@@ -1085,6 +1090,7 @@ def install_neovim():
     install_homebrew_only_package("typescript-language-server")
     ensure_typescript_fallback()
     install_homebrew_only_package("basedpyright")
+    install_package("imagemagick")
     install_homebrew_only_package("chafa")
     install_homebrew_only_package("viu")
     install_homebrew_only_package("mercurial")
