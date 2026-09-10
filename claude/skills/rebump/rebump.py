@@ -23,6 +23,7 @@ HOME = Path.home()
 DEFAULT_CONFIG_DIR = HOME / ".claude"
 SESSION_FULL_PERCENT = 90.0
 PICK_MAX_AGE = 300
+CUSAGE_TIMEOUT = 240
 NUDGE = (
     "This session hit a Claude usage limit and was resumed on a subscription or "
     "model with headroom. Pick up exactly where you left off and finish the task "
@@ -214,6 +215,17 @@ def accounts_from_usage(report: dict) -> list[Account]:
     return accounts
 
 
+def read_accounts(
+    usage_file: str | None = None,
+    max_age: int = PICK_MAX_AGE,
+    timeout: int = CUSAGE_TIMEOUT,
+) -> list[Account]:
+    accounts = accounts_from_usage(load_usage(usage_file, max_age, timeout))
+    if not accounts:
+        raise SystemExit("cusage reported no accounts")
+    return accounts
+
+
 def resolve_account(accounts: list[Account], name: str) -> Account:
     """cusage labels an account after whichever alias sorts first, so the same
     subscription can read `c3` one day and `claude3` the next."""
@@ -256,6 +268,16 @@ def pick_account(accounts: list[Account], to_label: str | None) -> Account:
     if account is None:
         raise SystemExit("no account has headroom; wait for a window to reset")
     return account
+
+
+def launch_choice(
+    accounts: list[Account], to_label: str | None, fallback: str = FALLBACK_MODEL
+) -> tuple[Account, str | None, str]:
+    """Everything a new claude session needs to start somewhere with
+    headroom: the account, the model to pin, and the shell prefix."""
+    account = pick_account(accounts, to_label)
+    model, _ = model_switch(account, fallback)
+    return account, model, launch_prefix(account.config_dir, model)
 
 
 def model_switch(
@@ -662,6 +684,23 @@ def dismiss_startup_dialogs(pane_id: str, log) -> bool:
     return answered
 
 
+def settle_agent(pane_id: str, log) -> str:
+    """Wait for a freshly launched agent to come to rest, answering the
+    first-run dialogs a config dir shows for a folder it has never opened."""
+
+    def wait() -> dict:
+        return herdr(
+            "agent", "wait", pane_id, "--timeout", "90000", check=False, timeout=120
+        )
+
+    settled = wait()
+    if dismiss_startup_dialogs(pane_id, log):
+        settled = wait()
+    result = settled.get("result") or {}
+    status = (result.get("agent") or {}).get("agent_status")
+    return status or result.get("status") or "unknown"
+
+
 def quit_claude(move: Move, log) -> bool:
     """Ctrl-C twice exits Claude Code; a first press only clears typed input."""
     for attempt in range(3):
@@ -694,22 +733,7 @@ def apply_move(move: Move, nudge: str | None, log) -> str:
         timeout=45,
     ):
         return "failed: herdr did not detect claude after the relaunch"
-    settled = herdr(
-        "agent", "wait", move.pane_id, "--timeout", "90000", check=False, timeout=120
-    )
-    if dismiss_startup_dialogs(move.pane_id, log):
-        settled = herdr(
-            "agent",
-            "wait",
-            move.pane_id,
-            "--timeout",
-            "90000",
-            check=False,
-            timeout=120,
-        )
-    status = ((settled.get("result") or {}).get("agent") or {}).get("agent_status")
-    if status is None:
-        status = ((settled.get("result") or {}).get("status")) or "unknown"
+    status = settle_agent(move.pane_id, log)
     log(f"  agent {status}")
     if status == "blocked" or "Enter to confirm" in pane_screen(move.pane_id):
         return "resumed, but claude is waiting on a dialog; nudge skipped"
@@ -827,19 +851,17 @@ def main(argv: list[str] | None = None) -> int:
         help="reuse the last cusage report if it is younger than this many "
         f"seconds (default: {PICK_MAX_AGE} for pick, 0 otherwise)",
     )
-    parser.add_argument("--timeout", type=int, default=240, help="cusage timeout")
+    parser.add_argument(
+        "--timeout", type=int, default=CUSAGE_TIMEOUT, help="cusage timeout"
+    )
     args = parser.parse_args(argv)
 
     if args.max_age is None:
         args.max_age = PICK_MAX_AGE if args.action == "pick" else 0
-    report = load_usage(args.usage, args.max_age, args.timeout)
-    accounts = accounts_from_usage(report)
-    if not accounts:
-        raise SystemExit("cusage reported no accounts")
+    accounts = read_accounts(args.usage, args.max_age, args.timeout)
 
     if args.action == "pick":
-        account = pick_account(accounts, args.to)
-        model, _ = model_switch(account, args.fallback_model)
+        account, model, prefix = launch_choice(accounts, args.to, args.fallback_model)
         if args.json:
             print(
                 json.dumps(
@@ -855,7 +877,7 @@ def main(argv: list[str] | None = None) -> int:
             print(render_accounts(accounts), file=sys.stderr)
             note = f" on {model} (its fable weekly cap is spent)" if model else ""
             print(f"  -> {account.label}{note}", file=sys.stderr)
-            print(launch_prefix(account.config_dir, model))
+            print(prefix)
         return 0
 
     if shutil.which("herdr") is None:
