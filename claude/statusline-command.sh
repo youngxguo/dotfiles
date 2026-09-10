@@ -105,8 +105,12 @@ EOF
   fi
 fi
 
+# Claude Code's own footer shows a PR only for a session it linked one to
+# itself, so a resumed session, or a branch whose PR was opened outside it, gets
+# nothing there; this looks the PR up by branch instead. --state all keeps it
+# showing once merged or closed.
 pr_state="" pr_number="" pr_url="" pr_label=""
-if [ -n "$HERDR_PANE_ID" ] && [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
+if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
   PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
   pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
   if [ ! -f "$pr_cache" ]; then
@@ -121,15 +125,29 @@ if [ -n "$HERDR_PANE_ID" ] && [ -n "$git_branch" ] && command -v gh >/dev/null 2
 
   [ -f "$pr_cache" ] && read -r pr_state pr_number pr_url < "$pr_cache"
   if [ -n "$pr_number" ]; then
+    case $pr_state in
+      open) pr_color='01;32' ;;
+      draft) pr_color=90 ;;
+      merged) pr_color='01;35' ;;
+      *) pr_color='01;31' ;;
+    esac
     pr_label="#$pr_number"
     [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
+    pr_text=$pr_label
+    if [ -n "$pr_url" ]; then
+      # OSC 8: ESC ] 8 ; ; <url> ST <text> ESC ] 8 ; ; ST, with ESC \ as ST.
+      # $pr_label stays plain text for the herdr token below.
+      pr_text=$(printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$pr_url" "$pr_label")
+    fi
+    printf " \033[%sm %s\033[00m" "$pr_color" "$pr_text"
   fi
 fi
 
 # herdr has no repo, branch or PR token for agent rows, so they go out as pane
 # metadata. A token's color is fixed in herdr/config.toml, so the PR is sent as
-# one of pr_open, pr_draft, pr_merged or pr_closed. herdr strips escape bytes
-# from metadata, so the PR cannot be a hyperlink.
+# one of pr_open, pr_draft, pr_merged or pr_closed, each colored there to match
+# the statusline. herdr strips escape bytes from metadata, so the PR cannot be a
+# hyperlink; prefix+p opens it instead.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   # herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
