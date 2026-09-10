@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code statusline: model | git branch + PR | prompt timer | session cost |
+# Claude Code statusline: model | git branch | prompt timer | session cost |
 # daily/monthly budget bars | context bar. Reads the statusLine JSON payload on
 # stdin and writes one line. install.py symlinks this to
 # ~/.claude/statusline-command.sh; claude/settings.json points statusLine here.
@@ -132,15 +132,15 @@ EOF
   fi
 fi
 
-# Pull request for the branch, colored by state: open green, draft grey, merged
-# magenta, closed red. Looked up with `gh pr list --state all` so the PR keeps
-# showing after it merges or closes instead of vanishing. gh takes ~0.5s, so the
-# refresher runs in the background and writes a pre-rendered
-# "<state> <number> <url>" line (empty when the branch has no PR) to a
-# per-repo+branch cache file. The label is an OSC 8 hyperlink to the PR, so a
-# terminal that supports them (Ghostty: cmd+click) opens it on GitHub.
+# Pull request for the branch, for the herdr sidebar below. It is not printed
+# here: Claude Code's own footer line already shows "PR #<n>" next to the
+# permission mode, so a label in the statusline showed the PR twice. Looked up
+# with `gh pr list --state all` so the PR keeps showing after it merges or
+# closes instead of vanishing. gh takes ~0.5s, so the refresher runs in the
+# background and writes a pre-rendered "<state> <number> <url>" line (empty
+# when the branch has no PR) to a per-repo+branch cache file.
 pr_state="" pr_number="" pr_url="" pr_label=""
-if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
+if [ -n "$HERDR_PANE_ID" ] && [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
   PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
   pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
   if [ ! -f "$pr_cache" ]; then
@@ -156,21 +156,8 @@ if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
 
   [ -f "$pr_cache" ] && read -r pr_state pr_number pr_url < "$pr_cache"
   if [ -n "$pr_number" ]; then
-    case $pr_state in
-      open) pr_color='01;32' ;;
-      draft) pr_color=90 ;;
-      merged) pr_color='01;35' ;;
-      *) pr_color='01;31' ;;
-    esac
     pr_label="#$pr_number"
     [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
-    pr_text=$pr_label
-    if [ -n "$pr_url" ]; then
-      # OSC 8: ESC ] 8 ; ; <url> ST <text> ESC ] 8 ; ; ST, with ESC \ as ST.
-      # $pr_label itself stays plain text for the herdr token below.
-      pr_text=$(printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$pr_url" "$pr_label")
-    fi
-    printf " \033[%sm %s\033[00m" "$pr_color" "$pr_text"
   fi
 fi
 
@@ -179,14 +166,14 @@ fi
 # under the title, and herdr has no built-in tokens for any of them on agent
 # rows. A token's color is fixed in the config, so the PR goes out as one of
 # pr_open, pr_draft, pr_merged or pr_closed (the rest cleared) and each has its
-# own fg there, matching the statusline's coloring by state. The
-# repo is the main checkout's name even from a linked worktree (the common git
-# dir's parent), so worktrees of hsys all read "hsys". The branch carries the
-# same nerd-font glyph as the statusline (herdr's metadata sanitizer keeps
-# glyphs, but strips escape bytes, so the PR cannot be a hyperlink here; the
-# open-pr plugin action in herdr/plugins opens it instead). Backgrounded so the
-# render never waits on the socket, and re-sent every refresh so a restarted
-# server picks it up. Runs after the PR lookup below so $pr_label is set.
+# own fg there. The repo is the main checkout's name even from a linked
+# worktree (the common git dir's parent), so worktrees of hsys all read "hsys".
+# The branch carries the same nerd-font glyph as the statusline. herdr's
+# metadata sanitizer keeps glyphs but strips escape bytes, so the PR cannot be
+# a hyperlink here; the open-pr plugin action in herdr/plugins opens it
+# instead. Backgrounded so the render never waits on the socket, and re-sent
+# every refresh so a restarted server picks it up. Runs after the PR lookup
+# above so $pr_label is set.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   # The session title, wrapped into $title1..3 so the sidebar shows it whole:
