@@ -65,8 +65,36 @@ LIMIT_RECORD = {
     "quotaLimits": {"status": "rejected", "rateLimitType": "five_hour"},
     "message": {
         "role": "assistant",
+        "model": "<synthetic>",
         "content": [{"type": "text", "text": "You've hit your session limit"}],
     },
+}
+MODEL_LIMIT_RECORD = {
+    "type": "assistant",
+    "error": "rate_limit",
+    "isApiErrorMessage": True,
+    "quotaLimits": {},
+    "message": {
+        "role": "assistant",
+        "model": "<synthetic>",
+        "content": [
+            {
+                "type": "text",
+                "text": "You're out of usage credits. /model to switch models.",
+            }
+        ],
+    },
+}
+FABLE_TURN = {
+    "type": "assistant",
+    "message": {
+        "model": "claude-fable-5-1",
+        "content": [{"type": "text", "text": "hi"}],
+    },
+}
+OPUS_TURN = {
+    "type": "assistant",
+    "message": {"model": "claude-opus-5", "content": [{"type": "text", "text": "hi"}]},
 }
 
 
@@ -142,13 +170,17 @@ class PickTest(unittest.TestCase):
             rebump.pick_account(self.accounts, "claude")
         self.assertIn("100%", str(caught.exception))
 
-    def test_spent_fable_cap_disqualifies_an_account(self):
+    def test_spent_fable_cap_only_deprioritises_an_account(self):
         c4 = self.accounts[3]
         c4.fable_used = 100.0
         self.assertEqual(rebump.pick_account(self.accounts, None).label, "c2")
-        with self.assertRaises(SystemExit) as caught:
-            rebump.pick_account(self.accounts, "c4")
-        self.assertIn("fable weekly cap", str(caught.exception))
+        self.assertEqual(rebump.pick_account(self.accounts, "c4").label, "c4")
+
+    def test_last_account_standing_keeps_its_spent_fable_cap(self):
+        for account in self.accounts[:3]:
+            account.session_used = 100.0
+        self.accounts[3].fable_used = 100.0
+        self.assertEqual(rebump.pick_account(self.accounts, None).label, "c4")
 
     def test_refuses_when_every_account_is_spent(self):
         for account in self.accounts:
@@ -157,22 +189,125 @@ class PickTest(unittest.TestCase):
             rebump.pick_account(self.accounts, None)
         self.assertIn("no account has headroom", str(caught.exception))
 
-    def test_pick_prints_env_assignment_and_skips_herdr(self):
+    def run_pick(self, usage, defaults=None):
         with tempfile.TemporaryDirectory() as tmp:
-            usage = Path(tmp) / "usage.json"
-            usage.write_text(json.dumps(USAGE))
+            path = Path(tmp) / "usage.json"
+            path.write_text(json.dumps(usage))
             with (
                 mock.patch.object(rebump.shutil, "which", return_value=None),
+                mock.patch.object(
+                    rebump,
+                    "settings_model",
+                    side_effect=lambda d: (defaults or {}).get(d),
+                ),
                 mock.patch("sys.stdout") as out,
                 mock.patch("sys.stderr"),
             ):
-                code = rebump.main(["pick", "--usage", str(usage)])
+                code = rebump.main(["pick", "--usage", str(path)])
         self.assertEqual(code, 0)
-        printed = "".join(c.args[0] for c in out.write.call_args_list)
+        return "".join(c.args[0] for c in out.write.call_args_list).strip()
+
+    def test_pick_prints_env_assignment_and_skips_herdr(self):
         self.assertEqual(
-            printed.strip(),
+            self.run_pick(USAGE),
             f"CLAUDE_CONFIG_DIR={rebump.normalize_config_dir('~/.claude4')}",
         )
+
+    def only_fable_spent_account_left(self):
+        """Every other subscription is out of its 5-hour window and the one
+        left has spent its Fable cap: the account still runs another model."""
+        usage = json.loads(json.dumps(USAGE))
+        usage["accounts"][0]["limits"] = [
+            {"id": "session", "used_percent": 63.0},
+            {"id": "week_all", "used_percent": 77.0},
+            {"id": "week_fable", "used_percent": 100.0},
+        ]
+        for account in usage["accounts"][1:]:
+            account["weekly_blocked"] = False
+            account["limits"] = [{"id": "session", "used_percent": 100.0}]
+        return usage, rebump.normalize_config_dir("~/.claude")
+
+    def test_pick_pins_the_fallback_when_the_account_defaults_to_fable(self):
+        usage, default_dir = self.only_fable_spent_account_left()
+        self.assertEqual(
+            self.run_pick(usage, {default_dir: "claude-fable-5-1[1m]"}),
+            "env -u CLAUDE_CONFIG_DIR ANTHROPIC_MODEL=opus",
+        )
+
+    def test_pick_leaves_an_account_that_already_defaults_off_fable(self):
+        usage, default_dir = self.only_fable_spent_account_left()
+        self.assertEqual(
+            self.run_pick(usage, {default_dir: "opus[1m]"}),
+            "env -u CLAUDE_CONFIG_DIR",
+        )
+
+
+class ModelSwitchTest(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(rebump, "account_email", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.account = rebump.accounts_from_usage(USAGE)[1]
+        self.defaults = {}
+        defaults = mock.patch.object(
+            rebump, "settings_model", side_effect=lambda d: self.defaults.get(d)
+        )
+        defaults.start()
+        self.addCleanup(defaults.stop)
+
+    def switch(self, **kwargs):
+        return rebump.model_switch(self.account, "opus", **kwargs)
+
+    def test_spent_fable_cap_pins_the_fallback_for_a_fable_session(self):
+        self.account.fable_used = 100.0
+        self.assertEqual(self.switch(running="claude-fable-5-1"), ("opus", False))
+
+    def test_a_session_already_off_fable_is_left_alone(self):
+        self.account.fable_used = 100.0
+        self.assertEqual(self.switch(running="claude-opus-5"), (None, False))
+        self.assertEqual(self.switch(running="claude-sonnet-5"), (None, False))
+
+    def test_the_accounts_own_default_decides_when_nothing_is_pinned(self):
+        self.account.fable_used = 100.0
+        self.defaults[self.account.config_dir] = "opus[1m]"
+        self.assertEqual(self.switch(), (None, False))
+        self.defaults[self.account.config_dir] = "claude-fable-5-1[1m]"
+        self.assertEqual(self.switch(), ("opus", False))
+
+    def test_a_reported_model_cap_pins_the_fallback_whatever_cusage_says(self):
+        self.assertEqual(
+            self.switch(running="claude-fable-5-1", model_limited=True),
+            ("opus", False),
+        )
+
+    def test_fable_headroom_drops_a_pin_we_added_earlier(self):
+        self.defaults[self.account.config_dir] = "claude-fable-5-1[1m]"
+        self.assertEqual(self.switch(pinned="opus", running="opus"), (None, True))
+        self.defaults[self.account.config_dir] = "opus[1m]"
+        self.assertEqual(self.switch(pinned="opus", running="opus"), (None, False))
+
+    def test_launch_prefix_unsets_what_it_has_to(self):
+        default_dir = rebump.normalize_config_dir(None)
+        self.assertEqual(
+            rebump.launch_prefix(default_dir, "opus"),
+            "env -u CLAUDE_CONFIG_DIR ANTHROPIC_MODEL=opus",
+        )
+        self.assertEqual(
+            rebump.launch_prefix("/cfg/c2", None, unpin=True),
+            "env -u ANTHROPIC_MODEL CLAUDE_CONFIG_DIR=/cfg/c2",
+        )
+
+    def test_session_model_reads_the_flag_then_the_environment(self):
+        self.assertEqual(
+            rebump.session_model(["claude", "--model", "opus"], {}), "opus"
+        )
+        self.assertEqual(
+            rebump.session_model(["claude", "--model=sonnet"], {}), "sonnet"
+        )
+        self.assertEqual(
+            rebump.session_model(["claude"], {"ANTHROPIC_MODEL": "opus"}), "opus"
+        )
+        self.assertIsNone(rebump.session_model(["claude", "--chrome"], {}))
 
 
 class UsageCacheTest(unittest.TestCase):
@@ -213,33 +348,59 @@ class RelaunchTest(unittest.TestCase):
             ["/usr/local/bin/claude", "--model", "opus", "--resume", "new"],
         )
 
+    def test_drops_the_model_flag_when_the_environment_sets_one(self):
+        argv = ["claude", "--model", "opus", "--chrome"]
+        self.assertEqual(
+            rebump.relaunch_argv(argv, "new", drop_model=True),
+            ["claude", "--chrome", "--resume", "new"],
+        )
+        self.assertEqual(
+            rebump.relaunch_argv(["claude", "--model=opus"], "new", drop_model=True),
+            ["claude", "--resume", "new"],
+        )
+
 
 class TranscriptTest(unittest.TestCase):
-    def test_limit_message_when_last_assistant_turn_is_rate_limited(self):
+    def records(self, records):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "s.jsonl"
-            write_jsonl(
-                path,
+            write_jsonl(path, records)
+            return rebump.tail_records(path)
+
+    def test_limit_message_when_last_assistant_turn_is_rate_limited(self):
+        limit = rebump.limit_message(
+            self.records(
                 [
                     {"type": "user"},
+                    FABLE_TURN,
                     LIMIT_RECORD,
                     {"type": "system"},
                     {"type": "last-prompt"},
-                ],
+                ]
             )
-            self.assertEqual(
-                rebump.limit_message(path), "You've hit your session limit"
-            )
+        )
+        self.assertEqual(limit.text, "You've hit your session limit")
+        self.assertEqual(limit.kind, "five_hour")
+        self.assertFalse(limit.model_only)
+
+    def test_a_per_model_cap_is_the_one_a_model_switch_fixes(self):
+        limit = rebump.limit_message(self.records([FABLE_TURN, MODEL_LIMIT_RECORD]))
+        self.assertIsNone(limit.kind)
+        self.assertTrue(limit.model_only)
+
+    def test_transcript_model_skips_the_synthetic_limit_messages(self):
+        records = self.records([{"type": "user"}, FABLE_TURN, MODEL_LIMIT_RECORD])
+        self.assertEqual(rebump.transcript_model(records), "claude-fable-5-1")
+        self.assertIsNone(rebump.transcript_model(self.records([{"type": "user"}])))
 
     def test_no_limit_once_a_real_turn_follows(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "s.jsonl"
-            ok = {
-                "type": "assistant",
-                "message": {"content": [{"type": "text", "text": "hi"}]},
-            }
-            write_jsonl(path, [LIMIT_RECORD, {"type": "user"}, ok])
-            self.assertIsNone(rebump.limit_message(path))
+        ok = {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "hi"}]},
+        }
+        self.assertIsNone(
+            rebump.limit_message(self.records([LIMIT_RECORD, {"type": "user"}, ok]))
+        )
 
     def test_copy_transcript_keeps_slug_and_sidecar(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -256,91 +417,164 @@ class TranscriptTest(unittest.TestCase):
 
 
 class PlanTest(unittest.TestCase):
-    def test_plan_moves_limited_panes_only(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp)
-            with (
-                mock.patch.object(rebump, "HOME", home),
-                mock.patch.object(rebump, "DEFAULT_CONFIG_DIR", home / ".claude"),
-                mock.patch.object(rebump, "account_email", return_value=None),
-            ):
-                accounts = rebump.accounts_from_usage(
-                    {
-                        "accounts": [
-                            {
-                                **a,
-                                "config_dir": str(home / a["config_dir"].lstrip("~/")),
-                            }
-                            if a["config_dir"]
-                            else a
-                            for a in USAGE["accounts"]
-                        ]
-                    }
-                )
-                default_dir = accounts[0].config_dir
-                c2_dir = accounts[1].config_dir
-                for sid, cfg in (("stuck", default_dir), ("fine", c2_dir)):
-                    slug = Path(cfg) / "projects/-repo"
-                    slug.mkdir(parents=True)
-                    records = [LIMIT_RECORD] if sid == "stuck" else [{"type": "user"}]
-                    write_jsonl(slug / f"{sid}.jsonl", records)
-
-                panes = [
-                    {
-                        "pane_id": "w1:p1",
-                        "agent_session": {"value": "stuck"},
-                        "cwd": "/repo",
-                        "terminal_title_stripped": "A",
-                        "agent_status": "idle",
-                    },
-                    {
-                        "pane_id": "w1:p2",
-                        "agent_session": {"value": "fine"},
-                        "cwd": "/repo",
-                        "terminal_title_stripped": "B",
-                        "agent_status": "idle",
-                    },
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name)
+        for patcher in (
+            mock.patch.object(rebump, "HOME", home),
+            mock.patch.object(rebump, "DEFAULT_CONFIG_DIR", home / ".claude"),
+            mock.patch.object(rebump, "account_email", return_value=None),
+            mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w9:p9"}),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.accounts = rebump.accounts_from_usage(
+            {
+                "accounts": [
+                    {**a, "config_dir": str(home / a["config_dir"].lstrip("~/"))}
+                    if a["config_dir"]
+                    else a
+                    for a in USAGE["accounts"]
                 ]
-                envs = {1: {}, 2: {"CLAUDE_CONFIG_DIR": c2_dir}}
-                with (
-                    mock.patch.object(
-                        rebump,
-                        "pane_claude_process",
-                        side_effect=lambda pane: {
-                            "pid": int(pane[-1]),
-                            "argv": ["claude", "--chrome"],
-                        },
-                    ),
-                    mock.patch.object(
-                        rebump, "process_env", side_effect=lambda pid: envs[pid]
-                    ),
-                    mock.patch.dict(os.environ, {"HERDR_PANE_ID": "w9:p9"}),
-                ):
-                    moves = rebump.build_plan(accounts, panes, None)
-                    forced = rebump.build_plan(accounts, panes, "c2", force=True)
-                    accounts[1].fable_used = 100.0
-                    fable_spent = rebump.build_plan(accounts, panes, None)[1]
-                    accounts[1].fable_used = 25.0
-                self.assertIn("fable weekly cap is spent", fable_spent.reason)
-                self.assertEqual(fable_spent.to_label, "c4")
+            }
+        )
+        self.by_label = {a.label: a for a in self.accounts}
+        self.panes = []
+        self.envs = {}
+        self.settings("claude1", "opus[1m]")
+        self.settings("c2", "claude-fable-5-1[1m]")
 
-                stuck, fine = moves
-                self.assertEqual(stuck.from_label, "claude1")
-                self.assertEqual(stuck.to_label, "c4")
-                self.assertIn("hit your session limit", stuck.reason)
-                self.assertIn("5h window is at 100%", stuck.reason)
-                self.assertTrue(stuck.actionable)
-                self.assertEqual(
-                    rebump.relaunch_command(stuck),
-                    f"CLAUDE_CONFIG_DIR={accounts[3].config_dir} claude --chrome --resume stuck",
-                )
-                self.assertIsNone(fine.to_label)
-                self.assertEqual(fine.reason, "not limited")
-                self.assertFalse(fine.actionable)
+    def settings(self, label, model):
+        config_dir = Path(self.by_label[label].config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "settings.json").write_text(json.dumps({"model": model}))
 
-                self.assertEqual(forced[0].to_label, "c2")
-                self.assertIsNone(forced[1].to_label)
-                self.assertIn("already on", forced[1].reason)
+    def dir_of(self, label):
+        return self.by_label[label].config_dir
+
+    def add_pane(self, session_id, label, records, env=None):
+        config_dir = self.dir_of(label)
+        slug = Path(config_dir) / "projects/-repo"
+        slug.mkdir(parents=True, exist_ok=True)
+        write_jsonl(slug / f"{session_id}.jsonl", records)
+        pid = len(self.panes) + 1
+        self.panes.append(
+            {
+                "pane_id": f"w1:p{pid}",
+                "agent_session": {"value": session_id},
+                "cwd": "/repo",
+                "terminal_title_stripped": session_id,
+                "agent_status": "idle",
+            }
+        )
+        self.envs[pid] = dict(env or {})
+        if config_dir != self.dir_of("claude1"):
+            self.envs[pid]["CLAUDE_CONFIG_DIR"] = config_dir
+
+    def plan(self, to_label=None, **kwargs):
+        with (
+            mock.patch.object(
+                rebump,
+                "pane_claude_process",
+                side_effect=lambda pane: {
+                    "pid": int(pane[-1]),
+                    "argv": ["claude", "--chrome"],
+                },
+            ),
+            mock.patch.object(
+                rebump, "process_env", side_effect=lambda pid: self.envs[pid]
+            ),
+        ):
+            return rebump.build_plan(self.accounts, self.panes, to_label, **kwargs)
+
+    def test_a_five_hour_limit_moves_the_session(self):
+        self.add_pane("stuck", "claude1", [{"type": "user"}, OPUS_TURN, LIMIT_RECORD])
+        (move,) = self.plan()
+        self.assertEqual((move.from_label, move.to_label), ("claude1", "c4"))
+        self.assertIn("hit your session limit", move.reason)
+        self.assertIn("5h window is at 100%", move.reason)
+        self.assertTrue(move.actionable)
+        self.assertEqual(move.change, "move to c4")
+        self.assertEqual(
+            rebump.relaunch_command(move),
+            f"CLAUDE_CONFIG_DIR={self.dir_of('c4')} claude --chrome --resume stuck",
+        )
+
+    def test_a_healthy_pane_is_left_alone(self):
+        self.add_pane("fine", "c2", [{"type": "user"}, FABLE_TURN])
+        (move,) = self.plan()
+        self.assertIsNone(move.to_label)
+        self.assertEqual(move.reason, "not limited")
+        self.assertFalse(move.actionable)
+
+    def test_a_spent_fable_cap_switches_model_where_the_session_is(self):
+        self.by_label["c2"].fable_used = 100.0
+        self.add_pane("fine", "c2", [{"type": "user"}, FABLE_TURN])
+        (move,) = self.plan()
+        self.assertEqual(move.to_dir, self.dir_of("c2"))
+        self.assertEqual(move.model, "opus")
+        self.assertIn("fable weekly cap is spent", move.reason)
+        self.assertIn("runs claude-fable-5-1", move.reason)
+        self.assertEqual(move.change, "restart here on opus")
+        self.assertTrue(move.actionable)
+        self.assertEqual(
+            rebump.relaunch_command(move),
+            f"CLAUDE_CONFIG_DIR={self.dir_of('c2')} ANTHROPIC_MODEL=opus "
+            "claude --chrome --resume fine",
+        )
+
+    def test_a_spent_fable_cap_is_no_trouble_for_a_session_off_fable(self):
+        claude1 = self.by_label["claude1"]
+        claude1.session_used, claude1.fable_used = 63.0, 100.0
+        self.add_pane("opus", "claude1", [{"type": "user"}, OPUS_TURN])
+        (move,) = self.plan()
+        self.assertIsNone(move.to_label)
+        self.assertEqual(move.reason, "not limited")
+
+    def test_a_reported_model_cap_switches_model_whatever_cusage_says(self):
+        self.add_pane(
+            "credits", "c4", [{"type": "user"}, FABLE_TURN, MODEL_LIMIT_RECORD]
+        )
+        (move,) = self.plan()
+        self.assertEqual(move.to_dir, self.dir_of("c4"))
+        self.assertEqual(move.model, "opus")
+        self.assertIn("out of usage credits", move.reason)
+
+    def test_a_model_cap_with_nowhere_left_to_switch_moves_instead(self):
+        claude1 = self.by_label["claude1"]
+        claude1.session_used = 63.0
+        self.add_pane(
+            "credits", "claude1", [{"type": "user"}, OPUS_TURN, MODEL_LIMIT_RECORD]
+        )
+        (move,) = self.plan()
+        self.assertEqual(move.to_label, "c4")
+        self.assertIsNone(move.model)
+
+    def test_fable_headroom_on_the_target_drops_a_pin_we_added_earlier(self):
+        self.settings("c4", "claude-fable-5-1[1m]")
+        self.add_pane(
+            "pinned",
+            "c2",
+            [{"type": "user"}, OPUS_TURN, LIMIT_RECORD],
+            env={"ANTHROPIC_MODEL": "opus"},
+        )
+        (move,) = self.plan()
+        self.assertEqual(move.to_label, "c4")
+        self.assertTrue(move.unpin)
+        self.assertEqual(move.change, "move to c4 on its default model")
+        self.assertEqual(
+            rebump.relaunch_command(move),
+            f"env -u ANTHROPIC_MODEL CLAUDE_CONFIG_DIR={self.dir_of('c4')} "
+            "claude --chrome --resume pinned",
+        )
+
+    def test_forced_target_moves_a_healthy_pane_but_not_onto_itself(self):
+        self.add_pane("fine", "c2", [{"type": "user"}, FABLE_TURN])
+        self.assertEqual(self.plan("c4", force=True)[0].to_label, "c4")
+        stay = self.plan("c2", force=True)[0]
+        self.assertIsNone(stay.to_label)
+        self.assertIn("already on", stay.reason)
 
 
 if __name__ == "__main__":

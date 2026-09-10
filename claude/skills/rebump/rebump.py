@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Move rate-limited Claude Code sessions in herdr onto a subscription with headroom."""
+"""Move rate-limited Claude Code sessions in herdr onto a subscription, or a
+model, with headroom."""
 
 from __future__ import annotations
 
@@ -23,12 +24,17 @@ DEFAULT_CONFIG_DIR = HOME / ".claude"
 SESSION_FULL_PERCENT = 90.0
 PICK_MAX_AGE = 300
 NUDGE = (
-    "This session hit a Claude usage limit and was resumed under another "
-    "subscription. Pick up exactly where you left off and finish the task that "
-    "was in progress."
+    "This session hit a Claude usage limit and was resumed on a subscription or "
+    "model with headroom. Pick up exactly where you left off and finish the task "
+    "that was in progress."
 )
 SESSION_FLAGS_WITH_VALUE = {"--resume", "-r", "--session-id", "--teleport"}
 SESSION_FLAGS = {"--continue", "-c", "--fork-session"}
+PREFERRED_MODEL = "fable"
+FALLBACK_MODEL = "opus"
+MODEL_FLAG = "--model"
+MODEL_ENV = "ANTHROPIC_MODEL"
+TAIL_BYTES = 262144
 
 
 @dataclass
@@ -45,16 +51,20 @@ class Account:
     fable_resets: str | None = None
 
     @property
+    def fable_spent(self) -> bool:
+        return (self.fable_used or 0.0) >= 100.0
+
+    @property
     def spent(self) -> str | None:
-        """Why a session cannot run on this account right now, or None."""
+        """Why no session at all can run on this account right now, or None. A
+        spent Fable cap is not a reason: the account still runs other models,
+        so a session there switches model instead of subscription."""
         if self.error:
             return self.error
         if self.weekly_blocked:
             return "weekly cap is spent"
         if (self.session_used or 0.0) >= SESSION_FULL_PERCENT:
             return f"5h window is at {fmt_pct(self.session_used)}"
-        if (self.fable_used or 0.0) >= 100.0:
-            return "fable weekly cap is spent"
         return None
 
     @property
@@ -66,6 +76,47 @@ def normalize_config_dir(raw: str | None) -> str:
     if not raw:
         return str(DEFAULT_CONFIG_DIR.resolve())
     return str(Path(os.path.expandvars(os.path.expanduser(raw))).resolve())
+
+
+def launch_prefix(
+    config_dir: str, model: str | None = None, unpin: bool = False
+) -> str:
+    """The environment a claude session starts under. The default account is
+    only reachable with CLAUDE_CONFIG_DIR unset: setting it, even to ~/.claude,
+    gives claude its own .claude.json inside the dir and its own `Claude
+    Code-credentials-<hash>` keychain entry, so the session lands on a login
+    prompt instead of the subscription. `unpin` drops an inherited
+    ANTHROPIC_MODEL so the account's own default model applies again."""
+    default = not config_dir or config_dir == normalize_config_dir(None)
+    unset = ["CLAUDE_CONFIG_DIR"] if default else []
+    assign = [] if unset else [f"CLAUDE_CONFIG_DIR={shlex.quote(config_dir)}"]
+    if unpin:
+        unset.append(MODEL_ENV)
+    if model:
+        assign.append(f"{MODEL_ENV}={shlex.quote(model)}")
+    parts = ["env " + " ".join(f"-u {name}" for name in unset)] if unset else []
+    return " ".join([*parts, *assign])
+
+
+def settings_model(config_dir: str) -> str | None:
+    """The account's own default model. It differs per config dir and carries
+    the context-window suffix (`opus[1m]`), which is why rebump unsets its pin
+    rather than writing a bare alias back."""
+    for name in ("settings.local.json", "settings.json"):
+        try:
+            data = json.loads((Path(config_dir) / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        model = data.get("model")
+        if isinstance(model, str):
+            return model
+    return None
+
+
+def is_model(model: str | None, alias: str) -> bool:
+    """`opus` matches `opus[1m]` and `claude-opus-5`: the forms a pin, a
+    settings default and a transcript record use for the same model."""
+    return bool(model) and alias.lower() in model.lower()
 
 
 def account_email(config_dir: str) -> str | None:
@@ -186,7 +237,8 @@ def resolve_account(accounts: list[Account], name: str) -> Account:
 
 def choose_target(accounts: list[Account], exclude: str = "") -> Account | None:
     """Fable is the model we want to run, and its weekly cap cannot be waited
-    out the way a 5-hour window can, so Fable headroom ranks first."""
+    out the way a 5-hour window can, so Fable headroom ranks first; an account
+    whose Fable cap is spent still qualifies, on the fallback model."""
     candidates = [a for a in accounts if a.usable and a.config_dir != exclude]
     candidates.sort(key=lambda a: (a.fable_used or 0.0, a.session_used or 0.0))
     return candidates[0] if candidates else None
@@ -204,6 +256,39 @@ def pick_account(accounts: list[Account], to_label: str | None) -> Account:
     if account is None:
         raise SystemExit("no account has headroom; wait for a window to reset")
     return account
+
+
+def model_switch(
+    account: Account,
+    fallback: str,
+    running: str | None = None,
+    pinned: str | None = None,
+    model_limited: bool = False,
+) -> tuple[str | None, bool]:
+    """How a relaunch on this account should set the model: a model to pin, and
+    whether to drop a pin the session inherited from its pane. A Fable weekly
+    cap cannot be waited out the way a 5-hour window can, so a session whose
+    model is out of quota switches model rather than subscription; once the
+    account can run Fable again, dropping our own pin hands the session back to
+    the account's default, suffix (`[1m]`) and all."""
+    default = settings_model(account.config_dir)
+    running = running or default
+    if model_limited or (account.fable_spent and is_model(running, PREFERRED_MODEL)):
+        return (None, False) if is_model(running, fallback) else (fallback, False)
+    if is_model(pinned, fallback) and is_model(default, PREFERRED_MODEL):
+        return None, True
+    return None, False
+
+
+def session_model(argv: list[str], env: dict[str, str]) -> str | None:
+    """The model a running session is pinned to, by flag or environment; None
+    means it follows the account's configured default."""
+    for index, token in enumerate(argv):
+        if token == MODEL_FLAG and index + 1 < len(argv):
+            return argv[index + 1]
+        if token.startswith(f"{MODEL_FLAG}="):
+            return token.split("=", 1)[1]
+    return env.get(MODEL_ENV)
 
 
 def herdr(*args: str, check: bool = True, timeout: int = 60) -> dict:
@@ -273,35 +358,68 @@ def find_transcript(config_dir: str, session_id: str) -> Path | None:
     return Path(hits[0]) if hits else None
 
 
-def limit_message(transcript: Path) -> str | None:
-    """Claude Code records a limit as a synthetic assistant message carrying
-    error=rate_limit and quotaLimits.status=rejected."""
+def tail_records(transcript: Path) -> list[dict]:
+    """The end of a transcript, oldest first."""
     try:
         with transcript.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
-            handle.seek(max(0, size - 262144))
+            start = max(0, size - TAIL_BYTES)
+            handle.seek(start)
             tail = handle.read().decode("utf-8", "replace")
     except OSError:
-        return None
+        return []
     lines = tail.splitlines()
-    if len(lines) > 1:
-        lines = lines[1:]  # the first line is cut mid-record
-    for line in reversed(lines):
+    if start and len(lines) > 1:
+        lines = lines[1:]  # a tail that starts mid-file cuts its first record
+    records = []
+    for line in lines:
         try:
-            record = json.loads(line)
+            records.append(json.loads(line))
         except ValueError:
             continue
+    return records
+
+
+@dataclass
+class Limit:
+    text: str
+    kind: str | None
+
+    @property
+    def model_only(self) -> bool:
+        """Claude Code writes "/model to switch models" and leaves quotaLimits
+        empty when the cap binds the current model rather than the whole
+        subscription, which is exactly the case a model switch fixes."""
+        return self.kind is None and "/model" in self.text
+
+
+def limit_message(records: list[dict]) -> Limit | None:
+    """Claude Code records a limit as a synthetic assistant message carrying
+    error=rate_limit; quotaLimits names the window when a whole subscription
+    one is spent (`five_hour`) and is empty for a per-model cap."""
+    for record in reversed(records):
         if record.get("type") != "assistant":
             continue
         quota = record.get("quotaLimits") or {}
         if record.get("error") == "rate_limit" or quota.get("status") == "rejected":
-            content = (record.get("message") or {}).get("content") or []
-            for part in content:
+            text = "rate limit"
+            for part in (record.get("message") or {}).get("content") or []:
                 if isinstance(part, dict) and part.get("type") == "text":
-                    return part["text"]
-            return "rate limit"
+                    text = part["text"]
+                    break
+            return Limit(text=text, kind=quota.get("rateLimitType"))
         return None
+    return None
+
+
+def transcript_model(records: list[dict]) -> str | None:
+    """The model the session was last answered by; the synthetic messages that
+    carry a limit say `<synthetic>` instead of a model."""
+    for record in reversed(records):
+        model = (record.get("message") or {}).get("model")
+        if record.get("type") == "assistant" and model and model != "<synthetic>":
+            return model
     return None
 
 
@@ -329,6 +447,8 @@ class Move:
     to_dir: str | None
     reason: str
     transcript: str | None
+    model: str | None = None
+    unpin: bool = False
     argv: list[str] = field(default_factory=list)
     pid: int | None = None
     is_self: bool = False
@@ -339,19 +459,37 @@ class Move:
             self.to_dir is not None and self.transcript is not None and not self.is_self
         )
 
+    @property
+    def change(self) -> str:
+        """What the relaunch changes: the account, the model, or both."""
+        if self.to_dir is None:
+            return ""
+        where = (
+            "restart here"
+            if self.to_dir == self.from_dir
+            else f"move to {self.to_label}"
+        )
+        if self.model:
+            return f"{where} on {self.model}"
+        return f"{where} on its default model" if self.unpin else where
 
-def relaunch_argv(argv: list[str], session_id: str) -> list[str]:
+
+def relaunch_argv(
+    argv: list[str], session_id: str, drop_model: bool = False
+) -> list[str]:
     out: list[str] = []
     skip = False
     for token in argv:
         if skip:
             skip = False
             continue
-        if token in SESSION_FLAGS_WITH_VALUE:
+        if token in SESSION_FLAGS_WITH_VALUE or (drop_model and token == MODEL_FLAG):
             skip = True
             continue
-        if token in SESSION_FLAGS or any(
-            token.startswith(f"{flag}=") for flag in SESSION_FLAGS_WITH_VALUE
+        if (
+            token in SESSION_FLAGS
+            or any(token.startswith(f"{flag}=") for flag in SESSION_FLAGS_WITH_VALUE)
+            or (drop_model and token.startswith(f"{MODEL_FLAG}="))
         ):
             continue
         if token not in out[1:]:  # the alias adds --chrome again; keep one
@@ -364,6 +502,7 @@ def build_plan(
     panes: list[dict],
     to_label: str | None,
     force: bool = False,
+    fallback: str = FALLBACK_MODEL,
 ) -> list[Move]:
     by_dir = {a.config_dir: a for a in accounts}
     forced = resolve_account(accounts, to_label) if to_label else None
@@ -374,36 +513,76 @@ def build_plan(
         session_id = pane["agent_session"]["value"]
         proc = pane_claude_process(pane_id)
         env = process_env(proc["pid"]) if proc else {}
+        argv = (proc or {}).get("argv") or ["claude"]
         from_dir = normalize_config_dir(env.get("CLAUDE_CONFIG_DIR"))
         account = by_dir.get(from_dir)
         from_label = account.label if account else Path(from_dir).name.lstrip(".")
         transcript = find_transcript(from_dir, session_id)
+        records = tail_records(transcript) if transcript else []
+        limit = limit_message(records)
+        pinned = session_model(argv, env)
+        # What the session actually runs: its pin, else the model that answered
+        # it last, else the account's default - which differs per config dir.
+        running = pinned or transcript_model(records) or settings_model(from_dir)
+        # A spent Fable cap only troubles a session that runs Fable; a model
+        # cap Claude Code reported troubles it whatever cusage says.
+        model_limited = bool(limit and limit.model_only) or (
+            account is not None
+            and account.fable_spent
+            and is_model(running, PREFERRED_MODEL)
+        )
 
         reasons = []
-        if transcript is not None:
-            text = limit_message(transcript)
-            if text:
-                reasons.append(f"transcript ends with: {text}")
+        if limit is not None:
+            reasons.append(f"transcript ends with: {limit.text}")
         if account is not None:
             if account.weekly_blocked:
                 reasons.append(f"{account.label} weekly cap is spent")
             elif (account.session_used or 0.0) >= 100.0:
                 reasons.append(f"{account.label} 5h window is at 100%")
-            elif (account.fable_used or 0.0) >= 100.0:
-                reasons.append(f"{account.label} fable weekly cap is spent")
+            elif model_limited:
+                reasons.append(
+                    f"{account.label} fable weekly cap is spent and this session "
+                    f"runs {running}"
+                )
         if force and not reasons:
             reasons.append("--force")
         if not reasons:
             reason = "not limited"
-            target = None
+            target, model, unpin = None, None, False
         else:
             reason = "; ".join(reasons)
-            target = forced or choose_target(accounts, exclude=from_dir)
-            if target is not None and target.config_dir == from_dir:
-                target = None
-                reason += "; target is the account it is already on"
-            elif target is None:
-                reason += "; no account has headroom"
+            # Switching model is cheaper than switching subscription and keeps
+            # the session where its memory is, so the account it is already on
+            # gets the first try whenever a model switch could fix the limit.
+            candidates = [forced] if forced else []
+            if not forced:
+                if model_limited and account is not None and account.usable:
+                    candidates.append(account)
+                other = choose_target(accounts, exclude=from_dir)
+                if other is not None:
+                    candidates.append(other)
+            target, model, unpin = None, None, False
+            for candidate in candidates:
+                model, unpin = model_switch(
+                    candidate,
+                    fallback,
+                    running=running,
+                    pinned=pinned,
+                    model_limited=model_limited and candidate is account,
+                )
+                if candidate.config_dir != from_dir or model or unpin:
+                    target = candidate
+                    break
+            if target is None:
+                model, unpin = None, False
+                reason += (
+                    f"; already on {from_label} with nothing to switch"
+                    if any(c.config_dir == from_dir for c in candidates)
+                    else "; no account has headroom"
+                )
+            elif target.config_dir == from_dir:
+                reason += f"; {from_label} can still run {model or 'its default'}"
             if transcript is None:
                 reason += f"; transcript not found under {from_dir}"
 
@@ -420,7 +599,9 @@ def build_plan(
                 to_dir=target.config_dir if target else None,
                 reason=reason,
                 transcript=str(transcript) if transcript else None,
-                argv=(proc or {}).get("argv") or ["claude"],
+                model=model,
+                unpin=unpin,
+                argv=argv,
                 pid=(proc or {}).get("pid"),
                 is_self=pane_id == own_pane,
             )
@@ -429,10 +610,13 @@ def build_plan(
 
 
 def relaunch_command(move: Move) -> str:
-    argv = relaunch_argv(move.argv, move.session_id)
-    return f"CLAUDE_CONFIG_DIR={shlex.quote(move.to_dir or '')} " + " ".join(
-        shlex.quote(a) for a in argv
+    """The model rides in the environment rather than on `--model`, so it also
+    overrides an ANTHROPIC_MODEL the pane's shell already carries."""
+    argv = relaunch_argv(
+        move.argv, move.session_id, drop_model=bool(move.model) or move.unpin
     )
+    prefix = launch_prefix(move.to_dir or "", move.model, move.unpin)
+    return prefix + " " + " ".join(shlex.quote(a) for a in argv)
 
 
 def wait_for(predicate, timeout: float, interval: float = 0.5) -> bool:
@@ -489,9 +673,10 @@ def quit_claude(move: Move, log) -> bool:
 
 
 def apply_move(move: Move, nudge: str | None, log) -> str:
-    log(f"{move.pane_id} {move.session_id[:8]} {move.from_label} -> {move.to_label}")
-    dest = copy_transcript(Path(move.transcript or ""), move.to_dir or "")
-    log(f"  transcript copied to {dest}")
+    log(f"{move.pane_id} {move.session_id[:8]} {move.from_label}: {move.change}")
+    if move.to_dir != move.from_dir:
+        dest = copy_transcript(Path(move.transcript or ""), move.to_dir or "")
+        log(f"  transcript copied to {dest}")
 
     if not quit_claude(move, log):
         return "failed: could not quit claude in the pane"
@@ -560,6 +745,8 @@ def render_accounts(accounts: list[Account]) -> str:
             lines.append(f"  {a.label:<8} {a.email or '':<28} ! {a.error}")
             continue
         flags = " blocked" if a.weekly_blocked else ""
+        if a.fable_spent and not a.weekly_blocked:
+            flags += f"  (default {settings_model(a.config_dir) or PREFERRED_MODEL})"
         lines.append(
             f"  {a.label:<8} {a.email or '':<28} "
             f"5h {fmt_pct(a.session_used):>4} ({fmt_resets(a.session_resets)})  "
@@ -579,11 +766,13 @@ def render_panes(moves: list[Move]) -> str:
             f"  {m.pane_id:<8} {m.session_id[:8]} {m.from_label:<8} {m.status:<8} "
             f"{where}: {m.title}"
         )
-        if m.to_label:
-            verb = "would move" if not m.is_self else "cannot move (this pane)"
-            lines.append(f"           {verb} to {m.to_label}: {m.reason}")
+        if m.to_dir:
+            lines.append(f"           would {m.change}: {m.reason}")
             if m.is_self:
-                lines.append("           run in the pane after quitting claude:")
+                lines.append(
+                    "           this pane cannot do it to itself; quit claude "
+                    "here and run:"
+                )
                 lines.append(f"             {relaunch_command(m)}")
         elif m.reason != "not limited":
             lines.append(f"           stuck: {m.reason}")
@@ -597,8 +786,10 @@ def main(argv: list[str] | None = None) -> int:
         nargs="?",
         choices=("plan", "apply", "pick"),
         default="plan",
-        help="plan is read-only (default); apply performs the moves; pick prints "
-        "CLAUDE_CONFIG_DIR=<dir> for the account a new session should start on",
+        help="plan is read-only (default); apply performs the moves and model "
+        "switches; pick prints the env prefix (CLAUDE_CONFIG_DIR=<dir>, or `env "
+        "-u CLAUDE_CONFIG_DIR` for the default account, plus ANTHROPIC_MODEL "
+        "when Fable is spent) a new session should start under",
     )
     parser.add_argument(
         "--to",
@@ -608,6 +799,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--pane", action="append", help="only these pane ids (repeatable)"
+    )
+    parser.add_argument(
+        "--fallback-model",
+        default=FALLBACK_MODEL,
+        help="model to run when the account's Fable weekly cap is spent "
+        f"(default: {FALLBACK_MODEL})",
     )
     parser.add_argument(
         "--force",
@@ -642,20 +839,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.action == "pick":
         account = pick_account(accounts, args.to)
+        model, _ = model_switch(account, args.fallback_model)
         if args.json:
             print(
                 json.dumps(
                     {
                         "accounts": [asdict(a) for a in accounts],
                         "pick": asdict(account),
+                        "model": model,
                     },
                     indent=2,
                 )
             )
         else:
             print(render_accounts(accounts), file=sys.stderr)
-            print(f"  -> {account.label}", file=sys.stderr)
-            print(f"CLAUDE_CONFIG_DIR={account.config_dir}")
+            note = f" on {model} (its fable weekly cap is spent)" if model else ""
+            print(f"  -> {account.label}{note}", file=sys.stderr)
+            print(launch_prefix(account.config_dir, model))
         return 0
 
     if shutil.which("herdr") is None:
@@ -665,7 +865,9 @@ def main(argv: list[str] | None = None) -> int:
         panes = [p for p in panes if p["pane_id"] in set(args.pane)]
     if args.force and not args.pane:
         raise SystemExit("--force needs --pane: it would restart every claude pane")
-    moves = build_plan(accounts, panes, args.to, force=args.force)
+    moves = build_plan(
+        accounts, panes, args.to, force=args.force, fallback=args.fallback_model
+    )
 
     if args.json:
         print(
