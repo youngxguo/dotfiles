@@ -84,4 +84,31 @@ function M.git_blame_commit_remote()
   M.yank_and_notify(url)
 end
 
+function M.octo_with_progress(command, message, filetype)
+  local loading = require("fidget.progress").handle.create({
+    lsp_client = { name = "Octo" },
+    message = message,
+  })
+  local done = false
+  local function finish_loading()
+    if done then
+      return
+    end
+    done = true
+    loading:finish()
+  end
+
+  local autocmd = vim.api.nvim_create_autocmd("FileType", {
+    pattern = filetype,
+    once = true,
+    callback = finish_loading,
+  })
+  vim.defer_fn(function()
+    finish_loading()
+    pcall(vim.api.nvim_del_autocmd, autocmd)
+  end, 15000)
+
+  vim.cmd(command)
+end
+
 return M
