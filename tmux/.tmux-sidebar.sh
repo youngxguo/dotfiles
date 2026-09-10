@@ -7,7 +7,9 @@ source "$SCRIPT_DIR/.tmux-lib.sh"
 TMUX_BIN="$(tmux_resolve_bin)"
 
 WIDTH="${SIDEBAR_WIDTH:-26}"
-SEP=$'\x1f'
+# tmux 3.4 escapes non-printable bytes in -F output, so a 0x1f separator comes
+# back as a literal \037 and the fields never split. Tab survives every version.
+SEP=$'\t'
 
 SIDEBAR_BUSY_TTL=10
 layout_quiet_begin() {
