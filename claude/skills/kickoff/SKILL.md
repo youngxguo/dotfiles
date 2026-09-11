@@ -22,9 +22,9 @@ python3 ${CLAUDE_SKILL_DIR}/kickoff.py signup-rate-limit --brief-file /tmp/brief
 ```
 
 The slug is the only required argument. It becomes the branch
-(`<git user>/<slug>`), the workspace label and the agent name. Write the brief
-to a file in the scratchpad and pass `--brief-file`; only use the trailing
-positional form for a one-liner.
+(`<git user>/<slug>`), the workspace label and the agent name. Pass a
+one-line brief as the trailing positional; write a longer one to a file in
+the scratchpad and pass `--brief-file`.
 
 Worth knowing:
 
@@ -46,14 +46,19 @@ Worth knowing:
 
 Report the final line it prints: agent name, branch, workspace id, path.
 
-## Write the brief like the agent has no context
+## Pass the ask straight through
 
-It starts fresh in an empty worktree and cannot see this conversation. A brief
-that works is a short paragraph or two covering: the goal in one sentence, the
-files or entry points you already know are involved, the constraints that are
-not obvious from the code, and what done looks like - tests to pass, and
-whether to commit, push and open a PR. Say that its branch is already created
-and checked out. Do not ask it to write its answer to a file; read the pane.
+Do not read the codebase, search for entry points or plan the work before
+kicking off. The agent does its own reasoning in the worktree; anything you
+work out here is wasted and delays the launch. Run `kickoff.py` as the first
+tool call.
+
+The brief is the user's request, close to verbatim. The only additions are
+what the agent cannot get from the request itself because it starts fresh and
+cannot see this conversation: something the user said earlier in the session
+that the request depends on, and, if the user said so, whether to commit, push
+or open a PR. Say its branch is already created and checked out. Do not ask
+it to write its answer to a file; read the pane.
 
 ## Afterwards
 
