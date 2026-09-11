@@ -6,15 +6,28 @@ allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/rebump.py *)
 
 # Rebump
 
-`rebump.py` beside this file does the work. It runs `cusage --json` for every
-account, lists the claude panes herdr knows about, reads each pane's account
-from its process environment, and for every pane whose transcript ends on a
-rate-limit message (or whose account is spent) it: copies the transcript into
-the target config dir (`claude --resume` only searches its own
-`CLAUDE_CONFIG_DIR`), quits claude in the pane with two Ctrl-C, relaunches the
-same command line under the target account with `--resume`, answers the
-folder-trust and other first-run dialogs the target account may show for that
-folder, waits for herdr to see it settle, and prompts it to continue.
+`rebump.py` beside this file does the work, in two flows that share one
+planner:
+
+- **One session, automatically.** The `StopFailure` hook runs `rebump.py hook`
+  inside the session that hit the limit. It plans that session alone, from the
+  session id and transcript Claude Code hands the hook and the environment the
+  hook inherits, and never looks at the rest of herdr. See "Rebumping
+  automatically" below; this is how nearly every rebump happens now.
+- **Every pane, by hand.** `plan` and `apply` sweep the claude panes herdr
+  knows about, reading each pane's account off its process environment. They
+  exist for sessions the hook cannot reach: ones started before the hook was
+  added (Claude Code reads hooks at startup), and ones the hook left alone
+  because no account had headroom at the time.
+
+Both flows do the same thing to a limited session: `cusage --json` for every
+account, then, when the transcript ends on a rate-limit message (or the account
+is spent), copy the transcript into the target config dir (`claude --resume`
+only searches its own `CLAUDE_CONFIG_DIR`), quit claude in the pane with two
+Ctrl-C, relaunch the same command line under the target account with
+`--resume`, answer the folder-trust and other first-run dialogs the target
+account may show for that folder, wait for herdr to see it settle, confirm the
+pane is running the resumed session, and prompt it to continue.
 
 A cap that binds only the model a session runs - a spent Fable weekly cap, or
 "You're out of usage credits. /model to switch models." at the end of the
@@ -26,6 +39,10 @@ Needs `herdr` on PATH with the server running (this session should have
 `HERDR_ENV=1`) and the hsys `cusage` helper sourced by the shell.
 
 ## Steps
+
+Before sweeping, check `~/.cache/rebump/hook.log`: a session inside herdr that
+hit its limit has usually rebumped itself already, and the log says where it
+went or why it stayed. The sweep is for what the log does not cover.
 
 1. Always start read-only:
 
@@ -49,7 +66,12 @@ Needs `herdr` on PATH with the server running (this session should have
 
    Each pane takes 20-60 seconds (quit, relaunch, wait for the resume). Report
    the per-pane result lines it prints. A line reading `restart here on opus`
-   is a model switch, not a move: the session stays on its own account.
+   is a model switch, not a move: the session stays on its own account. A
+   `failed: the pane runs session <id>` line means something else took the
+   pane over between the quit and the nudge - typically the user restarting
+   claude by hand in it - so the resumed session was not nudged; the
+   transcript is still in the target config dir and `claude --resume <id>`
+   there brings it back.
 
 4. A pane whose plan line says it `cannot do it to itself` is the one running
    this skill; the script prints the command to run there. Tell the user to
@@ -93,6 +115,32 @@ herdr pane run <returned-pane-id> "$env claude --chrome"
 herdr agent wait <pane-id> --timeout 90000
 herdr agent rename <pane-id> <name>
 ```
+
+## Rebumping automatically
+
+`claude/settings.json` registers `rebump.py hook` as a Claude Code
+`StopFailure` hook with the `rate_limit` matcher, in every config dir, so a
+herdr session that hits a usage limit rebumps itself without anyone running
+this skill. The hook forks the single-session flow into its own process group
+and returns at once. That flow builds the session from the hook payload
+(session id, transcript path, cwd) and the hook's own environment
+(`CLAUDE_CONFIG_DIR`, `ANTHROPIC_MODEL`, `HERDR_PANE_ID`), asks herdr only for
+the pane's claude command line, and then does exactly what step 3 does for
+that one pane - or nothing when no account has headroom, which leaves Claude
+Code's own wait-for-reset in place. It never lists or touches other panes.
+Each run appends to `~/.cache/rebump/hook.log` (`XDG_CACHE_HOME` respected);
+a `hook-<pane>.pid` beside it stops a second limit hit from starting a second
+rebump while one is still running. Outside herdr, or for any other API error,
+the hook does nothing. Sessions started before the hook was added do not have
+it: Claude Code reads hooks at startup.
+
+The rebump takes 20-60 seconds and works the pane from outside, so leave the
+pane alone once the limit message shows. Quitting claude or starting it again
+by hand in that pane while the hook is mid-flight races it: the hook's
+relaunch gets cut short, and the fresh session started by hand ends up with
+whatever was pasted next as its first prompt. The hook notices this (the
+pane's session id no longer matches) and logs it as a failure instead of
+nudging the wrong session.
 
 ## Rules
 

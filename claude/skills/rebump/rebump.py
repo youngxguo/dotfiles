@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Move rate-limited Claude Code sessions in herdr onto a subscription, or a
-model, with headroom."""
+model, with headroom.
+
+Two flows share the planning: `plan`/`apply` sweep every claude pane herdr
+knows about, and `hook` (the StopFailure hook) rebumps only the session it
+fired in, from what Claude Code hands the hook."""
 
 from __future__ import annotations
 
@@ -15,8 +19,10 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 HOME = Path.home()
@@ -36,6 +42,7 @@ FALLBACK_MODEL = "opus"
 MODEL_FLAG = "--model"
 MODEL_ENV = "ANTHROPIC_MODEL"
 TAIL_BYTES = 262144
+SESSION_CONFIRM_SECONDS = 15
 
 
 @dataclass
@@ -364,10 +371,39 @@ def herdr(*args: str, check: bool = True, timeout: int = 60) -> dict:
         data = json.loads(payload) if payload else {}
     except ValueError:
         data = {"error": {"message": payload}}
-    if check and (proc.returncode != 0 or "error" in data):
+    if proc.returncode != 0 and "error" not in data:
+        data["error"] = {"message": payload or f"exit status {proc.returncode}"}
+    if check and "error" in data:
         message = (data.get("error") or {}).get("message") or payload
         raise SystemExit(f"herdr {' '.join(args)} failed: {message}")
     return data
+
+
+def herdr_error(data: dict) -> str | None:
+    if "error" not in data:
+        return None
+    return (data.get("error") or {}).get("message") or "unknown error"
+
+
+def pane_agent(pane_id: str) -> dict:
+    """What herdr knows about the agent in a pane; empty when there is none."""
+    result = herdr("agent", "get", pane_id, check=False).get("result") or {}
+    return result.get("agent") or {}
+
+
+def pane_session(pane_id: str) -> tuple[str | None, str | None]:
+    """The session reference herdr reads off the agent in a pane, as (kind,
+    value); the kind is `id` when herdr could read the session id itself."""
+    ref = pane_agent(pane_id).get("agent_session") or {}
+    return ref.get("kind"), ref.get("value")
+
+
+def runs_session(pane_id: str, session_id: str) -> bool:
+    """Whether the pane runs the session we resumed. A reference herdr could
+    not read as an id (an older integration reports the title) cannot
+    contradict us, so only a different id counts against."""
+    kind, value = pane_session(pane_id)
+    return value == session_id or (value is not None and kind != "id")
 
 
 def claude_panes() -> list[dict]:
@@ -557,6 +593,168 @@ def relaunch_argv(
     return [*out, "--resume", session_id]
 
 
+@dataclass
+class Session:
+    """What rebump needs to know about one running Claude Code session."""
+
+    pane_id: str
+    session_id: str
+    argv: list[str]
+    env: dict[str, str]
+    transcript: Path | None
+    cwd: str = ""
+    title: str = ""
+    status: str = ""
+    pid: int | None = None
+
+    @property
+    def config_dir(self) -> str:
+        return normalize_config_dir(self.env.get("CLAUDE_CONFIG_DIR"))
+
+
+def session_from_pane(pane: dict) -> Session:
+    """A session herdr listed: its account and pin have to be read off the
+    claude process running in the pane."""
+    pane_id = pane["pane_id"]
+    session_id = pane["agent_session"]["value"]
+    proc = pane_claude_process(pane_id)
+    env = process_env(proc["pid"]) if proc else {}
+    config_dir = normalize_config_dir(env.get("CLAUDE_CONFIG_DIR"))
+    return Session(
+        pane_id=pane_id,
+        session_id=session_id,
+        argv=(proc or {}).get("argv") or ["claude"],
+        env=env,
+        transcript=find_transcript(config_dir, session_id),
+        cwd=pane.get("cwd") or "",
+        title=pane.get("terminal_title_stripped") or "",
+        status=pane.get("agent_status") or "",
+        pid=(proc or {}).get("pid"),
+    )
+
+
+def session_from_hook(payload: dict, pane_id: str, env: dict[str, str]) -> Session:
+    """The session a StopFailure hook fired in. Claude Code hands the hook its
+    session id and transcript, and the hook inherits the environment the
+    session runs under, so only the command line has to come from herdr."""
+    session_id = payload.get("session_id") or ""
+    proc = pane_claude_process(pane_id)
+    transcript: Path | None = Path(payload.get("transcript_path") or "")
+    if not transcript.is_file():
+        config_dir = normalize_config_dir(env.get("CLAUDE_CONFIG_DIR"))
+        transcript = find_transcript(config_dir, session_id)
+    return Session(
+        pane_id=pane_id,
+        session_id=session_id,
+        argv=(proc or {}).get("argv") or ["claude"],
+        env=dict(env),
+        transcript=transcript,
+        cwd=payload.get("cwd") or "",
+        pid=(proc or {}).get("pid"),
+    )
+
+
+def plan_move(
+    accounts: list[Account],
+    session: Session,
+    forced: Account | None = None,
+    force: bool = False,
+    fallback: str = FALLBACK_MODEL,
+    own_pane: str | None = None,
+) -> Move:
+    by_dir = {a.config_dir: a for a in accounts}
+    from_dir = session.config_dir
+    account = by_dir.get(from_dir)
+    from_label = account.label if account else Path(from_dir).name.lstrip(".")
+    transcript = session.transcript
+    records = tail_records(transcript) if transcript else []
+    limit = limit_message(records)
+    pinned = session_model(session.argv, session.env)
+    # What the session actually runs: its pin, else the model that answered
+    # it last, else the account's default - which differs per config dir.
+    running = pinned or transcript_model(records) or settings_model(from_dir)
+    # A spent Fable cap only troubles a session that runs Fable; a model
+    # cap Claude Code reported troubles it whatever cusage says.
+    model_limited = bool(limit and limit.model_only) or (
+        account is not None
+        and account.fable_spent
+        and is_model(running, PREFERRED_MODEL)
+    )
+
+    reasons = []
+    if limit is not None:
+        reasons.append(f"transcript ends with: {limit.text}")
+    if account is not None:
+        if account.weekly_blocked:
+            reasons.append(f"{account.label} weekly cap is spent")
+        elif (account.session_used or 0.0) >= 100.0:
+            reasons.append(f"{account.label} 5h window is at 100%")
+        elif model_limited:
+            reasons.append(
+                f"{account.label} fable weekly cap is spent and this session "
+                f"runs {running}"
+            )
+    if force and not reasons:
+        reasons.append("--force")
+    if not reasons:
+        reason = "not limited"
+        target, model, unpin = None, None, False
+    else:
+        reason = "; ".join(reasons)
+        # Switching model is cheaper than switching subscription and keeps
+        # the session where its memory is, so the account it is already on
+        # gets the first try whenever a model switch could fix the limit.
+        candidates = [forced] if forced else []
+        if not forced:
+            if model_limited and account is not None and account.usable:
+                candidates.append(account)
+            other = choose_target(accounts, exclude=from_dir)
+            if other is not None:
+                candidates.append(other)
+        target, model, unpin = None, None, False
+        for candidate in candidates:
+            model, unpin = model_switch(
+                candidate,
+                fallback,
+                running=running,
+                pinned=pinned,
+                model_limited=model_limited and candidate is account,
+            )
+            if candidate.config_dir != from_dir or model or unpin:
+                target = candidate
+                break
+        if target is None:
+            model, unpin = None, False
+            reason += (
+                f"; already on {from_label} with nothing to switch"
+                if any(c.config_dir == from_dir for c in candidates)
+                else "; no account has headroom"
+            )
+        elif target.config_dir == from_dir:
+            reason += f"; {from_label} can still run {model or 'its default'}"
+        if transcript is None:
+            reason += f"; transcript not found under {from_dir}"
+
+    return Move(
+        pane_id=session.pane_id,
+        session_id=session.session_id,
+        cwd=session.cwd,
+        title=session.title,
+        status=session.status,
+        from_label=from_label,
+        from_dir=from_dir,
+        to_label=target.label if target else None,
+        to_dir=target.config_dir if target else None,
+        reason=reason,
+        transcript=str(transcript) if transcript else None,
+        model=model,
+        unpin=unpin,
+        argv=session.argv,
+        pid=session.pid,
+        is_self=session.pane_id == own_pane,
+    )
+
+
 def build_plan(
     accounts: list[Account],
     panes: list[dict],
@@ -564,109 +762,13 @@ def build_plan(
     force: bool = False,
     fallback: str = FALLBACK_MODEL,
 ) -> list[Move]:
-    by_dir = {a.config_dir: a for a in accounts}
+    """The sweep: every claude session herdr knows about, planned together."""
     forced = resolve_account(accounts, to_label) if to_label else None
     own_pane = os.environ.get("HERDR_PANE_ID")
-    moves = []
-    for pane in panes:
-        pane_id = pane["pane_id"]
-        session_id = pane["agent_session"]["value"]
-        proc = pane_claude_process(pane_id)
-        env = process_env(proc["pid"]) if proc else {}
-        argv = (proc or {}).get("argv") or ["claude"]
-        from_dir = normalize_config_dir(env.get("CLAUDE_CONFIG_DIR"))
-        account = by_dir.get(from_dir)
-        from_label = account.label if account else Path(from_dir).name.lstrip(".")
-        transcript = find_transcript(from_dir, session_id)
-        records = tail_records(transcript) if transcript else []
-        limit = limit_message(records)
-        pinned = session_model(argv, env)
-        # What the session actually runs: its pin, else the model that answered
-        # it last, else the account's default - which differs per config dir.
-        running = pinned or transcript_model(records) or settings_model(from_dir)
-        # A spent Fable cap only troubles a session that runs Fable; a model
-        # cap Claude Code reported troubles it whatever cusage says.
-        model_limited = bool(limit and limit.model_only) or (
-            account is not None
-            and account.fable_spent
-            and is_model(running, PREFERRED_MODEL)
-        )
-
-        reasons = []
-        if limit is not None:
-            reasons.append(f"transcript ends with: {limit.text}")
-        if account is not None:
-            if account.weekly_blocked:
-                reasons.append(f"{account.label} weekly cap is spent")
-            elif (account.session_used or 0.0) >= 100.0:
-                reasons.append(f"{account.label} 5h window is at 100%")
-            elif model_limited:
-                reasons.append(
-                    f"{account.label} fable weekly cap is spent and this session "
-                    f"runs {running}"
-                )
-        if force and not reasons:
-            reasons.append("--force")
-        if not reasons:
-            reason = "not limited"
-            target, model, unpin = None, None, False
-        else:
-            reason = "; ".join(reasons)
-            # Switching model is cheaper than switching subscription and keeps
-            # the session where its memory is, so the account it is already on
-            # gets the first try whenever a model switch could fix the limit.
-            candidates = [forced] if forced else []
-            if not forced:
-                if model_limited and account is not None and account.usable:
-                    candidates.append(account)
-                other = choose_target(accounts, exclude=from_dir)
-                if other is not None:
-                    candidates.append(other)
-            target, model, unpin = None, None, False
-            for candidate in candidates:
-                model, unpin = model_switch(
-                    candidate,
-                    fallback,
-                    running=running,
-                    pinned=pinned,
-                    model_limited=model_limited and candidate is account,
-                )
-                if candidate.config_dir != from_dir or model or unpin:
-                    target = candidate
-                    break
-            if target is None:
-                model, unpin = None, False
-                reason += (
-                    f"; already on {from_label} with nothing to switch"
-                    if any(c.config_dir == from_dir for c in candidates)
-                    else "; no account has headroom"
-                )
-            elif target.config_dir == from_dir:
-                reason += f"; {from_label} can still run {model or 'its default'}"
-            if transcript is None:
-                reason += f"; transcript not found under {from_dir}"
-
-        moves.append(
-            Move(
-                pane_id=pane_id,
-                session_id=session_id,
-                cwd=pane.get("cwd") or "",
-                title=pane.get("terminal_title_stripped") or "",
-                status=pane.get("agent_status") or "",
-                from_label=from_label,
-                from_dir=from_dir,
-                to_label=target.label if target else None,
-                to_dir=target.config_dir if target else None,
-                reason=reason,
-                transcript=str(transcript) if transcript else None,
-                model=model,
-                unpin=unpin,
-                argv=argv,
-                pid=(proc or {}).get("pid"),
-                is_self=pane_id == own_pane,
-            )
-        )
-    return moves
+    return [
+        plan_move(accounts, session_from_pane(pane), forced, force, fallback, own_pane)
+        for pane in panes
+    ]
 
 
 def relaunch_command(move: Move) -> str:
@@ -762,24 +864,160 @@ def apply_move(move: Move, nudge: str | None, log) -> str:
     log(f"  ran: {command}")
 
     if not wait_for(
-        lambda: (
-            (herdr("agent", "get", move.pane_id, check=False).get("result") or {})
-            .get("agent", {})
-            .get("agent")
-            == "claude"
-        ),
-        timeout=45,
+        lambda: pane_agent(move.pane_id).get("agent") == "claude", timeout=45
     ):
         return "failed: herdr did not detect claude after the relaunch"
     status = settle_agent(move.pane_id, log)
     log(f"  agent {status}")
+    # The relaunch can be cut short - by someone quitting and restarting
+    # claude by hand in the same pane, say - and the nudge would then land
+    # in whatever session the pane runs now, so make sure it is ours.
+    if not wait_for(
+        lambda: runs_session(move.pane_id, move.session_id),
+        timeout=SESSION_CONFIRM_SECONDS,
+    ):
+        _, running = pane_session(move.pane_id)
+        if pane_agent(move.pane_id).get("agent") != "claude":
+            return "failed: claude exited again after the relaunch"
+        return (
+            f"failed: the pane runs session {running[:8] if running else 'unknown'}, "
+            f"not {move.session_id[:8]}; nudge skipped"
+        )
     if status == "blocked" or "Enter to confirm" in pane_screen(move.pane_id):
         return "resumed, but claude is waiting on a dialog; nudge skipped"
     if nudge:
-        herdr("agent", "prompt", move.pane_id, nudge, check=False)
+        error = herdr_error(herdr("agent", "prompt", move.pane_id, nudge, check=False))
+        if error:
+            return f"resumed, but the nudge failed: {error}"
         log("  nudged")
         return "resumed and nudged"
     return "resumed"
+
+
+HOOK_ERRORS = {"rate_limit"}
+HOOK_SETTLE_SECONDS = 3
+
+
+def hook_skip_reason(payload: dict, env: dict[str, str]) -> str | None:
+    """Why a StopFailure hook should do nothing, or None when it should rebump
+    its own session. Claude Code reports a spent claude.ai limit as
+    `rate_limit`, the same value the transcript record carries; every other
+    failure is not ours to fix."""
+    error = payload.get("error")
+    if error not in HOOK_ERRORS:
+        return f"error is {error!r}, not a usage limit"
+    if not payload.get("session_id"):
+        return "no session id in the hook payload"
+    if not env.get("HERDR_PANE_ID"):
+        return "not in a herdr pane"
+    if shutil.which("herdr") is None:
+        return "herdr is not on PATH"
+    return None
+
+
+def hook_lock_path(pane: str) -> Path:
+    slug = re.sub(r"[^A-Za-z0-9_-]", "_", pane)
+    return usage_cache_path().parent / f"hook-{slug}.pid"
+
+
+def hook_log_path() -> Path:
+    return usage_cache_path().parent / "hook.log"
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def running_hook(lock: Path) -> int | None:
+    try:
+        pid = int(lock.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    return pid if pid_alive(pid) else None
+
+
+def rebump_session(payload: dict, pane: str, env: dict[str, str], log) -> str:
+    """The single-session flow: plan and apply the move for the one session a
+    hook fired in, without looking at the rest of herdr."""
+    # herdr commands from here on act on the pane from outside it.
+    os.environ.pop("HERDR_PANE_ID", None)
+    accounts, usage_note = read_usage(None, USAGE_MAX_AGE, CUSAGE_TIMEOUT)
+    log(render_accounts(accounts))
+    if usage_note:
+        log(f"  ! {usage_note}")
+    move = plan_move(accounts, session_from_hook(payload, pane, env))
+    if move.actionable:
+        result = apply_move(move, NUDGE, log)
+    else:
+        result = f"left where it is: {move.reason}"
+    log(result)
+    return result
+
+
+def detach(log: Path, work) -> int:
+    """Fork `work` into its own session so it outlives the hook and the claude
+    process the hook is running under, and return the child's pid."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    pid = os.fork()
+    if pid:
+        return pid
+    code = 1
+    try:
+        os.setsid()
+        devnull = os.open(os.devnull, os.O_RDONLY)
+        out = os.open(str(log), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        os.dup2(devnull, 0)
+        os.dup2(out, 1)
+        os.dup2(out, 2)
+        # The hook fires as the turn ends; give Claude Code a moment to flush
+        # the limit record the plan reads from the transcript.
+        time.sleep(HOOK_SETTLE_SECONDS)
+        work()
+        code = 0
+    except SystemExit as exc:
+        print(f"failed: {exc}")
+    except Exception:
+        traceback.print_exc()
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+
+
+def run_hook(stdin, log) -> int:
+    """The StopFailure hook: rebump this session in the background and return
+    at once. Claude Code ignores the exit code, so nothing here raises."""
+    try:
+        payload = json.load(stdin)
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    skip = hook_skip_reason(payload, dict(os.environ))
+    if skip is not None:
+        log(f"rebump hook: {skip}")
+        return 0
+    pane = os.environ["HERDR_PANE_ID"]
+    lock = hook_lock_path(pane)
+    running = running_hook(lock)
+    if running is not None:
+        log(f"rebump hook: a rebump of {pane} is already running (pid {running})")
+        return 0
+    stamp = datetime.now().isoformat(timespec="seconds")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with hook_log_path().open("a", encoding="utf-8") as handle:
+        handle.write(f"\n== {stamp} {pane} {payload.get('session_id', '')}\n")
+    work = partial(rebump_session, payload, pane, dict(os.environ), print)
+    pid = detach(hook_log_path(), work)
+    lock.write_text(str(pid), encoding="utf-8")
+    log(f"rebump hook: rebumping {pane} in the background (pid {pid})")
+    return 0
 
 
 def fmt_pct(value: float | None) -> str:
@@ -846,12 +1084,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "action",
         nargs="?",
-        choices=("plan", "apply", "pick"),
+        choices=("plan", "apply", "pick", "hook"),
         default="plan",
         help="plan is read-only (default); apply performs the moves and model "
         "switches; pick prints the env prefix (CLAUDE_CONFIG_DIR=<dir>, or `env "
         "-u CLAUDE_CONFIG_DIR` for the default account, plus ANTHROPIC_MODEL "
-        "when Fable is spent) a new session should start under",
+        "when Fable is spent) a new session should start under; hook is the "
+        "Claude Code StopFailure hook and rebumps the one session it fired in, "
+        "in the background",
     )
     parser.add_argument(
         "--to",
@@ -894,6 +1134,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.action == "hook":
+        return run_hook(sys.stdin, print)
     if args.max_age is None:
         args.max_age = USAGE_MAX_AGE
     accounts, usage_note = read_usage(args.usage, args.max_age, args.timeout)

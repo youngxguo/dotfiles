@@ -245,7 +245,18 @@ class ClaudeInstallTest(unittest.TestCase):
         (repo / "claude/CLAUDE.md").write_text("# rules\n", encoding="utf-8")
         (repo / "claude/statusline-command.sh").write_text("", encoding="utf-8")
         (repo / "claude/settings.json").write_text(
-            '{"permissions": {"defaultMode": "plan"}, "statusLine": {"type": "command"}}\n',
+            json.dumps(
+                {
+                    "permissions": {"defaultMode": "plan"},
+                    "statusLine": {"type": "command"},
+                    "hooks": {
+                        "StopFailure": [
+                            {"matcher": "rate_limit", "hooks": [{"type": "command"}]}
+                        ]
+                    },
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
         return repo
@@ -292,6 +303,11 @@ class ClaudeInstallTest(unittest.TestCase):
                     secondary.get("permissions"), primary.get("permissions")
                 )
                 self.assertEqual(secondary.get("statusLine"), primary.get("statusLine"))
+                template = json.loads(
+                    (repo / "claude/settings.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(primary.get("hooks"), template["hooks"])
+                self.assertEqual(secondary.get("hooks"), template["hooks"])
 
                 skill_path = home / ".claude/skills/herdr/SKILL.md"
                 before = skill_path.stat().st_mtime_ns

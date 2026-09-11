@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -416,6 +417,73 @@ class TranscriptTest(unittest.TestCase):
             self.assertTrue((dest.parent / "sid/tool-results/x.txt").is_file())
 
 
+class HookTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.cache = Path(tmp.name)
+        for patcher in (
+            mock.patch.dict(
+                os.environ, {"XDG_CACHE_HOME": tmp.name, "HERDR_PANE_ID": "w1:p1"}
+            ),
+            mock.patch.object(rebump.shutil, "which", return_value="/bin/herdr"),
+            mock.patch.object(rebump, "detach", return_value=4242),
+        ):
+            started = patcher.start()
+            self.addCleanup(patcher.stop)
+            if isinstance(started, mock.MagicMock):
+                self.detach = started
+
+    def run_hook(self, payload):
+        lines = []
+        stdin = io.StringIO(
+            payload if isinstance(payload, str) else json.dumps(payload)
+        )
+        self.assertEqual(rebump.run_hook(stdin, lines.append), 0)
+        return "\n".join(lines)
+
+    def test_a_usage_limit_rebumps_the_hooks_own_session_in_the_background(self):
+        note = self.run_hook({"error": "rate_limit", "session_id": "abc"})
+        self.assertIn("rebumping w1:p1 in the background (pid 4242)", note)
+        log, work = self.detach.call_args.args
+        self.assertEqual(log, self.cache / "rebump/hook.log")
+        self.assertIs(work.func, rebump.rebump_session)
+        payload, pane, env = work.args[:3]
+        self.assertEqual((payload["session_id"], pane), ("abc", "w1:p1"))
+        self.assertEqual(env["HERDR_PANE_ID"], "w1:p1")
+        self.assertEqual(
+            (self.cache / "rebump/hook-w1_p1.pid").read_text(encoding="utf-8"), "4242"
+        )
+        self.assertIn("w1:p1 abc", log.read_text(encoding="utf-8"))
+
+    def test_other_api_errors_are_not_ours_to_fix(self):
+        for payload in ({"error": "overloaded"}, {}, "not json"):
+            with self.subTest(payload=payload):
+                self.assertIn("not a usage limit", self.run_hook(payload))
+        self.assertIn("no session id", self.run_hook({"error": "rate_limit"}))
+        self.detach.assert_not_called()
+
+    def test_a_session_outside_herdr_is_left_where_it_is(self):
+        with mock.patch.dict(os.environ):
+            del os.environ["HERDR_PANE_ID"]
+            self.assertIn(
+                "not in a herdr pane",
+                self.run_hook({"error": "rate_limit", "session_id": "abc"}),
+            )
+        self.detach.assert_not_called()
+
+    def test_a_rebump_already_running_for_the_pane_is_not_doubled(self):
+        payload = {"error": "rate_limit", "session_id": "abc"}
+        lock = self.cache / "rebump/hook-w1_p1.pid"
+        lock.parent.mkdir(parents=True)
+        lock.write_text(str(os.getpid()), encoding="utf-8")
+        self.assertIn("already running", self.run_hook(payload))
+        self.detach.assert_not_called()
+
+        lock.write_text("stale", encoding="utf-8")
+        self.assertIn("in the background", self.run_hook(payload))
+
+
 class PlanTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -501,6 +569,44 @@ class PlanTest(unittest.TestCase):
             f"CLAUDE_CONFIG_DIR={self.dir_of('c4')} claude --chrome --resume stuck",
         )
 
+    def hook_move(self, payload, env, **kwargs):
+        """The single-session flow: nothing may list herdr or scrape a process
+        environment, so those helpers are made to fail."""
+        with (
+            mock.patch.object(
+                rebump,
+                "pane_claude_process",
+                return_value={"pid": 7, "argv": ["claude", "--chrome"]},
+            ),
+            mock.patch.object(rebump, "claude_panes", side_effect=AssertionError),
+            mock.patch.object(rebump, "process_env", side_effect=AssertionError),
+        ):
+            session = rebump.session_from_hook(payload, "w1:p1", env)
+            return rebump.plan_move(self.accounts, session, **kwargs)
+
+    def test_the_hook_plans_its_own_session_from_the_payload(self):
+        self.add_pane("stuck", "c2", [{"type": "user"}, OPUS_TURN, LIMIT_RECORD])
+        transcript = Path(self.dir_of("c2")) / "projects/-repo/stuck.jsonl"
+        move = self.hook_move(
+            {"session_id": "stuck", "transcript_path": str(transcript), "cwd": "/repo"},
+            {"CLAUDE_CONFIG_DIR": self.dir_of("c2"), "HERDR_PANE_ID": "w1:p1"},
+        )
+        self.assertEqual((move.from_label, move.to_label), ("c2", "c4"))
+        self.assertEqual(move.transcript, str(transcript))
+        self.assertEqual(move.argv, ["claude", "--chrome"])
+        self.assertTrue(move.actionable)
+
+    def test_the_hook_finds_the_transcript_itself_when_the_payload_path_is_stale(self):
+        self.add_pane("stuck", "claude1", [{"type": "user"}, OPUS_TURN, LIMIT_RECORD])
+        move = self.hook_move(
+            {"session_id": "stuck", "transcript_path": "/nowhere/stuck.jsonl"}, {}
+        )
+        self.assertEqual(
+            move.transcript,
+            str(Path(self.dir_of("claude1")) / "projects/-repo/stuck.jsonl"),
+        )
+        self.assertEqual(move.to_label, "c4")
+
     def test_a_healthy_pane_is_left_alone(self):
         self.add_pane("fine", "c2", [{"type": "user"}, FABLE_TURN])
         (move,) = self.plan()
@@ -579,3 +685,101 @@ class PlanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApplyTest(unittest.TestCase):
+    """The relaunch is confirmed to be running the resumed session before the
+    nudge goes in, and a nudge herdr refuses is reported, not logged as done."""
+
+    def setUp(self):
+        self.move = rebump.Move(
+            pane_id="w1:p1",
+            session_id="stuck-session",
+            cwd="/repo",
+            title="",
+            status="idle",
+            from_label="c2",
+            from_dir="/c2",
+            to_label="c2",
+            to_dir="/c2",
+            reason="transcript ends with: rate limit",
+            transcript="/c2/projects/-repo/stuck-session.jsonl",
+            model="opus",
+            argv=["claude", "--chrome"],
+        )
+        self.calls = []
+        self.agent = {
+            "agent": "claude",
+            "agent_session": {"kind": "id", "value": "stuck-session"},
+        }
+        self.prompt_answer = {}
+        for patcher in (
+            mock.patch.object(rebump, "herdr", side_effect=self.fake_herdr),
+            mock.patch.object(rebump, "quit_claude", return_value=True),
+            mock.patch.object(rebump, "settle_agent", return_value="idle"),
+            mock.patch.object(rebump, "pane_screen", return_value=""),
+            mock.patch.object(
+                rebump, "wait_for", side_effect=lambda p, timeout, interval=0.5: p()
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def fake_herdr(self, *args, check=True, timeout=60):
+        self.calls.append(args)
+        if args[:2] == ("agent", "get"):
+            return {"result": {"agent": self.agent}}
+        if args[:2] == ("agent", "prompt"):
+            return self.prompt_answer
+        return {}
+
+    def apply(self):
+        return rebump.apply_move(self.move, "carry on", lambda line: None)
+
+    def prompts(self):
+        return [c[3] for c in self.calls if c[:2] == ("agent", "prompt")]
+
+    def test_the_resumed_session_is_nudged(self):
+        self.assertEqual(self.apply(), "resumed and nudged")
+        self.assertEqual(self.prompts(), ["carry on"])
+
+    def test_a_reference_that_is_not_an_id_cannot_contradict_us(self):
+        self.agent["agent_session"] = {"kind": "title", "value": "Resume session"}
+        self.assertEqual(self.apply(), "resumed and nudged")
+
+    def test_another_session_in_the_pane_is_left_alone(self):
+        self.agent["agent_session"] = {"kind": "id", "value": "fresh-session-by-hand"}
+        self.assertEqual(
+            self.apply(),
+            "failed: the pane runs session fresh-se, not stuck-se; nudge skipped",
+        )
+        self.assertEqual(self.prompts(), [])
+
+    def test_claude_exiting_again_is_a_failure(self):
+        # Detected once after the relaunch, gone by the time the session is checked.
+        answers = iter([self.agent])
+        with mock.patch.object(
+            rebump, "pane_agent", side_effect=lambda pane: next(answers, {})
+        ):
+            self.assertEqual(
+                self.apply(), "failed: claude exited again after the relaunch"
+            )
+        self.assertEqual(self.prompts(), [])
+
+    def test_a_refused_nudge_is_reported(self):
+        self.prompt_answer = {"error": {"message": "agent is not idle"}}
+        self.assertEqual(
+            self.apply(), "resumed, but the nudge failed: agent is not idle"
+        )
+
+
+class HerdrTest(unittest.TestCase):
+    def test_a_failing_exit_status_reads_as_an_error(self):
+        proc = mock.Mock(returncode=1, stdout="", stderr="no such pane")
+        with mock.patch.object(rebump.subprocess, "run", return_value=proc):
+            self.assertEqual(
+                rebump.herdr_error(rebump.herdr("agent", "get", "w1:p1", check=False)),
+                "no such pane",
+            )
+            with self.assertRaises(SystemExit):
+                rebump.herdr("agent", "get", "w1:p1")

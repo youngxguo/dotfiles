@@ -6,4 +6,6 @@ Several Claude subscriptions live side by side (`~/.claude`, `~/.claude2`,
 delegating work that starts one, use the rebump skill's `pick` to choose an
 account with headroom and start the pane with that `CLAUDE_CONFIG_DIR`. If a
 delegated claude session stops on a usage limit, rebump it rather than
-restarting it or prompting it again.
+restarting it or prompting it again; the `StopFailure` hook in
+`claude/settings.json` normally does this on its own, so check
+`~/.cache/rebump/hook.log` first.
