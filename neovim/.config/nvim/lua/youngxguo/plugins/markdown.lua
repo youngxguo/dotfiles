@@ -171,19 +171,20 @@ return {
         end)
       end
 
-      -- Octo rebuilds a buffer on reload by emptying it and writing the new
-      -- content back. Emptying the buffer collapses image.nvim's extmarks to
-      -- row 0, the rewrite pushes them past the last line, and the throwaway
-      -- insert Octo makes to drop the undo history then re-renders each image
-      -- there: screenpos() rejects the line with E966. Forget the images
-      -- before the buffer empties; the FileType replay below finds them again.
-      local OctoBuffer = require("octo.model.octo-buffer").OctoBuffer
-      local original_clear = OctoBuffer.clear
-      OctoBuffer.clear = function(self, ...)
-        for _, img in ipairs(image.get_images({ buffer = self.bufnr })) do
-          pcall(img.clear, img)
+      -- Octo rebuilds a buffer on reload by emptying it and writing the
+      -- content back, which leaves image.nvim's extmarks one row past the
+      -- last line. The next re-render then hands that row to screenpos(),
+      -- which rejects it with E966. Treat a row the buffer no longer has as
+      -- off-screen; the next document render places the image again. This
+      -- mirrors the fix proposed in 3rd/image.nvim#372, so drop it once merged.
+      local renderer = require("image/renderer")
+      local original_render = renderer.render
+      renderer.render = function(img, ...)
+        local buf = img.buffer
+        if buf and vim.api.nvim_buf_is_valid(buf) and (img.geometry.y or 0) >= vim.api.nvim_buf_line_count(buf) then
+          return false
         end
-        return original_clear(self, ...)
+        return original_render(img, ...)
       end
 
       -- Octo enters its buffer before assigning the `octo` filetype, while
