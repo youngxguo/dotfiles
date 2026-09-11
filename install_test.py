@@ -269,7 +269,7 @@ class ClaudeInstallTest(unittest.TestCase):
                 config_dirs = install.claude_config_dirs()
                 self.assertEqual(
                     [d.name for d in config_dirs],
-                    [".claude", ".claude2", ".claude3", ".claude4", ".claude5"],
+                    [".claude", ".claude2", ".claude3", ".claude4", ".claude5", ".claude6"],
                 )
                 for config_dir in config_dirs:
                     self.assertEqual(
@@ -353,7 +353,14 @@ class ClaudeSkillLinksTest(unittest.TestCase):
                 links = install.links_for("claude")
                 install.apply_links(links)
 
-            for config_dir in (".claude", ".claude2", ".claude3", ".claude4", ".claude5"):
+            for config_dir in (
+                ".claude",
+                ".claude2",
+                ".claude3",
+                ".claude4",
+                ".claude5",
+                ".claude6",
+            ):
                 link = home / config_dir / "skills/rebump"
                 self.assertTrue(link.is_symlink())
                 self.assertEqual(link.resolve(), skill.resolve())

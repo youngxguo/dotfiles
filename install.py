@@ -837,7 +837,7 @@ CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
 def claude_config_dirs():
     """claude resolves user-level CLAUDE.md, skills and settings.json relative
     to CLAUDE_CONFIG_DIR, so global config has to land in each dir."""
-    return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4, 5)]
+    return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4, 5, 6)]
 
 
 def install_claude_herdr_skill():
