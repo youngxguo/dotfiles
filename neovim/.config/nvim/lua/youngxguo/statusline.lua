@@ -107,10 +107,45 @@ local function win_width(winid)
   return vim.o.columns
 end
 
+-- codediff parks a revision's contents in an unnamed scratch buffer, and reads
+-- the other side of a diff through a codediff:// URL, so neither buffer carries
+-- a path worth showing. Its session knows which file each side is.
+local function codediff_label(bufnr, winid, name)
+  local lifecycle = package.loaded["codediff.ui.lifecycle"]
+  if lifecycle then
+    local tabpage = vim.api.nvim_win_is_valid(winid) and vim.api.nvim_win_get_tabpage(winid)
+      or vim.api.nvim_get_current_tabpage()
+    local ok, session = pcall(lifecycle.get_session, tabpage)
+    if ok and session then
+      local side
+      if bufnr == session.modified_bufnr then
+        side = session.modified
+      elseif bufnr == session.original_bufnr then
+        side = session.original
+      end
+      if side and side.relative and side.relative ~= "" then
+        return side.relative
+      end
+    end
+  end
+
+  local virtual_file = package.loaded["codediff.core.virtual_file"]
+  if virtual_file and name:match("^codediff://") then
+    local _, _, filepath = virtual_file.parse_url(name)
+    return filepath
+  end
+end
+
 local function get_file_label(bufnr, winid)
   local name = vim.api.nvim_buf_get_name(bufnr)
   local bt = vim.bo[bufnr].buftype
   local ft = vim.bo[bufnr].filetype
+  if name == "" or name:match("^codediff://") then
+    local diff = codediff_label(bufnr, winid, name)
+    if diff then
+      return diff
+    end
+  end
   if name == "" then
     if ft == "NvimTree" then
       return "Files"
@@ -216,9 +251,11 @@ local FileBlock = {
     self.modified = vim.bo[self.bufnr].modified
     self.readonly = vim.bo[self.bufnr].readonly or not vim.bo[self.bufnr].modifiable
 
-    local ext = vim.fn.fnamemodify(self.filename, ":e")
+    -- Off the label, not the buffer name: a codediff buffer has no name, so the
+    -- name would only ever yield the default icon.
+    local ext = vim.fn.fnamemodify(self.file_label, ":e")
     if has_devicons then
-      self.icon, self.icon_color = devicons.get_icon_color(self.filename, ext, { default = true })
+      self.icon, self.icon_color = devicons.get_icon_color(self.file_label, ext, { default = true })
     end
   end,
   {
