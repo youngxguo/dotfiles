@@ -76,20 +76,22 @@ show_agent_labels_on_pane_borders = true
 # PR token for agent rows, cannot wrap a row (hence $title1..3) and fixes a
 # token's color here (hence one $pr_<state> token per PR state).
 [ui.sidebar.agents]
-# Bold titles over dim repo/branch rows keep neighbouring five-line entries
-# from blurring together.
+# Bold titles keep neighbouring five-line entries from blurring together. The
+# branch is the row that says which piece of work a pane is on, so it stays
+# undimmed; the repo folder is the least interesting row and sits dim at the
+# bottom.
 rows = [
   ["state_icon", { token = "$num", bold = true, dim = false }, { token = "$title1", bold = true, dim = false }],
   [{ token = "$title2", bold = true, dim = false }],
   [{ token = "$title3", bold = true, dim = false }],
-  [{ token = "$repo", dim = true }],
   [
-    { token = "$branch", dim = true },
+    { token = "$branch", dim = false },
     { token = "$pr_open", dim = false, fg = "#3fb950" },
     { token = "$pr_draft", dim = false, fg = "#8b949e" },
     { token = "$pr_merged", dim = false, fg = "#a371f7" },
     { token = "$pr_closed", dim = false, fg = "#f85149" },
   ],
+  [{ token = "$repo", dim = true }],
 ]
 
 [experimental]
