@@ -22,7 +22,7 @@ from pathlib import Path
 HOME = Path.home()
 DEFAULT_CONFIG_DIR = HOME / ".claude"
 SESSION_FULL_PERCENT = 90.0
-PICK_MAX_AGE = 300
+USAGE_MAX_AGE = 300
 CUSAGE_TIMEOUT = 240
 NUDGE = (
     "This session hit a Claude usage limit and was resumed on a subscription or "
@@ -170,19 +170,39 @@ def usage_cache_path() -> Path:
     return Path(base) / "rebump" / "usage.json"
 
 
+def report_readable(report: dict) -> bool:
+    """Whether the report says anything usable. The usage API rate-limits a
+    caller that asks twice in quick succession, and every account then comes
+    back with an error - which reads as `spent` and would quietly turn a plan
+    into `no account has headroom`."""
+    accounts = report.get("accounts") or []
+    return any(not entry.get("error") for entry in accounts)
+
+
+def read_cache(cache: Path) -> tuple[dict | None, float]:
+    try:
+        return json.loads(cache.read_text(encoding="utf-8")), cache.stat().st_mtime
+    except (OSError, ValueError):
+        return None, 0.0
+
+
 def load_usage(usage_file: str | None, max_age: int, timeout: int) -> dict:
-    """cusage takes about half a minute, so a coordinator starting several
-    agents in a row reuses the last report while it is younger than max_age."""
+    """Every action reuses the last report while it is younger than max_age, so
+    a plan followed by an apply - or several agents starting in a row - asks
+    the usage API once rather than tripping its rate limit."""
     if usage_file:
         return json.loads(Path(usage_file).read_text(encoding="utf-8"))
     cache = usage_cache_path()
-    if max_age > 0:
-        try:
-            if time.time() - cache.stat().st_mtime < max_age:
-                return json.loads(cache.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            pass
+    cached, cached_at = read_cache(cache)
+    if cached is not None and max_age > 0 and time.time() - cached_at < max_age:
+        return cached
     report = run_cusage(timeout)
+    if not report_readable(report):
+        # A rate-limited read tells us nothing; the last real one still does.
+        if cached is not None and report_readable(cached):
+            cached["stale_since"] = cached_at
+            return cached
+        return report
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(report), encoding="utf-8")
@@ -217,13 +237,31 @@ def accounts_from_usage(report: dict) -> list[Account]:
 
 def read_accounts(
     usage_file: str | None = None,
-    max_age: int = PICK_MAX_AGE,
+    max_age: int = USAGE_MAX_AGE,
     timeout: int = CUSAGE_TIMEOUT,
 ) -> list[Account]:
-    accounts = accounts_from_usage(load_usage(usage_file, max_age, timeout))
+    return read_usage(usage_file, max_age, timeout)[0]
+
+
+def read_usage(
+    usage_file: str | None = None,
+    max_age: int = USAGE_MAX_AGE,
+    timeout: int = CUSAGE_TIMEOUT,
+) -> tuple[list[Account], str | None]:
+    """The accounts, and a note when they did not come from a fresh read."""
+    report = load_usage(usage_file, max_age, timeout)
+    accounts = accounts_from_usage(report)
     if not accounts:
         raise SystemExit("cusage reported no accounts")
-    return accounts
+    note = None
+    stale_since = report.get("stale_since")
+    if stale_since:
+        age = max(0, int(time.time() - stale_since))
+        note = (
+            f"the usage API would not answer; showing the last reading, "
+            f"{age // 60}m{age % 60:02d}s old"
+        )
+    return accounts, note
 
 
 def resolve_account(accounts: list[Account], name: str) -> Account:
@@ -849,7 +887,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-age",
         type=int,
         help="reuse the last cusage report if it is younger than this many "
-        f"seconds (default: {PICK_MAX_AGE} for pick, 0 otherwise)",
+        f"seconds (default: {USAGE_MAX_AGE}; 0 forces a fresh read)",
     )
     parser.add_argument(
         "--timeout", type=int, default=CUSAGE_TIMEOUT, help="cusage timeout"
@@ -857,8 +895,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.max_age is None:
-        args.max_age = PICK_MAX_AGE if args.action == "pick" else 0
-    accounts = read_accounts(args.usage, args.max_age, args.timeout)
+        args.max_age = USAGE_MAX_AGE
+    accounts, usage_note = read_usage(args.usage, args.max_age, args.timeout)
 
     if args.action == "pick":
         account, model, prefix = launch_choice(accounts, args.to, args.fallback_model)
@@ -875,6 +913,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             print(render_accounts(accounts), file=sys.stderr)
+            if usage_note:
+                print(f"  ! {usage_note}", file=sys.stderr)
             note = f" on {model} (its fable weekly cap is spent)" if model else ""
             print(f"  -> {account.label}{note}", file=sys.stderr)
             print(prefix)
@@ -905,6 +945,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print(render_accounts(accounts))
+        if usage_note:
+            print(f"  ! {usage_note}")
         print()
         print(render_panes(moves))
 
