@@ -14,6 +14,21 @@ else:
 print(display)
 ")
 
+# Which subscription the session is on. Every account runs this one statusline
+# out of ~/.claude, so the account cannot come from where the script lives, and
+# CLAUDE_CONFIG_DIR is unset on the default one; the transcript sits under the
+# config dir actually in use, so it answers for all four.
+transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
+account=$(TRANSCRIPT="$transcript" python3 -c "
+import os, re
+transcript = os.environ['TRANSCRIPT']
+config_dir = transcript.split('/projects/')[0] if '/projects/' in transcript else ''
+config_dir = config_dir or os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR') or '~/.claude')
+name = os.path.basename(config_dir.rstrip('/'))
+match = re.fullmatch(r'\.?claude(\d*)', name)
+print('c' + (match.group(1) or '1') if match else name)
+")
+
 CLAUDE_DIR="$HOME/.claude"
 TRACKING_DIR="$CLAUDE_DIR/cost-tracking"
 mkdir -p "$TRACKING_DIR"
@@ -90,6 +105,16 @@ print(color + bar + reset + overflow, end='')
 "
 }
 
+# One colour per account, so which subscription a window is on reads at a
+# glance rather than by spelling out the label.
+case $account in
+  c1) account_color=34 ;;
+  c2) account_color=36 ;;
+  c3) account_color=33 ;;
+  c4) account_color=32 ;;
+  *) account_color=37 ;;
+esac
+printf "\033[01;%sm%s\033[00m | " "$account_color" "$account"
 printf "\033[01;35m%s\033[00m" "$model"
 
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
@@ -153,7 +178,6 @@ if [ -n "$HERDR_PANE_ID" ]; then
   # herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
   # to session.json next to the socket. Claude Code writes an ai-title transcript
   # line when it titles a session and a custom-title line for /rename or --name.
-  transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
   herdr_session=${HERDR_SOCKET_PATH:+${HERDR_SOCKET_PATH%/*}/session.json}
   : "${herdr_session:=$HOME/.config/herdr/session.json}"
   # `herdr agent list` returns agents in workspace, tab, pane order, the
