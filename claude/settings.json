@@ -24,14 +24,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.tmux-ai-state.sh thinking"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "~/.claude/hooks/prompt-timer.sh start"
           }
         ]
@@ -42,28 +34,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.tmux-ai-state.sh idle"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "~/.claude/hooks/prompt-timer.sh clear"
           }
         ]
       }
     ],
     "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.tmux-ai-state.sh clear"
-          }
-        ]
-      },
       {
         "hooks": [
           {

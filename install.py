@@ -761,76 +761,6 @@ def install_vscode():
     apply_links(links_for("vscode"))
 
 
-def ensure_codex_hooks():
-    fragment_path = REPO_ROOT / "codex/ai-state-hooks.json"
-    try:
-        fragment = json.loads(fragment_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        print(f"skipping codex ai-state hooks: unable to read {fragment_path}: {exc}")
-        return
-    if not isinstance(fragment, dict):
-        print(f"skipping codex ai-state hooks: {fragment_path} is not a JSON object")
-        return
-    wanted = fragment.get("hooks", {})
-    if not wanted:
-        return
-    if not isinstance(wanted, dict):
-        print(
-            f"skipping codex ai-state hooks: {fragment_path} hooks is not a JSON object"
-        )
-        return
-
-    target = HOME / ".codex/hooks.json"
-    if target.exists():
-        try:
-            settings = json.loads(target.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            print(f"skipping codex ai-state hooks: {target} is not valid JSON")
-            return
-        if not isinstance(settings, dict):
-            print(f"skipping codex ai-state hooks: {target} is not a JSON object")
-            return
-    else:
-        settings = {}
-
-    hooks = settings.setdefault("hooks", {})
-    if not isinstance(hooks, dict):
-        print(f"skipping codex ai-state hooks: {target} hooks is not a JSON object")
-        return
-
-    changed = False
-    for event, groups in wanted.items():
-        existing = hooks.get(event)
-        if existing is None:
-            existing = hooks[event] = []
-        elif not isinstance(existing, list):
-            print(f"skipping codex hook event {event}: existing value is not a list")
-            continue
-        present = {
-            hook.get("command")
-            for group in existing
-            if isinstance(group, dict)
-            for hook in group.get("hooks", [])
-            if isinstance(hook, dict)
-        }
-        for group in groups:
-            commands = {
-                h.get("command") for h in group.get("hooks", []) if isinstance(h, dict)
-            }
-            if commands & present:
-                continue
-            existing.append(group)
-            present |= commands
-            changed = True
-
-    if not changed:
-        print("codex ai-state hooks already present")
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    print(f"merged codex ai-state hooks into {target}")
-
-
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
 
 
@@ -1016,7 +946,6 @@ def install_codex():
     apply_links(links_for("codex"))
 
     ensure_codex_local_config()
-    ensure_codex_hooks()
 
     pet_links = links_for("codex-pets")
     if pet_links:
