@@ -1,6 +1,6 @@
 ---
 name: rebump
-description: Check every Claude subscription's usage (cusage across ~/.claude and the c2/c3/c4 config dirs) and get rate-limited Claude Code sessions running in herdr going again - on a subscription with headroom, or on another model when the cap binds only the one they run - resuming each one and nudging it to carry on. Also picks the account and model a new Claude Code agent should start on. Use when a session hit its session, 5-hour, weekly or per-model usage limit, when asked to rebump, rebalance or move sessions to another sub, account or model, when asked which claude account has headroom, and before starting any claude agent in a herdr pane.
+description: Check every Claude subscription's usage (cusage across ~/.claude and the c2/c3/c4/c5 config dirs) and get rate-limited Claude Code sessions running in herdr going again - on a subscription with headroom, or on another model when the cap binds only the one they run - resuming each one and nudging it to carry on. Also picks the account and model a new Claude Code agent should start on. Use when a session hit its session, 5-hour, weekly or per-model usage limit, when asked to rebump, rebalance or move sessions to another sub, account or model, when asked which claude account has headroom, and before starting any claude agent in a herdr pane.
 allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/rebump.py *)
 ---
 

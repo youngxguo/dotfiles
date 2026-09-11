@@ -112,6 +112,7 @@ case $account in
   c2) account_color=36 ;;
   c3) account_color=33 ;;
   c4) account_color=32 ;;
+  c5) account_color=31 ;;
   *) account_color=37 ;;
 esac
 printf "\033[01;%sm%s\033[00m | " "$account_color" "$account"

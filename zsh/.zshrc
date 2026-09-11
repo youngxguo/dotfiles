@@ -88,6 +88,7 @@ alias c="claude --chrome"
 alias c2="CLAUDE_CONFIG_DIR=~/.claude2 claude --chrome"
 alias c3="CLAUDE_CONFIG_DIR=~/.claude3 claude --chrome"
 alias c4="CLAUDE_CONFIG_DIR=~/.claude4 claude --chrome"
+alias c5="CLAUDE_CONFIG_DIR=~/.claude5 claude --chrome"
 
 if [[ -n ${TMUX_PANE:-} ]]; then
   autoload -Uz add-zsh-hook
