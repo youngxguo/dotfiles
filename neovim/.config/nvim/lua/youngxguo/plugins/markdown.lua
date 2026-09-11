@@ -171,6 +171,21 @@ return {
         end)
       end
 
+      -- Octo rebuilds a buffer on reload by emptying it and writing the new
+      -- content back. Emptying the buffer collapses image.nvim's extmarks to
+      -- row 0, the rewrite pushes them past the last line, and the throwaway
+      -- insert Octo makes to drop the undo history then re-renders each image
+      -- there: screenpos() rejects the line with E966. Forget the images
+      -- before the buffer empties; the FileType replay below finds them again.
+      local OctoBuffer = require("octo.model.octo-buffer").OctoBuffer
+      local original_clear = OctoBuffer.clear
+      OctoBuffer.clear = function(self, ...)
+        for _, img in ipairs(image.get_images({ buffer = self.bufnr })) do
+          pcall(img.clear, img)
+        end
+        return original_clear(self, ...)
+      end
+
       -- Octo enters its buffer before assigning the `octo` filetype, while
       -- image.nvim discovers Markdown documents on BufWinEnter. Replay that
       -- event after Octo has populated the issue/PR body and comments.
