@@ -43,6 +43,10 @@ MODEL_FLAG = "--model"
 MODEL_ENV = "ANTHROPIC_MODEL"
 TAIL_BYTES = 262144
 SESSION_CONFIRM_SECONDS = 15
+NUDGE_RETRY_SECONDS = 20
+# Claude Code's own wait for the reset, which it re-arms when it resumes a
+# transcript that ends on a limit; "esc or type to cancel".
+AUTO_CONTINUE_MARK = "continuing automatically"
 
 
 @dataclass
@@ -826,11 +830,24 @@ def dismiss_startup_dialogs(pane_id: str, log) -> bool:
 
 def settle_agent(pane_id: str, log) -> str:
     """Wait for a freshly launched agent to come to rest, answering the
-    first-run dialogs a config dir shows for a folder it has never opened."""
+    first-run dialogs a config dir shows for a folder it has never opened.
+    Only idle and blocked count: herdr keeps the record of the claude that
+    just quit, marked `done`, until it detects the new one, and a plain wait
+    would return that at once."""
 
     def wait() -> dict:
         return herdr(
-            "agent", "wait", pane_id, "--timeout", "90000", check=False, timeout=120
+            "agent",
+            "wait",
+            pane_id,
+            "--until",
+            "idle",
+            "--until",
+            "blocked",
+            "--timeout",
+            "90000",
+            check=False,
+            timeout=120,
         )
 
     settled = wait()
@@ -851,6 +868,26 @@ def quit_claude(move: Move, log) -> bool:
     return False
 
 
+def relaunched(move: Move) -> bool:
+    """Whether a claude other than the one that quit runs in the pane. herdr's
+    agent record cannot tell: it keeps the old process - same label, same
+    session id, status `done` - until it detects the new one."""
+    proc = pane_claude_process(move.pane_id)
+    return proc is not None and proc.get("pid") != move.pid
+
+
+def nudge_agent(pane_id: str, nudge: str) -> str | None:
+    """Prompt the resumed session, retrying while herdr refuses: right after
+    a relaunch it can still hold the record of the process that quit and
+    answer that the agent is no longer the pane's foreground process."""
+    deadline = time.monotonic() + NUDGE_RETRY_SECONDS
+    while True:
+        error = herdr_error(herdr("agent", "prompt", pane_id, nudge, check=False))
+        if error is None or time.monotonic() >= deadline:
+            return error
+        time.sleep(1)
+
+
 def apply_move(move: Move, nudge: str | None, log) -> str:
     log(f"{move.pane_id} {move.session_id[:8]} {move.from_label}: {move.change}")
     if move.to_dir != move.from_dir:
@@ -863,10 +900,8 @@ def apply_move(move: Move, nudge: str | None, log) -> str:
     herdr("pane", "run", move.pane_id, command)
     log(f"  ran: {command}")
 
-    if not wait_for(
-        lambda: pane_agent(move.pane_id).get("agent") == "claude", timeout=45
-    ):
-        return "failed: herdr did not detect claude after the relaunch"
+    if not wait_for(lambda: relaunched(move), timeout=45):
+        return "failed: claude did not come back after the relaunch"
     status = settle_agent(move.pane_id, log)
     log(f"  agent {status}")
     # The relaunch can be cut short - by someone quitting and restarting
@@ -883,10 +918,17 @@ def apply_move(move: Move, nudge: str | None, log) -> str:
             f"failed: the pane runs session {running[:8] if running else 'unknown'}, "
             f"not {move.session_id[:8]}; nudge skipped"
         )
-    if status == "blocked" or "Enter to confirm" in pane_screen(move.pane_id):
+    screen = pane_screen(move.pane_id)
+    if status == "blocked" or "Enter to confirm" in screen:
         return "resumed, but claude is waiting on a dialog; nudge skipped"
+    if AUTO_CONTINUE_MARK in screen:
+        # The resumed session would otherwise sit until the old account's
+        # window resets, headroom or not; typing cancels it too, but the
+        # nudge may be empty or refused.
+        herdr("pane", "send-keys", move.pane_id, "esc", check=False)
+        log("  cancelled claude's own wait for the old account's reset")
     if nudge:
-        error = herdr_error(herdr("agent", "prompt", move.pane_id, nudge, check=False))
+        error = nudge_agent(move.pane_id, nudge)
         if error:
             return f"resumed, but the nudge failed: {error}"
         log("  nudged")
@@ -924,6 +966,31 @@ def hook_log_path() -> Path:
     return usage_cache_path().parent / "hook.log"
 
 
+def hook_log_write(text: str) -> None:
+    path = hook_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def notify(move: Move, result: str) -> None:
+    """Show the outcome in herdr: the pane itself only shows the resumed
+    session, and a hook that gave up shows nothing at all."""
+    fine = result.startswith("resumed and nudged") or result == "resumed"
+    title = f"rebump {move.pane_id}: {move.change or 'left where it is'}"
+    body = result if fine else f"{result}\nsee {hook_log_path()}"
+    herdr(
+        "notification",
+        "show",
+        title,
+        "--body",
+        body,
+        "--sound",
+        "none" if fine else "request",
+        check=False,
+    )
+
+
 def pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -957,6 +1024,7 @@ def rebump_session(payload: dict, pane: str, env: dict[str, str], log) -> str:
     else:
         result = f"left where it is: {move.reason}"
     log(result)
+    notify(move, result)
     return result
 
 
@@ -999,20 +1067,27 @@ def run_hook(stdin, log) -> int:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
+    stamp = datetime.now().isoformat(timespec="seconds")
+    pane = os.environ.get("HERDR_PANE_ID", "")
+    session_id = payload.get("session_id", "")
     skip = hook_skip_reason(payload, dict(os.environ))
     if skip is not None:
+        # Claude Code swallows what a hook prints, so the log is the only
+        # place a skipped rebump can be seen afterwards.
+        hook_log_write(f"\n== {stamp} {pane} {session_id} skipped: {skip}\n")
         log(f"rebump hook: {skip}")
         return 0
-    pane = os.environ["HERDR_PANE_ID"]
     lock = hook_lock_path(pane)
     running = running_hook(lock)
     if running is not None:
+        hook_log_write(
+            f"\n== {stamp} {pane} {session_id} skipped: a rebump is already "
+            f"running (pid {running})\n"
+        )
         log(f"rebump hook: a rebump of {pane} is already running (pid {running})")
         return 0
-    stamp = datetime.now().isoformat(timespec="seconds")
     lock.parent.mkdir(parents=True, exist_ok=True)
-    with hook_log_path().open("a", encoding="utf-8") as handle:
-        handle.write(f"\n== {stamp} {pane} {payload.get('session_id', '')}\n")
+    hook_log_write(f"\n== {stamp} {pane} {session_id}\n")
     work = partial(rebump_session, payload, pane, dict(os.environ), print)
     pid = detach(hook_log_path(), work)
     lock.write_text(str(pid), encoding="utf-8")

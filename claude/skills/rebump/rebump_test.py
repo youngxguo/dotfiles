@@ -463,6 +463,12 @@ class HookTest(unittest.TestCase):
         self.assertIn("no session id", self.run_hook({"error": "rate_limit"}))
         self.detach.assert_not_called()
 
+    def test_a_skipped_rebump_is_still_written_to_the_log(self):
+        # Claude Code swallows what the hook prints; the log is what is left.
+        self.run_hook({"error": "overloaded", "session_id": "abc"})
+        log = (self.cache / "rebump/hook.log").read_text(encoding="utf-8")
+        self.assertIn("w1:p1 abc skipped: error is 'overloaded'", log)
+
     def test_a_session_outside_herdr_is_left_where_it_is(self):
         with mock.patch.dict(os.environ):
             del os.environ["HERDR_PANE_ID"]
@@ -706,18 +712,27 @@ class ApplyTest(unittest.TestCase):
             transcript="/c2/projects/-repo/stuck-session.jsonl",
             model="opus",
             argv=["claude", "--chrome"],
+            pid=1,
         )
         self.calls = []
         self.agent = {
             "agent": "claude",
             "agent_session": {"kind": "id", "value": "stuck-session"},
         }
-        self.prompt_answer = {}
+        self.process = {"pid": 2, "argv": ["claude", "--chrome"]}
+        self.prompt_answers = [{}]
+        self.screen = ""
         for patcher in (
             mock.patch.object(rebump, "herdr", side_effect=self.fake_herdr),
             mock.patch.object(rebump, "quit_claude", return_value=True),
             mock.patch.object(rebump, "settle_agent", return_value="idle"),
-            mock.patch.object(rebump, "pane_screen", return_value=""),
+            mock.patch.object(
+                rebump, "pane_claude_process", side_effect=lambda pane: self.process
+            ),
+            mock.patch.object(
+                rebump, "pane_screen", side_effect=lambda pane: self.screen
+            ),
+            # One try per wait, so a predicate that fails once fails the wait.
             mock.patch.object(
                 rebump, "wait_for", side_effect=lambda p, timeout, interval=0.5: p()
             ),
@@ -730,7 +745,11 @@ class ApplyTest(unittest.TestCase):
         if args[:2] == ("agent", "get"):
             return {"result": {"agent": self.agent}}
         if args[:2] == ("agent", "prompt"):
-            return self.prompt_answer
+            return (
+                self.prompt_answers.pop(0)
+                if len(self.prompt_answers) > 1
+                else self.prompt_answers[0]
+            )
         return {}
 
     def apply(self):
@@ -756,21 +775,129 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [])
 
     def test_claude_exiting_again_is_a_failure(self):
-        # Detected once after the relaunch, gone by the time the session is checked.
-        answers = iter([self.agent])
-        with mock.patch.object(
-            rebump, "pane_agent", side_effect=lambda pane: next(answers, {})
-        ):
+        # The process came back after the relaunch, but herdr has no agent in
+        # the pane by the time the session is checked.
+        with mock.patch.object(rebump, "pane_agent", return_value={}):
             self.assertEqual(
                 self.apply(), "failed: claude exited again after the relaunch"
             )
         self.assertEqual(self.prompts(), [])
 
     def test_a_refused_nudge_is_reported(self):
-        self.prompt_answer = {"error": {"message": "agent is not idle"}}
+        self.prompt_answers = [{"error": {"message": "agent is not idle"}}]
+        with (
+            mock.patch.object(rebump.time, "sleep"),
+            mock.patch.object(rebump.time, "monotonic", side_effect=[0, 1, 99]),
+        ):
+            self.assertEqual(
+                self.apply(), "resumed, but the nudge failed: agent is not idle"
+            )
+        self.assertEqual(self.prompts(), ["carry on"] * 2)
+
+    def test_herdrs_record_of_the_quit_claude_is_not_taken_for_the_relaunch(self):
+        # herdr keeps the old agent - same label, same session id - as `done`
+        # until it sees the new process; only a new pid means claude is back.
+        self.process = {"pid": 1, "argv": ["claude", "--chrome"]}
         self.assertEqual(
-            self.apply(), "resumed, but the nudge failed: agent is not idle"
+            self.apply(), "failed: claude did not come back after the relaunch"
         )
+        self.assertEqual(self.prompts(), [])
+        self.process = None
+        self.assertEqual(
+            self.apply(), "failed: claude did not come back after the relaunch"
+        )
+
+    def test_the_nudge_is_retried_while_herdr_catches_up(self):
+        stale = {
+            "error": {"message": "agent w1:p1 is no longer the pane foreground process"}
+        }
+        self.prompt_answers = [stale, stale, {}]
+        with mock.patch.object(rebump.time, "sleep"):
+            self.assertEqual(self.apply(), "resumed and nudged")
+        self.assertEqual(self.prompts(), ["carry on"] * 3)
+
+    def test_claudes_own_wait_for_the_old_reset_is_cancelled(self):
+        esc = ("pane", "send-keys", "w1:p1", "esc")
+        self.screen = "Usage limit reached · continuing automatically at 5:50pm"
+        self.assertEqual(
+            rebump.apply_move(self.move, None, lambda line: None), "resumed"
+        )
+        self.assertIn(esc, self.calls)
+        self.screen, self.calls = "", []
+        self.apply()
+        self.assertNotIn(esc, self.calls)
+
+
+class SettleTest(unittest.TestCase):
+    def test_only_a_resting_agent_counts_as_settled(self):
+        calls = []
+
+        def fake_herdr(*args, check=True, timeout=60):
+            calls.append(args)
+            return {"result": {"agent": {"agent_status": "idle"}}}
+
+        with (
+            mock.patch.object(rebump, "herdr", side_effect=fake_herdr),
+            mock.patch.object(rebump, "dismiss_startup_dialogs", return_value=False),
+        ):
+            self.assertEqual(rebump.settle_agent("w1:p1", lambda line: None), "idle")
+        (wait,) = calls
+        self.assertEqual(wait[:3], ("agent", "wait", "w1:p1"))
+        # `done` is what herdr says of the claude that just quit; it must not
+        # end the wait for the one that replaced it.
+        self.assertEqual(
+            [wait[i + 1] for i, a in enumerate(wait) if a == "--until"],
+            ["idle", "blocked"],
+        )
+
+
+class NotifyTest(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+        patcher = mock.patch.object(
+            rebump, "herdr", side_effect=lambda *a, **k: self.calls.append(a) or {}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.move = rebump.Move(
+            pane_id="w1:p1",
+            session_id="stuck-session",
+            cwd="/repo",
+            title="",
+            status="idle",
+            from_label="c5",
+            from_dir="/c5",
+            to_label="c4",
+            to_dir="/c4",
+            reason="transcript ends with: rate limit",
+            transcript="/c5/projects/-repo/stuck-session.jsonl",
+        )
+
+    def shown(self):
+        (call,) = self.calls
+        self.assertEqual(call[:2], ("notification", "show"))
+        opts = dict(zip(call[3::2], call[4::2]))
+        return call[2], opts["--body"], opts["--sound"]
+
+    def test_a_clean_rebump_is_announced_quietly(self):
+        rebump.notify(self.move, "resumed and nudged")
+        self.assertEqual(
+            self.shown(), ("rebump w1:p1: move to c4", "resumed and nudged", "none")
+        )
+
+    def test_anything_short_of_that_points_at_the_log(self):
+        with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": "/cache"}):
+            rebump.notify(self.move, "resumed, but the nudge failed: agent is not idle")
+        title, body, sound = self.shown()
+        self.assertEqual(sound, "request")
+        self.assertIn("nudge failed", body)
+        self.assertIn("/cache/rebump/hook.log", body)
+
+    def test_a_session_left_in_place_says_so(self):
+        self.move.to_dir = self.move.to_label = None
+        rebump.notify(self.move, "left where it is: no account has headroom")
+        title, body, sound = self.shown()
+        self.assertEqual((title, sound), ("rebump w1:p1: left where it is", "request"))
 
 
 class HerdrTest(unittest.TestCase):

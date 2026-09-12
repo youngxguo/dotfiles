@@ -128,11 +128,15 @@ and returns at once. That flow builds the session from the hook payload
 the pane's claude command line, and then does exactly what step 3 does for
 that one pane - or nothing when no account has headroom, which leaves Claude
 Code's own wait-for-reset in place. It never lists or touches other panes.
-Each run appends to `~/.cache/rebump/hook.log` (`XDG_CACHE_HOME` respected);
-a `hook-<pane>.pid` beside it stops a second limit hit from starting a second
-rebump while one is still running. Outside herdr, or for any other API error,
-the hook does nothing. Sessions started before the hook was added do not have
-it: Claude Code reads hooks at startup.
+Each run appends to `~/.cache/rebump/hook.log` (`XDG_CACHE_HOME` respected),
+including the runs it skipped and why; a `hook-<pane>.pid` beside it stops a
+second limit hit from starting a second rebump while one is still running.
+When it is done it shows a herdr notification with the outcome, silent for a
+clean resume and with a sound (and the log path) for anything less, so a
+session that stayed put or was resumed without its nudge does not go
+unnoticed. Outside herdr, or for any other API error, the hook does nothing.
+Sessions started before the hook was added do not have it: Claude Code reads
+hooks at startup.
 
 The rebump takes 20-60 seconds and works the pane from outside, so leave the
 pane alone once the limit message shows. Quitting claude or starting it again
@@ -141,6 +145,11 @@ relaunch gets cut short, and the fresh session started by hand ends up with
 whatever was pasted next as its first prompt. The hook notices this (the
 pane's session id no longer matches) and logs it as a failure instead of
 nudging the wrong session.
+
+After the relaunch the script waits for a claude with a new pid (herdr keeps
+the quit one on record as `done` for a moment), retries the nudge while herdr
+catches up, and presses esc on Claude Code's own "continuing automatically"
+wait, which a resumed transcript re-arms for the old account's reset.
 
 ## Rules
 
