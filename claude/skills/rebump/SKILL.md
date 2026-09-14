@@ -93,10 +93,15 @@ accounts table goes to stderr) and exits 1 when no account has headroom; stop
 and tell the user in that case instead of launching anyway. Headroom means the
 5-hour window is under 90% and the weekly cap is not blocked; a spent Fable
 weekly cap does not disqualify an account, it only decides the model. Fable is
-the model we want running, and its weekly cap cannot be waited out like a
-5-hour window, so among usable accounts it prefers the most Fable headroom,
-then the emptiest 5-hour window. `--to c3` insists on a named account and fails
-if it is spent. `pick` reuses a cusage report younger than five minutes, so
+the model we want running, so accounts with Fable headroom come first. Among
+them it picks the one whose Fable week resets soonest, not the emptiest:
+weekly quota is lost at the reset, while quota on an account that resets later
+can still serve work until then, so the emptiest account is the reserve. An
+account whose 5-hour window is over 80% ranks after the open ones, by when
+that window resets, so a new session is not bumped straight away. Accounts
+with a spent Fable cap come last, soonest weekly reset first. Ties break on
+the emptiest 5-hour window. `--to c3` insists on a named account and fails if
+it is spent. `pick` reuses a cusage report younger than five minutes, so
 starting several agents in a row only pays for cusage once; `--max-age 0`
 forces a fresh read.
 
