@@ -28,6 +28,9 @@ from pathlib import Path
 HOME = Path.home()
 DEFAULT_CONFIG_DIR = HOME / ".claude"
 SESSION_FULL_PERCENT = 90.0
+# A 5-hour window this full binds within the hour on a busy session, so a new
+# session prefers an account with an open window over one that will bump it.
+SESSION_CROWDED_PERCENT = 80.0
 USAGE_MAX_AGE = 300
 CUSAGE_TIMEOUT = 240
 NUDGE = (
@@ -297,12 +300,46 @@ def resolve_account(accounts: list[Account], name: str) -> Account:
     )
 
 
+def reset_epoch(iso: str | None) -> float:
+    """When a limit window resets, as a timestamp; a reset cusage does not
+    report sorts after every known one."""
+    if not iso:
+        return float("inf")
+    try:
+        return datetime.fromisoformat(iso).timestamp()
+    except ValueError:
+        return float("inf")
+
+
+def target_rank(account: Account) -> tuple:
+    """Weekly quota is perishable: whatever is unspent when an account's week
+    resets is lost, while the same quota on an account that resets later can
+    still serve work until then. So the account whose quota expires soonest
+    is the one to spend first, and the emptiest account is the reserve. Fable
+    is the model we want running, so Fable headroom ranks ahead of a spent
+    Fable cap however the resets fall, and an account whose 5-hour window is
+    about to bind ranks after the open ones, soonest window reset first, so a
+    new session is not bumped straight away. Ties break on the emptiest
+    5-hour window, which is the only thing left that changes anything: it
+    keeps the session on its account longer."""
+    if account.fable_spent:
+        tier, resets = 2, account.week_resets
+    elif (account.session_used or 0.0) >= SESSION_CROWDED_PERCENT:
+        tier, resets = 1, account.session_resets
+    else:
+        tier, resets = 0, account.fable_resets
+    return (
+        tier,
+        reset_epoch(resets),
+        account.session_used or 0.0,
+        account.fable_used or 0.0,
+    )
+
+
 def choose_target(accounts: list[Account], exclude: str = "") -> Account | None:
-    """Fable is the model we want to run, and its weekly cap cannot be waited
-    out the way a 5-hour window can, so Fable headroom ranks first; an account
-    whose Fable cap is spent still qualifies, on the fallback model."""
+    """The usable account whose quota expires soonest; see `target_rank`."""
     candidates = [a for a in accounts if a.usable and a.config_dir != exclude]
-    candidates.sort(key=lambda a: (a.fable_used or 0.0, a.session_used or 0.0))
+    candidates.sort(key=target_rank)
     return candidates[0] if candidates else None
 
 

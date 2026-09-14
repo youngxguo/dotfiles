@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -99,6 +100,10 @@ OPUS_TURN = {
 }
 
 
+def resets_in(hours):
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+
+
 def write_jsonl(path, records):
     path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
 
@@ -117,16 +122,46 @@ class AccountTest(unittest.TestCase):
         self.assertEqual(self.accounts[0].session_used, 100.0)
         self.assertEqual(self.accounts[0].fable_used, 75.0)
 
-    def test_target_has_the_most_fable_headroom_and_is_not_blocked(self):
+    def test_target_is_the_emptiest_when_no_reset_is_known(self):
         target = rebump.choose_target(
             self.accounts, exclude=self.accounts[0].config_dir
         )
         self.assertEqual(target.label, "c4")
 
-    def test_fable_headroom_outranks_the_session_window(self):
+    def test_target_is_the_account_whose_fable_week_resets_soonest(self):
+        c2, c4 = self.accounts[1], self.accounts[3]
+        c2.fable_resets, c4.fable_resets = resets_in(48), resets_in(120)
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
+        c2.fable_resets, c4.fable_resets = resets_in(120), resets_in(48)
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
+
+    def test_a_known_reset_ranks_ahead_of_an_unknown_one(self):
+        self.accounts[1].fable_resets = resets_in(150)
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
+
+    def test_equal_resets_break_on_the_emptiest_session_window(self):
         c2, c4 = self.accounts[1], self.accounts[3]
         c2.session_used, c2.fable_used = 70.0, 20.0
         c4.session_used, c4.fable_used = 10.0, 60.0
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
+
+    def test_crowded_session_window_ranks_after_open_ones(self):
+        c2, c4 = self.accounts[1], self.accounts[3]
+        c2.fable_resets, c4.fable_resets = resets_in(48), resets_in(120)
+        c2.session_used = 85.0
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
+
+    def test_crowded_windows_rank_by_their_own_reset(self):
+        c2, c4 = self.accounts[1], self.accounts[3]
+        c2.fable_resets, c4.fable_resets = resets_in(48), resets_in(120)
+        c2.session_used, c4.session_used = 85.0, 88.0
+        c2.session_resets, c4.session_resets = resets_in(4), resets_in(0.25)
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
+
+    def test_spent_fable_cap_ranks_after_a_crowded_window(self):
+        c2, c4 = self.accounts[1], self.accounts[3]
+        c2.session_used, c2.session_resets = 85.0, resets_in(4)
+        c4.fable_used, c4.week_resets = 100.0, resets_in(1)
         self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
 
     def test_target_excludes_the_source_account(self):
