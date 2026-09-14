@@ -59,6 +59,7 @@ class Account:
     session_used: float | None = None
     session_resets: str | None = None
     week_used: float | None = None
+    week_resets: str | None = None
     fable_used: float | None = None
     fable_resets: str | None = None
 
@@ -239,7 +240,7 @@ def accounts_from_usage(report: dict) -> list[Account]:
             if limit.get("id") == "session":
                 account.session_used, account.session_resets = used, resets
             elif limit.get("id") == "week_all":
-                account.week_used = used
+                account.week_used, account.week_resets = used, resets
             elif limit.get("id") == "week_fable":
                 account.fable_used, account.fable_resets = used, resets
         accounts.append(account)
@@ -1110,6 +1111,8 @@ def fmt_resets(iso: str | None) -> str:
     if secs <= 0:
         return "due"
     hours, rem = divmod(secs, 3600)
+    if hours >= 24:
+        return f"{hours // 24}d{hours % 24:02d}h"
     return f"{hours}h{rem // 60:02d}m"
 
 
@@ -1125,8 +1128,8 @@ def render_accounts(accounts: list[Account]) -> str:
         lines.append(
             f"  {a.label:<8} {a.email or '':<28} "
             f"5h {fmt_pct(a.session_used):>4} ({fmt_resets(a.session_resets)})  "
-            f"week {fmt_pct(a.week_used):>4}  fable {fmt_pct(a.fable_used):>4}"
-            f"{flags}"
+            f"week {fmt_pct(a.week_used):>4}  fable {fmt_pct(a.fable_used):>4} "
+            f"({fmt_resets(a.fable_resets or a.week_resets)}){flags}"
         )
     return "\n".join(lines)
 
