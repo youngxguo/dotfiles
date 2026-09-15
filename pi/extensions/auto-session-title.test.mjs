@@ -125,7 +125,7 @@ test("does not replace a manual name", () => {
 	assert.deepEqual(harness.terminalTitles, []);
 });
 
-test("clears its Herdr tokens when the session runtime shuts down", async () => {
+test("clears its terminal and Herdr titles on /new", async () => {
 	const originalEnvironment = {
 		HERDR_BIN_PATH: process.env.HERDR_BIN_PATH,
 		HERDR_ENV: process.env.HERDR_ENV,
@@ -142,6 +142,7 @@ test("clears its Herdr tokens when the session runtime shuts down", async () => 
 			harness.ctx,
 		);
 
+		assert.deepEqual(harness.terminalTitles, [""]);
 		const reports = harness.execCalls.filter(
 			(call) => call.command === "herdr-test" && call.args[0] === "pane",
 		);

@@ -410,12 +410,13 @@ export default function (pi: ExtensionAPI) {
 		if (event.name) setTerminalTitle(event.name, ctx);
 	});
 
-	pi.on("session_shutdown", async (_event, ctx) => {
+	pi.on("session_shutdown", async (event, ctx) => {
 		titleRequest?.abort();
 		titleRequest = undefined;
 		if (terminalTitleRefresh) clearTimeout(terminalTitleRefresh);
 		terminalTitleRefresh = undefined;
 		generation++;
+		if (event.reason === "new" && ctx.mode === "tui") ctx.ui.setTitle("");
 		await clearHerdrMetadata(ctx);
 	});
 }
