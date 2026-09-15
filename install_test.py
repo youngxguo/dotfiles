@@ -18,8 +18,6 @@ class PiConfigInstallTest(unittest.TestCase):
             source = repo / "pi/settings.json"
             source.parent.mkdir(parents=True)
             source.write_text('{"theme": "dark"}\n', encoding="utf-8")
-            lens_config = repo / "pi/pi-lens-config.json"
-            lens_config.write_text("{}\n", encoding="utf-8")
             theme = repo / "pi/themes/custom.json"
             theme.parent.mkdir()
             theme.write_text('{"name": "custom"}\n', encoding="utf-8")
@@ -79,7 +77,6 @@ class PiCliInstallTest(unittest.TestCase):
             source = repo / "pi/settings.json"
             source.parent.mkdir(parents=True)
             source.write_text('{"theme": "dark"}\n', encoding="utf-8")
-            (repo / "pi/pi-lens-config.json").write_text("{}\n", encoding="utf-8")
 
             with ExitStack() as stack:
                 for patch in self.pi_patches(home, repo, prefix, npm_installed=False):

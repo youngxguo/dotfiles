@@ -469,9 +469,6 @@ def managed_links():
     links.append(
         ("pi", REPO_ROOT / "pi/settings.json", HOME / ".pi/agent/settings.json")
     )
-    links.append(
-        ("pi", REPO_ROOT / "pi/pi-lens-config.json", HOME / ".pi-lens/config.json")
-    )
     pi_themes_dir = REPO_ROOT / "pi/themes"
     if pi_themes_dir.is_dir():
         for theme_file in sorted(pi_themes_dir.glob("*.json")):
