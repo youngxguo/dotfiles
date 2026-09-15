@@ -1,6 +1,9 @@
 import json
+import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
@@ -343,6 +346,93 @@ class ClaudeInstallTest(unittest.TestCase):
             ):
                 install.install_claude_herdr_skill()
             self.assertFalse((home / ".claude/skills").exists())
+
+
+class ClaudeStatuslineTest(unittest.TestCase):
+    @staticmethod
+    def fake_herdr(root):
+        fake = root / "herdr"
+        fake.write_text(
+            '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HERDR_REPORT_PATH"\n',
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
+        return fake
+
+    @staticmethod
+    def wait_for_report(path):
+        for _ in range(100):
+            if path.is_file():
+                return path.read_text(encoding="utf-8").splitlines()
+            time.sleep(0.01)
+        raise AssertionError("statusline did not report Herdr metadata")
+
+    def statusline_environment(self, root, fake, report):
+        env = os.environ.copy()
+        env.update(
+            {
+                "HOME": str(root / "home"),
+                "HERDR_BIN_PATH": str(fake),
+                "HERDR_PANE_ID": "w1:p1",
+                "HERDR_REPORT_PATH": str(report),
+            }
+        )
+        return env
+
+    def test_clear_mode_removes_every_owned_token(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            script = Path(__file__).parent / "claude/statusline-command.sh"
+            subprocess.run(
+                ["sh", str(script), "--clear-herdr-metadata"],
+                check=True,
+                env=self.statusline_environment(root, fake, report),
+            )
+
+            args = self.wait_for_report(report)
+            self.assertEqual(args[:3], ["pane", "report-metadata", "w1:p1"])
+            for token in (
+                "title1",
+                "title2",
+                "title3",
+                "repo",
+                "branch",
+                "pr_open",
+                "pr_draft",
+                "pr_merged",
+                "pr_closed",
+            ):
+                index = args.index(token)
+                self.assertEqual(args[index - 1], "--clear-token")
+
+    def test_missing_transcript_clears_old_title_rows(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            script = Path(__file__).parent / "claude/statusline-command.sh"
+            payload = {
+                "cost": {"total_cost_usd": 0},
+                "context_window": {},
+                "model": {"display_name": "test"},
+                "transcript_path": str(root / "missing.jsonl"),
+                "workspace": {"current_dir": str(root)},
+            }
+            subprocess.run(
+                ["sh", str(script)],
+                input=json.dumps(payload),
+                text=True,
+                check=True,
+                capture_output=True,
+                env=self.statusline_environment(root, fake, report),
+            )
+
+            args = self.wait_for_report(report)
+            for token in ("title1", "title2", "title3"):
+                index = args.index(token)
+                self.assertEqual(args[index - 1], "--clear-token")
 
 
 class ClaudeSkillLinksTest(unittest.TestCase):

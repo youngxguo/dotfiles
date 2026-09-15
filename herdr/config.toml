@@ -67,9 +67,9 @@ agent_panel_sort = "spaces"
 status_indicators = "dots"
 show_agent_labels_on_pane_borders = true
 
-# Pane metadata from claude/statusline-command.sh: herdr has no repo, branch or
-# PR token for agent rows, cannot wrap a row (hence $title1..3) and fixes a
-# token's color here (hence one $pr_<state> token per PR state).
+# Pane metadata from Claude's statusline and Pi's auto-session-title extension:
+# Herdr has no repo, branch or PR token for agent rows, cannot wrap a row (hence
+# $title1..3) and fixes token colors here (hence one token per PR state).
 [ui.sidebar.agents]
 # Bold titles keep neighbouring five-line entries from blurring together. The
 # branch is the row that says which piece of work a pane is on, so it gets a row

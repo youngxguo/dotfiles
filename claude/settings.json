@@ -45,6 +45,10 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/prompt-timer.sh clear"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/statusline-command.sh --clear-herdr-metadata"
           }
         ]
       }

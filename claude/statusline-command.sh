@@ -1,4 +1,29 @@
 #!/bin/sh
+
+HERDR_METADATA_SOURCE=claude-statusline
+
+herdr_metadata_seq() {
+  python3 -c 'import time; print(time.time_ns())' 2>/dev/null ||
+    printf '%s000000000\n' "$(date +%s)"
+}
+
+clear_herdr_metadata() {
+  [ -n "${HERDR_PANE_ID:-}" ] || return 0
+  herdr_bin=${HERDR_BIN_PATH:-herdr}
+  "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
+    --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" \
+    --clear-token title1 --clear-token title2 --clear-token title3 \
+    --clear-token repo --clear-token branch \
+    --clear-token pr_open --clear-token pr_draft \
+    --clear-token pr_merged --clear-token pr_closed \
+    </dev/null >/dev/null 2>&1 || true
+}
+
+if [ "${1:-}" = --clear-herdr-metadata ]; then
+  clear_herdr_metadata
+  exit 0
+fi
+
 input=$(cat)
 
 session_cost=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('cost', {}).get('total_cost_usd', 0) or 0)")
@@ -174,7 +199,7 @@ fi
 # metadata. A token's color is fixed in herdr/config.toml, so the PR is sent as
 # one of pr_open, pr_draft, pr_merged or pr_closed, each colored there to match
 # the statusline. herdr strips escape bytes from metadata, so the PR cannot be a
-# hyperlink; prefix+p opens it instead.
+# hyperlink; the clickable link remains in Claude's own statusline instead.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   # herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
@@ -185,6 +210,7 @@ if [ -n "$HERDR_PANE_ID" ]; then
   # young.agent-index owns $num centrally so every row changes together when
   # an agent starts, exits, or moves.
   set --
+  n=0
   if [ -n "$transcript" ] && [ -f "$transcript" ]; then
     title_rows=$(tail -c 262144 "$transcript" | HERDR_SESSION_FILE="$herdr_session" python3 -c "
 import json, os, sys, textwrap
@@ -210,7 +236,6 @@ rows = textwrap.wrap(title, max(10, width - state_dot_and_padding), initial_inde
 for part in rows:
     print(part.strip())
 ")
-    n=0
     while IFS= read -r chunk; do
       [ -n "$chunk" ] || continue
       n=$((n + 1))
@@ -218,11 +243,13 @@ for part in rows:
     done <<EOF
 $title_rows
 EOF
-    while [ "$n" -lt 3 ]; do
-      n=$((n + 1))
-      set -- "$@" --clear-token "title$n"
-    done
   fi
+  # A new or resumed session may not have a transcript yet. Clear every unused
+  # row regardless so this pane cannot keep the previous session's title.
+  while [ "$n" -lt 3 ]; do
+    n=$((n + 1))
+    set -- "$@" --clear-token "title$n"
+  done
   if [ -n "$git_branch" ]; then
     if [ "$git_dir" = "$git_common_dir" ]; then
       repo_name=${repo_root##*/}
@@ -245,7 +272,8 @@ EOF
       set -- "$@" --clear-token "pr_$state"
     fi
   done
-  nohup "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" --source claude-statusline "$@" \
+  nohup "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
+    --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" "$@" \
     </dev/null >/dev/null 2>&1 &
 fi
 
