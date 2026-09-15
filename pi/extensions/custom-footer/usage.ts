@@ -4,40 +4,12 @@ const WEEK_MINUTES = 7 * 24 * 60;
 
 type JsonRecord = Record<string, unknown>;
 
-type RateLimitWindow = {
-	usedPercent: number;
-	windowMinutes: number;
-};
-
 function isRecord(value: unknown): value is JsonRecord {
 	return typeof value === "object" && value != null && !Array.isArray(value);
 }
 
 function isWeeklyWindow(windowMinutes: number): boolean {
 	return windowMinutes >= WEEK_MINUTES * 0.95 && windowMinutes <= WEEK_MINUTES * 1.05;
-}
-
-function parseRateLimitWindow(
-	headers: Record<string, string>,
-	name: "primary" | "secondary",
-): RateLimitWindow | undefined {
-	const usedPercent = Number(headers[`x-codex-${name}-used-percent`]);
-	const windowMinutes = Number(headers[`x-codex-${name}-window-minutes`]);
-	if (!Number.isFinite(usedPercent) || !Number.isFinite(windowMinutes)) return undefined;
-	return {
-		usedPercent: Math.max(0, Math.min(100, usedPercent)),
-		windowMinutes,
-	};
-}
-
-export function parseWeeklyUsedPercent(headers: Record<string, string>): number | undefined {
-	const normalizedHeaders = Object.fromEntries(
-		Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]),
-	);
-	return (["primary", "secondary"] as const)
-		.map((name) => parseRateLimitWindow(normalizedHeaders, name))
-		.filter((window): window is RateLimitWindow => window != null)
-		.find((window) => isWeeklyWindow(window.windowMinutes))?.usedPercent;
 }
 
 function parseWeeklyUsedPercentFromUsage(payload: unknown): number | undefined {

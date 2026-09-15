@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { CompactFooter } from "./footer.js";
-import { fetchWeeklyUsedPercent, parseWeeklyUsedPercent } from "./usage.js";
+import { fetchWeeklyUsedPercent } from "./usage.js";
 
 export default function (pi: ExtensionAPI) {
 	let enabled = true;
@@ -16,9 +16,8 @@ export default function (pi: ExtensionAPI) {
 
 	async function refreshWeeklyUsedPercent(ctx: ExtensionContext) {
 		const lookup = ++weeklyUsageLookup;
-		updateWeeklyUsedPercent(undefined);
 		const value = await fetchWeeklyUsedPercent(ctx);
-		if (lookup === weeklyUsageLookup) updateWeeklyUsedPercent(value);
+		if (lookup === weeklyUsageLookup && value != null) updateWeeklyUsedPercent(value);
 	}
 
 	function applyFooter(ctx: ExtensionContext) {
@@ -38,20 +37,23 @@ export default function (pi: ExtensionAPI) {
 		applyFooter(ctx);
 		void refreshWeeklyUsedPercent(ctx);
 	});
-	pi.on("after_provider_response", (event, ctx) => {
-		if (ctx.model?.provider !== "openai-codex") return;
-		const value = parseWeeklyUsedPercent(event.headers);
-		if (value == null) return;
-		weeklyUsageLookup++;
-		updateWeeklyUsedPercent(value);
+	pi.on("model_select", (event, ctx) => {
+		if (event.model.provider === "openai-codex") {
+			void refreshWeeklyUsedPercent(ctx);
+		} else {
+			weeklyUsageLookup++;
+			updateWeeklyUsedPercent(undefined);
+		}
 	});
-	pi.on("model_select", (_event, ctx) => void refreshWeeklyUsedPercent(ctx));
 	pi.on("tool_execution_end", (event) => {
 		if (["bash", "edit", "write"].includes(event.toolName)) {
 			currentFooter?.markRepositoryDirty();
 		}
 	});
-	pi.on("agent_settled", () => currentFooter?.refreshDirtyRepository());
+	pi.on("agent_settled", (_event, ctx) => {
+		currentFooter?.refreshDirtyRepository();
+		if (ctx.model?.provider === "openai-codex") void refreshWeeklyUsedPercent(ctx);
+	});
 
 	pi.registerCommand("footer", {
 		description: "Toggle the compact custom footer",
