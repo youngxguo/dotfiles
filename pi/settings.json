@@ -22,6 +22,9 @@
     "npm:@ryan_nookpi/pi-extension-codex-fast-mode@0.2.6",
     "npm:pi-lens@4.1.2"
   ],
+  "skills": [
+    "~/.claude/skills"
+  ],
   "markdown": {
     "mermaid": "final"
   },
