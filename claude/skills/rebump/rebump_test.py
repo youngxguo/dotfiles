@@ -278,12 +278,13 @@ class PickTest(unittest.TestCase):
         )
 
 
-class ModelSwitchTest(unittest.TestCase):
+class ModelSafetyTest(unittest.TestCase):
     def setUp(self):
         patcher = mock.patch.object(rebump, "account_email", return_value=None)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.account = rebump.accounts_from_usage(USAGE)[1]
+        self.accounts = rebump.accounts_from_usage(USAGE)
+        self.account = self.accounts[1]
         self.defaults = {}
         defaults = mock.patch.object(
             rebump, "settings_model", side_effect=lambda d: self.defaults.get(d)
@@ -291,47 +292,47 @@ class ModelSwitchTest(unittest.TestCase):
         defaults.start()
         self.addCleanup(defaults.stop)
 
-    def switch(self, **kwargs):
-        return rebump.model_switch(self.account, "opus", **kwargs)
-
-    def test_spent_fable_cap_pins_the_fallback_for_a_fable_session(self):
+    def test_only_a_brand_new_session_can_fall_back_to_opus(self):
         self.account.fable_used = 100.0
-        self.assertEqual(self.switch(running="claude-fable-5-1"), ("opus", False))
-
-    def test_a_session_already_off_fable_is_left_alone(self):
-        self.account.fable_used = 100.0
-        self.assertEqual(self.switch(running="claude-opus-5"), (None, False))
-        self.assertEqual(self.switch(running="claude-sonnet-5"), (None, False))
-
-    def test_the_accounts_own_default_decides_when_nothing_is_pinned(self):
-        self.account.fable_used = 100.0
-        self.defaults[self.account.config_dir] = "opus[1m]"
-        self.assertEqual(self.switch(), (None, False))
         self.defaults[self.account.config_dir] = "claude-fable-5-1[1m]"
-        self.assertEqual(self.switch(), ("opus", False))
-
-    def test_a_reported_model_cap_pins_the_fallback_whatever_cusage_says(self):
-        self.assertEqual(
-            self.switch(running="claude-fable-5-1", model_limited=True),
-            ("opus", False),
-        )
-
-    def test_fable_headroom_drops_a_pin_we_added_earlier(self):
-        self.defaults[self.account.config_dir] = "claude-fable-5-1[1m]"
-        self.assertEqual(self.switch(pinned="opus", running="opus"), (None, True))
+        self.assertEqual(rebump.new_session_model(self.account, "opus"), "opus")
         self.defaults[self.account.config_dir] = "opus[1m]"
-        self.assertEqual(self.switch(pinned="opus", running="opus"), (None, False))
+        self.assertIsNone(rebump.new_session_model(self.account, "opus"))
 
-    def test_launch_prefix_unsets_what_it_has_to(self):
+    def test_a_fable_session_cannot_target_an_account_with_no_fable_headroom(self):
+        self.account.fable_used = 100.0
+        self.assertFalse(rebump.can_run_model(self.account, "claude-fable-5-1"))
+        self.assertTrue(rebump.can_run_model(self.account, "claude-opus-5"))
+
+    def test_model_aliases_and_transcript_ids_compare_by_family(self):
+        self.assertTrue(rebump.same_model("opus[1m]", "claude-opus-5"))
+        self.assertTrue(rebump.same_model("claude-fable-5-1[1m]", "claude-fable-5-1"))
+        self.assertFalse(rebump.same_model("claude-fable-5-1", "opus"))
+
+    def test_launch_prefix_can_pin_a_model_but_never_unpins_one(self):
         default_dir = rebump.normalize_config_dir(None)
         self.assertEqual(
             rebump.launch_prefix(default_dir, "opus"),
             "env -u CLAUDE_CONFIG_DIR ANTHROPIC_MODEL=opus",
         )
-        self.assertEqual(
-            rebump.launch_prefix("/cfg/c2", None, unpin=True),
-            "env -u ANTHROPIC_MODEL CLAUDE_CONFIG_DIR=/cfg/c2",
+        self.assertEqual(rebump.launch_prefix("/cfg/c2"), "CLAUDE_CONFIG_DIR=/cfg/c2")
+
+    def test_a_same_account_model_relaunch_is_never_actionable(self):
+        move = rebump.Move(
+            pane_id="w1:p1",
+            session_id="session",
+            cwd="/repo",
+            title="",
+            status="idle",
+            from_label="c2",
+            from_dir="/c2",
+            to_label="c2",
+            to_dir="/c2",
+            reason="model cap",
+            transcript="/c2/session.jsonl",
+            model_pin="opus",
         )
+        self.assertFalse(move.actionable)
 
     def test_session_model_reads_the_flag_then_the_environment(self):
         self.assertEqual(
@@ -419,7 +420,7 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(limit.kind, "five_hour")
         self.assertFalse(limit.model_only)
 
-    def test_a_per_model_cap_is_the_one_a_model_switch_fixes(self):
+    def test_a_per_model_cap_is_the_one_an_account_move_fixes(self):
         limit = rebump.limit_message(self.records([FABLE_TURN, MODEL_LIMIT_RECORD]))
         self.assertIsNone(limit.kind)
         self.assertTrue(limit.model_only)
@@ -552,7 +553,8 @@ class PlanTest(unittest.TestCase):
         self.panes = []
         self.envs = {}
         self.settings("claude1", "opus[1m]")
-        self.settings("c2", "claude-fable-5-1[1m]")
+        for label in ("c2", "c3", "c4"):
+            self.settings(label, "claude-fable-5-1[1m]")
 
     def settings(self, label, model):
         config_dir = Path(self.by_label[label].config_dir)
@@ -604,10 +606,12 @@ class PlanTest(unittest.TestCase):
         self.assertIn("hit your session limit", move.reason)
         self.assertIn("5h window is at 100%", move.reason)
         self.assertTrue(move.actionable)
-        self.assertEqual(move.change, "move to c4")
+        self.assertEqual(move.model_pin, "opus[1m]")
+        self.assertEqual(move.change, "move to c4, preserving opus[1m]")
         self.assertEqual(
             rebump.relaunch_command(move),
-            f"CLAUDE_CONFIG_DIR={self.dir_of('c4')} claude --chrome --resume stuck",
+            f"CLAUDE_CONFIG_DIR={self.dir_of('c4')} ANTHROPIC_MODEL='opus[1m]' "
+            "claude --chrome --resume stuck",
         )
 
     def hook_move(self, payload, env, **kwargs):
@@ -655,21 +659,43 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(move.reason, "not limited")
         self.assertFalse(move.actionable)
 
-    def test_a_spent_fable_cap_switches_model_where_the_session_is(self):
+    def test_a_spent_fable_cap_moves_the_fable_session_without_changing_model(self):
         self.by_label["c2"].fable_used = 100.0
         self.add_pane("fine", "c2", [{"type": "user"}, FABLE_TURN])
         (move,) = self.plan()
-        self.assertEqual(move.to_dir, self.dir_of("c2"))
-        self.assertEqual(move.model, "opus")
+        self.assertEqual(move.to_dir, self.dir_of("c4"))
+        self.assertIsNone(move.model_pin)
         self.assertIn("fable weekly cap is spent", move.reason)
         self.assertIn("runs claude-fable-5-1", move.reason)
-        self.assertEqual(move.change, "restart here on opus")
+        self.assertEqual(move.change, "move to c4")
         self.assertTrue(move.actionable)
+        command = rebump.relaunch_command(move)
         self.assertEqual(
-            rebump.relaunch_command(move),
-            f"CLAUDE_CONFIG_DIR={self.dir_of('c2')} ANTHROPIC_MODEL=opus "
-            "claude --chrome --resume fine",
+            command,
+            f"CLAUDE_CONFIG_DIR={self.dir_of('c4')} claude --chrome --resume fine",
         )
+        self.assertNotIn("opus", command)
+
+    def test_an_account_move_preserves_the_source_context_suffix(self):
+        self.settings("c4", "claude-fable-5-1")
+        self.by_label["c2"].fable_used = 100.0
+        self.add_pane("fine", "c2", [{"type": "user"}, FABLE_TURN])
+        (move,) = self.plan()
+        self.assertEqual(move.to_label, "c4")
+        self.assertEqual(move.model_pin, "claude-fable-5-1[1m]")
+        self.assertNotIn("opus", rebump.relaunch_command(move))
+
+    def test_a_fable_session_stays_put_when_no_account_can_run_fable(self):
+        for account in self.accounts:
+            account.weekly_blocked = False
+            account.session_used = 10.0
+            account.fable_used = 100.0
+        self.add_pane("fine", "c2", [{"type": "user"}, FABLE_TURN])
+        (move,) = self.plan()
+        self.assertIsNone(move.to_dir)
+        self.assertIsNone(move.model_pin)
+        self.assertFalse(move.actionable)
+        self.assertIn("no other account can run claude-fable-5-1", move.reason)
 
     def test_a_spent_fable_cap_is_no_trouble_for_a_session_off_fable(self):
         claude1 = self.by_label["claude1"]
@@ -679,16 +705,17 @@ class PlanTest(unittest.TestCase):
         self.assertIsNone(move.to_label)
         self.assertEqual(move.reason, "not limited")
 
-    def test_a_reported_model_cap_switches_model_whatever_cusage_says(self):
+    def test_a_reported_model_cap_moves_fable_to_another_account(self):
         self.add_pane(
             "credits", "c4", [{"type": "user"}, FABLE_TURN, MODEL_LIMIT_RECORD]
         )
         (move,) = self.plan()
-        self.assertEqual(move.to_dir, self.dir_of("c4"))
-        self.assertEqual(move.model, "opus")
+        self.assertEqual(move.to_dir, self.dir_of("c2"))
+        self.assertIsNone(move.model_pin)
+        self.assertNotIn("opus", rebump.relaunch_command(move))
         self.assertIn("out of usage credits", move.reason)
 
-    def test_a_model_cap_with_nowhere_left_to_switch_moves_instead(self):
+    def test_an_opus_model_cap_moves_and_preserves_opus(self):
         claude1 = self.by_label["claude1"]
         claude1.session_used = 63.0
         self.add_pane(
@@ -696,10 +723,10 @@ class PlanTest(unittest.TestCase):
         )
         (move,) = self.plan()
         self.assertEqual(move.to_label, "c4")
-        self.assertIsNone(move.model)
+        self.assertEqual(move.model_pin, "opus[1m]")
+        self.assertIn("ANTHROPIC_MODEL='opus[1m]'", rebump.relaunch_command(move))
 
-    def test_fable_headroom_on_the_target_drops_a_pin_we_added_earlier(self):
-        self.settings("c4", "claude-fable-5-1[1m]")
+    def test_an_existing_model_pin_is_preserved_on_the_target(self):
         self.add_pane(
             "pinned",
             "c2",
@@ -708,11 +735,11 @@ class PlanTest(unittest.TestCase):
         )
         (move,) = self.plan()
         self.assertEqual(move.to_label, "c4")
-        self.assertTrue(move.unpin)
-        self.assertEqual(move.change, "move to c4 on its default model")
+        self.assertEqual(move.model_pin, "opus")
+        self.assertEqual(move.change, "move to c4, preserving opus")
         self.assertEqual(
             rebump.relaunch_command(move),
-            f"env -u ANTHROPIC_MODEL CLAUDE_CONFIG_DIR={self.dir_of('c4')} "
+            f"CLAUDE_CONFIG_DIR={self.dir_of('c4')} ANTHROPIC_MODEL=opus "
             "claude --chrome --resume pinned",
         )
 
@@ -741,11 +768,10 @@ class ApplyTest(unittest.TestCase):
             status="idle",
             from_label="c2",
             from_dir="/c2",
-            to_label="c2",
-            to_dir="/c2",
+            to_label="c4",
+            to_dir="/c4",
             reason="transcript ends with: rate limit",
             transcript="/c2/projects/-repo/stuck-session.jsonl",
-            model="opus",
             argv=["claude", "--chrome"],
             pid=1,
         )
@@ -759,6 +785,9 @@ class ApplyTest(unittest.TestCase):
         self.screen = ""
         for patcher in (
             mock.patch.object(rebump, "herdr", side_effect=self.fake_herdr),
+            mock.patch.object(
+                rebump, "copy_transcript", return_value=Path("/c4/s.jsonl")
+            ),
             mock.patch.object(rebump, "quit_claude", return_value=True),
             mock.patch.object(rebump, "settle_agent", return_value="idle"),
             mock.patch.object(

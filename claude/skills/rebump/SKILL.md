@@ -1,6 +1,6 @@
 ---
 name: rebump
-description: Check every Claude subscription's usage (cusage across ~/.claude and the c2/c3/c4/c5/c6 config dirs) and get rate-limited Claude Code sessions running in herdr going again - on a subscription with headroom, or on another model when the cap binds only the one they run - resuming each one and nudging it to carry on. Also picks the account and model a new Claude Code agent should start on. Use when a session hit its session, 5-hour, weekly or per-model usage limit, when asked to rebump, rebalance or move sessions to another sub, account or model, when asked which claude account has headroom, and before starting any claude agent in a herdr pane.
+description: Check every Claude subscription's usage (cusage across ~/.claude and the c2/c3/c4/c5/c6 config dirs) and move rate-limited Claude Code sessions running in herdr onto a subscription that can continue the same model, resuming each one there and nudging it to carry on. Also picks the account and model a new Claude Code agent should start on. Use when a session hit its session, 5-hour, weekly or per-model usage limit, when asked to rebump, rebalance or move sessions to another sub or account, when asked which claude account has headroom, and before starting any claude agent in a herdr pane.
 allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/rebump.py *)
 ---
 
@@ -22,18 +22,19 @@ planner:
 
 Both flows do the same thing to a limited session: `cusage --json` for every
 account, then, when the transcript ends on a rate-limit message (or the account
-is spent), copy the transcript into the target config dir (`claude --resume`
-only searches its own `CLAUDE_CONFIG_DIR`), quit claude in the pane with two
-Ctrl-C, relaunch the same command line under the target account with
-`--resume`, answer the folder-trust and other first-run dialogs the target
-account may show for that folder, wait for herdr to see it settle, confirm the
-pane is running the resumed session, and prompt it to continue.
+is spent), find another account with headroom for the session's current model,
+copy the transcript into its config dir (`claude --resume` only searches its
+own `CLAUDE_CONFIG_DIR`), quit claude in the pane with two Ctrl-C, relaunch the
+same command line under the target account with `--resume`, answer the
+folder-trust and other first-run dialogs the target account may show for that
+folder, wait for herdr to see it settle, confirm the pane is running the resumed
+session, and prompt it to continue.
 
-A cap that binds only the model a session runs - a spent Fable weekly cap, or
-"You're out of usage credits. /model to switch models." at the end of the
-transcript - is not a reason to move it. Those sessions are relaunched where
-they are, on `opus`, which leaves the account's 5-hour window and weekly cap to
-carry them.
+**Rebump never changes the model of an existing session.** A spent Fable weekly
+cap or a per-model limit moves a Fable session to another account with Fable
+headroom. If none exists, the session is left at the limit instead of being
+relaunched on Opus. When account defaults differ, rebump carries an explicit
+pin for the model already running.
 
 Needs `herdr` on PATH with the server running (this session should have
 `HERDR_ENV=1`) and the hsys `cusage` helper sourced by the shell.
@@ -76,11 +77,12 @@ went or why it stayed. The sweep is for what the log does not cover.
    ```
 
    Each pane takes 20-60 seconds (quit, relaunch, wait for the resume). Report
-   the per-pane result lines it prints. A line reading `restart here on opus`
-   is a model switch, not a move: the session stays on its own account. A
-   `failed: the pane runs session <id>` line means something else took the
-   pane over between the quit and the nudge - typically the user restarting
-   claude by hand in it - so the resumed session was not nudged; the
+   the per-pane result lines it prints. A `preserving <model>` suffix means the
+   target account has a different default, so the relaunch explicitly keeps the
+   session's existing model. A `failed: the pane runs session <id>` line means
+   something else took the pane over between the quit and the nudge - typically
+   the user restarting claude by hand in it - so the resumed session was not
+   nudged; the
    transcript is still in the target config dir and `claude --resume <id>`
    there brings it back.
 
@@ -114,7 +116,8 @@ with a spent Fable cap come last, soonest weekly reset first. Ties break on
 the emptiest 5-hour window. `--to c3` insists on a named account and fails if
 it is spent. `pick` reuses a cusage report younger than five minutes, so
 starting several agents in a row only pays for cusage once; `--max-age 0`
-forces a fresh read.
+forces a fresh read. Only this brand-new-session flow may choose Opus as a
+fallback; it never changes a model after a session has started.
 
 What it prints is a shell prefix, not a `KEY=VALUE` pair. It is one of
 `CLAUDE_CONFIG_DIR=<dir>` or `env -u CLAUDE_CONFIG_DIR` (the default account is
@@ -142,8 +145,9 @@ and returns at once. That flow builds the session from the hook payload
 (session id, transcript path, cwd) and the hook's own environment
 (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_MODEL`, `HERDR_PANE_ID`), asks herdr only for
 the pane's claude command line, and then does exactly what step 3 does for
-that one pane - or nothing when no account has headroom, which leaves Claude
-Code's own wait-for-reset in place. It never lists or touches other panes.
+that one pane - or nothing when no account can continue the same model, which
+leaves Claude Code's own wait-for-reset in place. It never lists or touches
+other panes.
 Each run appends to `~/.cache/rebump/hook.log` (`XDG_CACHE_HOME` respected),
 including the runs it skipped and why; a `hook-<pane>.pid` beside it stops a
 second limit hit from starting a second rebump while one is still running.
@@ -172,14 +176,15 @@ wait, which a resumed transcript re-arms for the old account's reset.
 - A spent Fable weekly cap only troubles a session that runs Fable. rebump
   reads the pin (`--model` or `ANTHROPIC_MODEL`) first, then the model that
   last answered in the transcript, then the account's own `settings.json`
-  default - `~/.claude` runs `opus[1m]`, `~/.claude2` runs Fable - so panes
-  already off Fable are left alone.
-- The switch rides in `ANTHROPIC_MODEL` and drops any `--model` from the old
-  command line, so it also beats a pin the pane's shell already carried. Going
-  the other way, when the target can run Fable and its own default is Fable,
-  rebump unsets the pin instead of writing one, which keeps the `[1m]` suffix
-  the default carries. `--fallback-model` changes what it switches to.
-- Only move or switch panes the plan marks as limited. Touching a healthy pane
+  default. It excludes accounts whose Fable cap is spent from that session's
+  targets, even though those accounts can still start new Opus sessions.
+- An existing model pin is preserved. If the session was unpinned but the
+  target account defaults to another model, rebump pins the source account's
+  default (including a `[1m]` suffix) or the transcript model. The planner
+  cannot produce a same-account restart, and a move to the same config dir is
+  not actionable.
+- `--fallback-model` applies only to `pick` for a brand-new session.
+- Only move panes the plan marks as limited. Touching a healthy pane
   needs the user to ask for it explicitly; then use `apply --force --pane <id>`.
 - `--nudge ""` resumes without sending the follow-up prompt; use it when the
   user wants to look at a session before it continues.
