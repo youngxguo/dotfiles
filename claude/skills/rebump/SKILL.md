@@ -40,6 +40,15 @@ Needs `herdr` on PATH with the server running (this session should have
 
 ## Steps
 
+When the user identifies a target as `chat N` or `agent N`, `N` is the Herdr
+agent index shown in the UI. Pass it directly to `plan` and `apply` as
+`--agent-index N` (also accepted as `--chat N`); the script resolves the live
+agent's `tokens.num` and rejects missing, ambiguous, or non-Claude indexes. It
+is not a Herdr workspace number and not a Claude account label such as `cN`.
+When the user also names a project or branch, pass it as `--expect-project` so
+the script rejects a conflicting index instead of inferring or forcing another
+pane.
+
 Before sweeping, check `~/.cache/rebump/hook.log`: a session inside herdr that
 hit its limit has usually rebumped itself already, and the log says where it
 went or why it stayed. The sweep is for what the log does not cover.
@@ -62,6 +71,8 @@ went or why it stayed. The sweep is for what the log does not cover.
    ```bash
    python3 ${CLAUDE_SKILL_DIR}/rebump.py apply
    python3 ${CLAUDE_SKILL_DIR}/rebump.py apply --to c3 --pane w2E:p1
+   python3 ${CLAUDE_SKILL_DIR}/rebump.py apply --agent-index 4
+   python3 ${CLAUDE_SKILL_DIR}/rebump.py apply --agent-index 4 --expect-project young/logging-middleware
    ```
 
    Each pane takes 20-60 seconds (quit, relaunch, wait for the resume). Report

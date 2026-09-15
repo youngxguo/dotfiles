@@ -448,13 +448,73 @@ def runs_session(pane_id: str, session_id: str) -> bool:
     return value == session_id or (value is not None and kind != "id")
 
 
-def claude_panes() -> list[dict]:
-    agents = herdr("agent", "list")["result"]["agents"]
+def herdr_agents() -> list[dict]:
+    return herdr("agent", "list")["result"]["agents"]
+
+
+def claude_panes(agents: list[dict] | None = None) -> list[dict]:
+    agents = herdr_agents() if agents is None else agents
     return [
         a
         for a in agents
         if a.get("agent") == "claude" and (a.get("agent_session") or {}).get("value")
     ]
+
+
+def resolve_agent_indexes(
+    agents: list[dict], indexes: list[int], expected_project: str | None = None
+) -> list[dict]:
+    """Resolve the numeric agent indexes Herdr shows in its UI. These are
+    deliberately resolved from `tokens.num`, never from workspace or account
+    numbers, because all three are small integers with unrelated meanings."""
+    selected = []
+    seen_panes = set()
+    for index in indexes:
+        matches = [
+            agent
+            for agent in agents
+            if str((agent.get("tokens") or {}).get("num", "")) == str(index)
+        ]
+        if not matches:
+            live = ", ".join(
+                f"{(agent.get('tokens') or {}).get('num')}="
+                f"{Path(agent.get('cwd') or '').name or agent.get('agent', 'unknown')}"
+                for agent in agents
+                if (agent.get("tokens") or {}).get("num") is not None
+            )
+            raise SystemExit(
+                f"no live Herdr agent has index {index}; live agents: {live or 'none'}"
+            )
+        if len(matches) != 1:
+            raise SystemExit(f"Herdr agent index {index} is ambiguous")
+        agent = matches[0]
+        if agent.get("agent") != "claude" or not (
+            agent.get("agent_session") or {}
+        ).get("value"):
+            raise SystemExit(
+                f"Herdr agent index {index} is {agent.get('agent') or 'unknown'}, "
+                "not a resumable Claude agent"
+            )
+        identity = [
+            agent.get("cwd") or "",
+            agent.get("foreground_cwd") or "",
+            agent.get("terminal_title_stripped") or "",
+            *((agent.get("tokens") or {}).values()),
+        ]
+        if expected_project and not any(
+            expected_project.casefold() in str(value).casefold() for value in identity
+        ):
+            branch = (agent.get("tokens") or {}).get("branch") or ""
+            raise SystemExit(
+                f"Herdr agent index {index} does not match expected project "
+                f"{expected_project!r}; resolved to {agent.get('cwd') or 'unknown cwd'}"
+                + (f" ({branch})" if branch else "")
+            )
+        pane_id = agent.get("pane_id")
+        if pane_id not in seen_panes:
+            selected.append(agent)
+            seen_panes.add(pane_id)
+    return selected
 
 
 def pane_claude_process(pane_id: str) -> dict | None:
@@ -1218,6 +1278,20 @@ def main(argv: list[str] | None = None) -> int:
         "--pane", action="append", help="only these pane ids (repeatable)"
     )
     parser.add_argument(
+        "--agent-index",
+        "--chat",
+        action="append",
+        type=int,
+        dest="agent_indexes",
+        help="only the Herdr agents with these UI index numbers (repeatable); "
+        "not a workspace number or Claude account label",
+    )
+    parser.add_argument(
+        "--expect-project",
+        help="with --agent-index, refuse unless the selected agent's cwd, branch, "
+        "or title matches this project",
+    )
+    parser.add_argument(
         "--fallback-model",
         default=FALLBACK_MODEL,
         help="model to run when the account's Fable weekly cap is spent "
@@ -1279,11 +1353,24 @@ def main(argv: list[str] | None = None) -> int:
 
     if shutil.which("herdr") is None:
         raise SystemExit("herdr is not on PATH")
-    panes = claude_panes()
-    if args.pane:
-        panes = [p for p in panes if p["pane_id"] in set(args.pane)]
-    if args.force and not args.pane:
-        raise SystemExit("--force needs --pane: it would restart every claude pane")
+    if args.pane and args.agent_indexes:
+        raise SystemExit("use either --pane or --agent-index, not both")
+    if args.expect_project and not args.agent_indexes:
+        raise SystemExit("--expect-project needs --agent-index")
+    agents = herdr_agents()
+    if args.agent_indexes:
+        panes = resolve_agent_indexes(
+            agents, args.agent_indexes, args.expect_project
+        )
+    else:
+        panes = claude_panes(agents)
+        if args.pane:
+            panes = [p for p in panes if p["pane_id"] in set(args.pane)]
+    if args.force and not (args.pane or args.agent_indexes):
+        raise SystemExit(
+            "--force needs --pane or --agent-index: it would restart every "
+            "claude pane"
+        )
     moves = build_plan(
         accounts, panes, args.to, force=args.force, fallback=args.fallback_model
     )

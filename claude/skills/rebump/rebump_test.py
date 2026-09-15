@@ -945,3 +945,57 @@ class HerdrTest(unittest.TestCase):
             )
             with self.assertRaises(SystemExit):
                 rebump.herdr("agent", "get", "w1:p1")
+
+
+class AgentIndexTest(unittest.TestCase):
+    def setUp(self):
+        self.agents = [
+            {
+                "agent": "claude",
+                "agent_session": {"value": "wrong-workspace"},
+                "cwd": "/work/cloud-tests",
+                "pane_id": "w4:p1",
+                "tokens": {"num": "2"},
+            },
+            {
+                "agent": "claude",
+                "agent_session": {"value": "logging"},
+                "cwd": "/work/young-logging-middleware",
+                "pane_id": "w6D:p1",
+                "tokens": {"num": "4"},
+            },
+            {
+                "agent": "pi",
+                "agent_session": {"value": "pi-session"},
+                "cwd": "/work/dotfiles",
+                "pane_id": "w1:p1",
+                "tokens": {"num": "6"},
+            },
+        ]
+
+    def test_resolves_the_ui_agent_index_not_the_workspace_number(self):
+        self.assertEqual(
+            rebump.resolve_agent_indexes(self.agents, [4])[0]["pane_id"],
+            "w6D:p1",
+        )
+
+    def test_refuses_a_missing_agent_index(self):
+        with self.assertRaisesRegex(SystemExit, "no live Herdr agent has index 5"):
+            rebump.resolve_agent_indexes(self.agents, [5])
+
+    def test_refuses_an_index_that_is_not_a_resumable_claude_agent(self):
+        with self.assertRaisesRegex(SystemExit, "not a resumable Claude agent"):
+            rebump.resolve_agent_indexes(self.agents, [6])
+
+    def test_can_assert_the_project_resolved_by_the_index(self):
+        selected = rebump.resolve_agent_indexes(
+            self.agents, [4], "young-logging-middleware"
+        )
+        self.assertEqual(selected[0]["pane_id"], "w6D:p1")
+        with self.assertRaisesRegex(SystemExit, "does not match expected project"):
+            rebump.resolve_agent_indexes(self.agents, [4], "cloud-tests")
+
+    def test_refuses_an_ambiguous_agent_index(self):
+        self.agents.append({**self.agents[1], "pane_id": "w7:p1"})
+        with self.assertRaisesRegex(SystemExit, "index 4 is ambiguous"):
+            rebump.resolve_agent_indexes(self.agents, [4])
