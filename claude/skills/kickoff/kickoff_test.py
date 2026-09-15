@@ -49,30 +49,6 @@ def fake_herdr(**responses):
     return call
 
 
-class SplitAgentArgsTest(unittest.TestCase):
-    def test_without_a_separator_everything_is_ours(self):
-        self.assertEqual(
-            kickoff.split_agent_args(["slug", "--dry-run"]), (["slug", "--dry-run"], [])
-        )
-
-    def test_our_options_survive_a_trailing_brief(self):
-        argv, extra = kickoff.split_agent_args(
-            ["slug", "do the thing", "--repo", "widget"]
-        )
-        self.assertEqual(argv, ["slug", "do the thing", "--repo", "widget"])
-        self.assertEqual(extra, [])
-
-    def test_the_separator_hands_the_rest_to_the_agent(self):
-        argv, extra = kickoff.split_agent_args(
-            ["slug", "--focus", "--", "--chrome", "-p"]
-        )
-        self.assertEqual(argv, ["slug", "--focus"])
-        self.assertEqual(extra, ["--chrome", "-p"])
-
-    def test_a_dangling_separator_adds_nothing(self):
-        self.assertEqual(kickoff.split_agent_args(["slug", "--"]), (["slug"], []))
-
-
 class SlugifyTest(unittest.TestCase):
     def test_punctuation_and_case_collapse_to_dashes(self):
         self.assertEqual(kickoff.slugify("Signup rate limit!"), "signup-rate-limit")
@@ -84,6 +60,12 @@ class SlugifyTest(unittest.TestCase):
 
     def test_a_slug_with_nothing_in_it_is_empty(self):
         self.assertEqual(kickoff.slugify("!!!"), "")
+
+
+class MainTest(unittest.TestCase):
+    def test_a_task_is_required(self):
+        with self.assertRaisesRegex(SystemExit, "needs a task"):
+            kickoff.main(["new-work"])
 
 
 class AgentNameTest(unittest.TestCase):
@@ -103,20 +85,15 @@ class AgentNameTest(unittest.TestCase):
 
 
 class MainCheckoutTest(unittest.TestCase):
-    WORKTREES = [{"branch": "main", "path": "/repos/widget"}]
-
     def test_repo_name_finds_the_main_checkout(self):
         with mock.patch.object(
             kickoff,
             "herdr",
-            fake_herdr(
-                workspace_list={"result": {"workspaces": [LINKED, MAIN]}},
-                worktree_list={"result": {"worktrees": self.WORKTREES}},
-            ),
+            fake_herdr(workspace_list={"result": {"workspaces": [LINKED, MAIN]}}),
         ):
             self.assertEqual(
-                kickoff.main_checkout("widget", None, None),
-                (["--workspace", "w2"], "/repos/widget", self.WORKTREES),
+                kickoff.main_checkout("widget"),
+                (["--workspace", "w2"], "/repos/widget"),
             )
 
     def test_a_repo_with_no_open_workspace_fails_before_creating_anything(self):
@@ -126,55 +103,29 @@ class MainCheckoutTest(unittest.TestCase):
             fake_herdr(workspace_list={"result": {"workspaces": [OTHER]}}),
         ):
             with self.assertRaises(SystemExit):
-                kickoff.main_checkout("widget", None, None)
+                kickoff.main_checkout("widget")
 
     def test_a_linked_worktree_resolves_up_to_its_parent(self):
         calls = fake_herdr(
-            worktree_list={
-                "result": {
-                    "source": {"repo_root": "/repos/widget"},
-                    "worktrees": self.WORKTREES,
-                }
-            },
+            worktree_list={"result": {"source": {"repo_root": "/repos/widget"}}},
             workspace_list={"result": {"workspaces": [LINKED, MAIN]}},
         )
         with mock.patch.object(kickoff, "herdr", calls):
             self.assertEqual(
-                kickoff.main_checkout(None, "w9", None),
-                (["--workspace", "w2"], "/repos/widget", self.WORKTREES),
+                kickoff.main_checkout(None),
+                (["--workspace", "w2"], "/repos/widget"),
             )
 
     def test_a_closed_parent_workspace_falls_back_to_its_path(self):
         calls = fake_herdr(
-            worktree_list={
-                "result": {
-                    "source": {"repo_root": "/repos/widget"},
-                    "worktrees": self.WORKTREES,
-                }
-            },
+            worktree_list={"result": {"source": {"repo_root": "/repos/widget"}}},
             workspace_list={"result": {"workspaces": [LINKED]}},
         )
         with mock.patch.object(kickoff, "herdr", calls):
             self.assertEqual(
-                kickoff.main_checkout(None, "w9", None),
-                (["--cwd", "/repos/widget"], "/repos/widget", self.WORKTREES),
+                kickoff.main_checkout(None),
+                (["--cwd", "/repos/widget"], "/repos/widget"),
             )
-
-
-class ExistingWorktreeTest(unittest.TestCase):
-    WORKTREES = [
-        {"branch": "main", "path": "/repos/widget"},
-        {"branch": "mine/thing", "path": "/worktrees/widget/mine-thing"},
-    ]
-
-    def test_a_known_branch_is_found_by_name(self):
-        self.assertEqual(
-            kickoff.existing_worktree(self.WORKTREES, "mine/thing")["path"],
-            "/worktrees/widget/mine-thing",
-        )
-
-    def test_an_unknown_branch_is_not(self):
-        self.assertIsNone(kickoff.existing_worktree(self.WORKTREES, "mine/other"))
 
 
 class ShellReadyTest(unittest.TestCase):
