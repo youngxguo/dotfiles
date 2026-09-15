@@ -44,6 +44,7 @@ print(display)
 # CLAUDE_CONFIG_DIR is unset on the default one; the transcript sits under the
 # config dir actually in use, so it answers for all four.
 transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
+session_name=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_name',''))")
 account=$(TRANSCRIPT="$transcript" python3 -c "
 import os, re
 transcript = os.environ['TRANSCRIPT']
@@ -202,40 +203,27 @@ fi
 # hyperlink; the clickable link remains in Claude's own statusline instead.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
-  # herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
-  # to session.json next to the socket. Claude Code writes an ai-title transcript
-  # line when it titles a session and a custom-title line for /rename or --name.
+  # Herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
+  # to session.json next to the socket.
   herdr_session=${HERDR_SOCKET_PATH:+${HERDR_SOCKET_PATH%/*}/session.json}
   : "${herdr_session:=$HOME/.config/herdr/session.json}"
   # young.agent-index owns $num centrally so every row changes together when
   # an agent starts, exits, or moves.
   set --
-  n=0
-  if [ -n "$transcript" ] && [ -f "$transcript" ]; then
-    title_rows=$(tail -c 262144 "$transcript" | HERDR_SESSION_FILE="$herdr_session" python3 -c "
-import json, os, sys, textwrap
+  if [ -n "$session_name" ]; then
+    title_rows=$(HERDR_SESSION_FILE="$herdr_session" SESSION_NAME="$session_name" python3 -c "
+import json, os, textwrap
 width = 26
 state_dot_and_padding = 4
 try:
     width = int(json.load(open(os.environ['HERDR_SESSION_FILE'])).get('sidebar_width') or width)
 except (OSError, ValueError, TypeError):
     pass
-title = ''
-for line in sys.stdin:
-    if '\"custom-title\"' not in line and '\"ai-title\"' not in line:
-        continue
-    try:
-        entry = json.loads(line)
-    except ValueError:
-        continue
-    if entry.get('type') == 'custom-title':
-        title = entry.get('customTitle') or title
-    elif entry.get('type') == 'ai-title':
-        title = entry.get('aiTitle') or title
-rows = textwrap.wrap(title, max(10, width - state_dot_and_padding), initial_indent='  ', max_lines=3, placeholder='…')
+rows = textwrap.wrap(os.environ['SESSION_NAME'], max(10, width - state_dot_and_padding), initial_indent='  ', max_lines=3, placeholder='…')
 for part in rows:
     print(part.strip())
 ")
+    n=0
     while IFS= read -r chunk; do
       [ -n "$chunk" ] || continue
       n=$((n + 1))
@@ -243,13 +231,14 @@ for part in rows:
     done <<EOF
 $title_rows
 EOF
+    while [ "$n" -lt 3 ]; do
+      n=$((n + 1))
+      set -- "$@" --clear-token "title$n"
+    done
   fi
-  # A new or resumed session may not have a transcript yet. Clear every unused
-  # row regardless so this pane cannot keep the previous session's title.
-  while [ "$n" -lt 3 ]; do
-    n=$((n + 1))
-    set -- "$@" --clear-token "title$n"
-  done
+  # Opening a task starts a second status-line loop for an unnamed transient
+  # session that inherits this pane ID. An absent name must not clear the parent
+  # title; SessionEnd clears every title row at a real session boundary.
   if [ -n "$git_branch" ]; then
     if [ "$git_dir" = "$git_common_dir" ]; then
       repo_name=${repo_root##*/}

@@ -566,7 +566,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 index = args.index(token)
                 self.assertEqual(args[index - 1], "--clear-token")
 
-    def test_missing_transcript_clears_old_title_rows(self):
+    def test_unnamed_task_does_not_clear_parent_title_rows(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             root = Path(tmpdir)
             report = root / "report"
@@ -576,6 +576,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 "cost": {"total_cost_usd": 0},
                 "context_window": {},
                 "model": {"display_name": "test"},
+                "session_id": "transient-task",
                 "transcript_path": str(root / "missing.jsonl"),
                 "workspace": {"current_dir": str(root)},
             }
@@ -589,7 +590,38 @@ class ClaudeStatuslineTest(unittest.TestCase):
             )
 
             args = self.wait_for_report(report)
-            for token in ("title1", "title2", "title3"):
+            self.assertFalse(
+                any(arg.startswith("title") for arg in args),
+                "an unnamed task must leave the parent session title alone",
+            )
+
+    def test_named_session_sets_title_and_clears_unused_rows(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            script = Path(__file__).parent / "claude/statusline-command.sh"
+            payload = {
+                "cost": {"total_cost_usd": 0},
+                "context_window": {},
+                "model": {"display_name": "test"},
+                "session_id": "parent",
+                "session_name": "Adversarial review",
+                "transcript_path": str(root / "missing.jsonl"),
+                "workspace": {"current_dir": str(root)},
+            }
+            subprocess.run(
+                ["sh", str(script)],
+                input=json.dumps(payload),
+                text=True,
+                check=True,
+                capture_output=True,
+                env=self.statusline_environment(root, fake, report),
+            )
+
+            args = self.wait_for_report(report)
+            self.assertIn("title1=Adversarial review", args)
+            for token in ("title2", "title3"):
                 index = args.index(token)
                 self.assertEqual(args[index - 1], "--clear-token")
 
