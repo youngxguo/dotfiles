@@ -759,12 +759,44 @@ def install_vscode():
 
 
 CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
+CLAUDE_GLOBAL_CONFIG = {"lspRecommendationDisabled": True}
 
 
 def claude_config_dirs():
     """claude resolves user-level CLAUDE.md, skills and settings.json relative
     to CLAUDE_CONFIG_DIR, so global config has to land in each dir."""
     return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4, 5, 6)]
+
+
+def claude_global_config_path(config_dir):
+    """The default account keeps its global state beside ~/.claude, while
+    CLAUDE_CONFIG_DIR accounts keep it inside their config directory."""
+    if config_dir == HOME / ".claude":
+        return HOME / ".claude.json"
+    return config_dir / ".claude.json"
+
+
+def merge_claude_global_config():
+    """Apply durable UI preferences without replacing Claude's account state."""
+    for config_dir in claude_config_dirs():
+        target = claude_global_config_path(config_dir)
+        if target.is_symlink():
+            raise RuntimeError(f"refusing to overwrite symlink: {target}")
+        config = {}
+        if target.is_file():
+            try:
+                config = json.loads(target.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                print(f"skipping claude global config: {target} is not valid JSON")
+                continue
+            if not isinstance(config, dict):
+                print(f"skipping claude global config: {target} is not a JSON object")
+                continue
+
+        config.update(CLAUDE_GLOBAL_CONFIG)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        print(f"merged claude global config into {target}")
 
 
 def install_claude_herdr_skill():
@@ -846,6 +878,7 @@ def install_claude():
     print("applying claude config")
     apply_links(links_for("claude"))
     merge_claude_settings()
+    merge_claude_global_config()
     install_claude_herdr_skill()
     if not VERIFY_MODE:
         install_claude_herdr_integrations()

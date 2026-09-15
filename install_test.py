@@ -340,6 +340,13 @@ class ClaudeInstallTest(unittest.TestCase):
                     secondary.get("permissions"), primary.get("permissions")
                 )
                 self.assertEqual(secondary.get("statusLine"), primary.get("statusLine"))
+                for config_dir in config_dirs:
+                    global_config = json.loads(
+                        install.claude_global_config_path(config_dir).read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    self.assertIs(global_config.get("lspRecommendationDisabled"), True)
                 template = json.loads(
                     (repo / "claude/settings.json").read_text(encoding="utf-8")
                 )
@@ -356,6 +363,31 @@ class ClaudeInstallTest(unittest.TestCase):
                 self.assertTrue(
                     skill_path.read_text(encoding="utf-8").endswith("## New section\n")
                 )
+
+    def test_merge_claude_global_config_preserves_account_state(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            state_path = home / ".claude3/.claude.json"
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text(
+                json.dumps({"oauthAccount": {"emailAddress": "young@example.com"}}),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(install, "HOME", home):
+                install.merge_claude_global_config()
+
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                state.get("oauthAccount"), {"emailAddress": "young@example.com"}
+            )
+            self.assertIs(state.get("lspRecommendationDisabled"), True)
+            self.assertIs(
+                json.loads((home / ".claude.json").read_text(encoding="utf-8")).get(
+                    "lspRecommendationDisabled"
+                ),
+                True,
+            )
 
     def test_install_claude_herdr_integrations_cover_every_config_dir(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
