@@ -50,11 +50,6 @@ type = "plugin_action"
 command = "herdr-splits.nav-right"
 
 [[keys.command]]
-key = "prefix+p"
-type = "plugin_action"
-command = "young.open-pr.open-pr"
-
-[[keys.command]]
 key = "prefix+f"
 type = "popup"
 command = 'export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"; dir=$(fd -H -t d -d 3 "^\.git$" ~/Documents/code -x dirname | sort -u | fzf --prompt="new workspace > ") && [ -n "$dir" ] && herdr workspace create --cwd "$dir" --label "${dir##*/}" --focus'

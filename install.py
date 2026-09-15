@@ -30,7 +30,6 @@ HERDR_PLUGINS = (
 )
 HERDR_LOCAL_PLUGINS = (
     ("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),
-    ("herdr/plugins/open-pr", "young.open-pr"),
 )
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
 # pi's package.json engines field.
