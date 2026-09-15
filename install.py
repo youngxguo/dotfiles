@@ -29,6 +29,7 @@ HERDR_PLUGINS = (
     ("youngxguo/herdr-auto-title", "herdr.auto-title"),
 )
 HERDR_LOCAL_PLUGINS = (
+    ("herdr/plugins/agent-index", "young.agent-index"),
     ("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),
 )
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"

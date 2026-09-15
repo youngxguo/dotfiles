@@ -182,23 +182,9 @@ if [ -n "$HERDR_PANE_ID" ]; then
   # line when it titles a session and a custom-title line for /rename or --name.
   herdr_session=${HERDR_SOCKET_PATH:+${HERDR_SOCKET_PATH%/*}/session.json}
   : "${herdr_session:=$HOME/.config/herdr/session.json}"
-  # `herdr agent list` returns agents in workspace, tab, pane order, the
-  # sidebar's "spaces" sort; focus_agent (cmd+1..9) reaches only the first nine.
-  agent_num=$("$herdr_bin" agent list 2>/dev/null | python3 -c "
-import json, os, sys
-try:
-    agents = json.load(sys.stdin)['result']['agents']
-except (ValueError, KeyError, TypeError):
-    agents = []
-for i, agent in enumerate(agents, 1):
-    if agent.get('pane_id') == os.environ.get('HERDR_PANE_ID') and i <= 9:
-        print(i)
-")
-  if [ -n "$agent_num" ]; then
-    set -- --token "num=$agent_num"
-  else
-    set -- --clear-token num
-  fi
+  # young.agent-index owns $num centrally so every row changes together when
+  # an agent starts, exits, or moves.
+  set --
   if [ -n "$transcript" ] && [ -f "$transcript" ]; then
     title_rows=$(tail -c 262144 "$transcript" | HERDR_SESSION_FILE="$herdr_session" python3 -c "
 import json, os, sys, textwrap
