@@ -7,3 +7,5 @@ there are a variety of tools and setup here, not all of which might be directly 
 everything should be agnostic to macos and linux
 
 everything should also try to be agnostic to the work environment. this is for personal but also professional work. no professional work configs should leak into this repo for example.
+
+we should aim to be as native as possible across implementations. custom implementations are more to maintain and we should be wary of them.
