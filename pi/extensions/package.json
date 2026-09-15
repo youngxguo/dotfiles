@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc"
+    "check": "tsc && npm test",
+    "test": "node --experimental-strip-types --test auto-session-title.test.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.84.1",
