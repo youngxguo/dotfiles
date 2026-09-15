@@ -512,7 +512,12 @@ class ClaudeStatuslineTest(unittest.TestCase):
     def fake_herdr(root):
         fake = root / "herdr"
         fake.write_text(
-            '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HERDR_REPORT_PATH"\n',
+            "#!/bin/sh\n"
+            'if [ "$1 $2" = "pane get" ]; then\n'
+            '  printf \'{"result":{"pane":{"cwd":"%s"}}}\\n\' "$HERDR_PANE_CWD"\n'
+            "  exit\n"
+            "fi\n"
+            'printf \'%s\\n\' "$@" > "$HERDR_REPORT_PATH"\n',
             encoding="utf-8",
         )
         fake.chmod(0o755)
@@ -533,6 +538,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 "HOME": str(root / "home"),
                 "HERDR_BIN_PATH": str(fake),
                 "HERDR_PANE_ID": "w1:p1",
+                "HERDR_PANE_CWD": str(root),
                 "HERDR_REPORT_PATH": str(report),
             }
         )
@@ -547,6 +553,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
             subprocess.run(
                 ["sh", str(script), "--clear-herdr-metadata"],
                 check=True,
+                cwd=root,
                 env=self.statusline_environment(root, fake, report),
             )
 
@@ -624,6 +631,38 @@ class ClaudeStatuslineTest(unittest.TestCase):
             for token in ("title2", "title3"):
                 index = args.index(token)
                 self.assertEqual(args[index - 1], "--clear-token")
+
+    def test_shared_daemon_does_not_report_to_another_workspace(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            wrong_workspace = root / "wrong"
+            current_dir = root / "right" / "product"
+            wrong_workspace.mkdir()
+            current_dir.mkdir(parents=True)
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            script = Path(__file__).parent / "claude/statusline-command.sh"
+            payload = {
+                "cost": {"total_cost_usd": 0},
+                "context_window": {},
+                "model": {"display_name": "test"},
+                "session_id": "forked-session",
+                "session_name": "Right workspace",
+                "transcript_path": str(root / "missing.jsonl"),
+                "workspace": {"current_dir": str(current_dir)},
+            }
+            env = self.statusline_environment(root, fake, report)
+            env["HERDR_PANE_CWD"] = str(wrong_workspace)
+            subprocess.run(
+                ["sh", str(script)],
+                input=json.dumps(payload),
+                text=True,
+                check=True,
+                capture_output=True,
+                env=env,
+            )
+
+            self.assertFalse(report.exists())
 
 
 class ClaudeSkillLinksTest(unittest.TestCase):

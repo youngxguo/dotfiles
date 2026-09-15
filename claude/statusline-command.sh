@@ -7,9 +7,29 @@ herdr_metadata_seq() {
     printf '%s000000000\n' "$(date +%s)"
 }
 
+herdr_pane_cwd() {
+  herdr_bin=${HERDR_BIN_PATH:-herdr}
+  "$herdr_bin" pane get "$1" 2>/dev/null | python3 -c '
+import json, sys
+print(json.load(sys.stdin).get("result", {}).get("pane", {}).get("cwd", ""))
+' 2>/dev/null
+}
+
+path_is_within() {
+  [ -n "$2" ] || return 1
+  path=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+  root=$(cd "$2" 2>/dev/null && pwd -P) || return 1
+  case "$path/" in
+    "$root/"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 clear_herdr_metadata() {
   [ -n "${HERDR_PANE_ID:-}" ] || return 0
   herdr_bin=${HERDR_BIN_PATH:-herdr}
+  pane_cwd=$(herdr_pane_cwd "$HERDR_PANE_ID")
+  path_is_within "$PWD" "$pane_cwd" || return 0
   "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
     --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" \
     --clear-token title1 --clear-token title2 --clear-token title3 \
@@ -203,6 +223,14 @@ fi
 # hyperlink; the clickable link remains in Claude's own statusline instead.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
+  # Claude's shared daemon can leak another session's Herdr pane ID. Never
+  # write across workspaces; the pane's own statusline will refresh its data.
+  route_dir=${repo_root:-${workspace_dir:-$PWD}}
+  pane_cwd=$(herdr_pane_cwd "$HERDR_PANE_ID")
+  path_is_within "$route_dir" "$pane_cwd" || HERDR_PANE_ID=
+fi
+
+if [ -n "$HERDR_PANE_ID" ]; then
   # Herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
   # to session.json next to the socket.
   herdr_session=${HERDR_SOCKET_PATH:+${HERDR_SOCKET_PATH%/*}/session.json}
