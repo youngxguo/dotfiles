@@ -847,6 +847,8 @@ def install_claude():
     apply_links(links_for("claude"))
     merge_claude_settings()
     install_claude_herdr_skill()
+    if not VERIFY_MODE:
+        install_claude_herdr_integrations()
 
 
 def node_version():
@@ -912,6 +914,100 @@ def install_pi_cli():
         print("warning: unable to install pi; continuing")
 
 
+def install_herdr_integration(target, env=None):
+    herdr = herdr_command()
+    if herdr is None:
+        print(f"skipping {target} herdr integration: herdr is not installed")
+        return
+
+    check_kwargs = {"env": env} if env is not None else {}
+    try:
+        status = subprocess.check_output(
+            [herdr, "integration", "status"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            **check_kwargs,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        status = ""
+    if any(line.startswith(f"{target}: current ") for line in status.splitlines()):
+        print(f"{target} herdr integration already current")
+        return
+
+    try:
+        command = [herdr, "integration", "install", target]
+        if env is None:
+            run(command)
+        else:
+            run(command, env=env)
+    except subprocess.CalledProcessError:
+        print(f"warning: unable to install {target} herdr integration; continuing")
+
+
+def remove_cross_account_claude_herdr_hooks(config_dir):
+    """Keep only the Herdr SessionStart hook installed for this Claude account."""
+    settings_path = config_dir / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return
+    hooks = settings.get("hooks")
+    groups = hooks.get("SessionStart") if isinstance(hooks, dict) else None
+    if not isinstance(groups, list):
+        return
+
+    hook_names = ("herdr-agent-state.sh", "herdr-agent-state.ps1")
+    expected_hook_paths = tuple(str(config_dir / "hooks" / name) for name in hook_names)
+    changed = False
+    kept_groups = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            kept_groups.append(group)
+            continue
+        kept_commands = []
+        for hook in group["hooks"]:
+            command = hook.get("command", "") if isinstance(hook, dict) else ""
+            is_herdr_hook = isinstance(command, str) and any(
+                name in command for name in hook_names
+            )
+            is_expected_hook = isinstance(command, str) and any(
+                path in command for path in expected_hook_paths
+            )
+            if is_herdr_hook and not is_expected_hook:
+                changed = True
+                continue
+            kept_commands.append(hook)
+        if kept_commands:
+            if len(kept_commands) != len(group["hooks"]):
+                group["hooks"] = kept_commands
+            kept_groups.append(group)
+        elif group["hooks"]:
+            changed = True
+
+    if not changed:
+        return
+    hooks["SessionStart"] = kept_groups
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    print(f"removed cross-account claude herdr hooks from {settings_path}")
+
+
+def install_claude_herdr_integrations():
+    for config_dir in claude_config_dirs():
+        env = os.environ.copy()
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+        install_herdr_integration("claude", env=env)
+        hooks_dir = config_dir / "hooks"
+        if any(
+            (hooks_dir / name).is_file()
+            for name in ("herdr-agent-state.sh", "herdr-agent-state.ps1")
+        ):
+            remove_cross_account_claude_herdr_hooks(config_dir)
+
+
+def install_pi_herdr_integration():
+    install_herdr_integration("pi")
+
+
 def install_pi():
     print("installing pi")
     if VERIFY_MODE:
@@ -923,6 +1019,8 @@ def install_pi():
 
     print("applying pi config")
     apply_links(links_for("pi"))
+    if not VERIFY_MODE:
+        install_pi_herdr_integration()
 
 
 def ensure_codex_local_config():

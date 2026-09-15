@@ -33,6 +33,7 @@ class PiConfigInstallTest(unittest.TestCase):
                 mock.patch.object(install, "HOME", home),
                 mock.patch.object(install, "REPO_ROOT", repo),
                 mock.patch.object(install, "install_pi_cli"),
+                mock.patch.object(install, "install_pi_herdr_integration"),
                 mock.patch.object(install, "pi_installed", return_value=True),
             ):
                 install.install_pi()
@@ -122,6 +123,34 @@ class PiCliInstallTest(unittest.TestCase):
             mock.patch.object(install, "run") as run_mock,
         ):
             install.install_pi_cli()
+        run_mock.assert_not_called()
+
+    def test_install_pi_herdr_integration_when_missing_or_outdated(self):
+        with (
+            mock.patch.object(install, "herdr_command", return_value="herdr"),
+            mock.patch.object(
+                install.subprocess,
+                "check_output",
+                return_value="pi: not installed (~/.pi/agent/extensions/herdr-agent-state.ts)\n",
+            ),
+            mock.patch.object(install, "run") as run_mock,
+        ):
+            install.install_pi_herdr_integration()
+
+        run_mock.assert_called_once_with(["herdr", "integration", "install", "pi"])
+
+    def test_install_pi_skips_current_herdr_integration(self):
+        with (
+            mock.patch.object(install, "herdr_command", return_value="herdr"),
+            mock.patch.object(
+                install.subprocess,
+                "check_output",
+                return_value="pi: current (v8) (~/.pi/agent/extensions/herdr-agent-state.ts)\n",
+            ),
+            mock.patch.object(install, "run") as run_mock,
+        ):
+            install.install_pi_herdr_integration()
+
         run_mock.assert_not_called()
 
 
@@ -271,6 +300,7 @@ class ClaudeInstallTest(unittest.TestCase):
                 mock.patch.object(install, "HOME", home),
                 mock.patch.object(install, "REPO_ROOT", repo),
                 mock.patch.object(install, "herdr_command", return_value="herdr"),
+                mock.patch.object(install, "install_claude_herdr_integrations"),
                 mock.patch.object(
                     install.subprocess, "check_output", return_value=self.SKILL
                 ) as skill_mock,
@@ -280,7 +310,14 @@ class ClaudeInstallTest(unittest.TestCase):
                 config_dirs = install.claude_config_dirs()
                 self.assertEqual(
                     [d.name for d in config_dirs],
-                    [".claude", ".claude2", ".claude3", ".claude4", ".claude5", ".claude6"],
+                    [
+                        ".claude",
+                        ".claude2",
+                        ".claude3",
+                        ".claude4",
+                        ".claude5",
+                        ".claude6",
+                    ],
                 )
                 for config_dir in config_dirs:
                     self.assertEqual(
@@ -319,6 +356,96 @@ class ClaudeInstallTest(unittest.TestCase):
                 self.assertTrue(
                     skill_path.read_text(encoding="utf-8").endswith("## New section\n")
                 )
+
+    def test_install_claude_herdr_integrations_cover_every_config_dir(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "herdr_command", return_value="herdr"),
+                mock.patch.object(
+                    install.subprocess,
+                    "check_output",
+                    return_value="claude: not installed (~/.claude/hooks/herdr-agent-state.sh)\n",
+                ) as status_mock,
+                mock.patch.object(install, "run") as run_mock,
+            ):
+                install.install_claude_herdr_integrations()
+
+            config_dirs = [home / ".claude"] + [
+                home / f".claude{number}" for number in (2, 3, 4, 5, 6)
+            ]
+            self.assertEqual(len(run_mock.mock_calls), 6)
+            self.assertEqual(status_mock.call_count, 6)
+            for status_call, run_call, config_dir in zip(
+                status_mock.mock_calls, run_mock.mock_calls, config_dirs, strict=True
+            ):
+                self.assertEqual(
+                    status_call.kwargs["env"]["CLAUDE_CONFIG_DIR"], str(config_dir)
+                )
+                self.assertEqual(
+                    run_call.args[0], ["herdr", "integration", "install", "claude"]
+                )
+                self.assertEqual(
+                    run_call.kwargs["env"]["CLAUDE_CONFIG_DIR"], str(config_dir)
+                )
+
+    def test_remove_cross_account_claude_herdr_hooks(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            config_dir = home / ".claude2"
+            config_dir.mkdir(parents=True)
+            settings_path = config_dir / "settings.json"
+            own_hook = f"bash '{config_dir}/hooks/herdr-agent-state.sh' session"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "SessionStart": [
+                                {
+                                    "hooks": [
+                                        {
+                                            "type": "command",
+                                            "command": f"bash '{home}/.claude/hooks/herdr-agent-state.sh' session",
+                                        },
+                                        {"type": "command", "command": own_hook},
+                                        {"type": "command", "command": "echo keep-me"},
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            install.remove_cross_account_claude_herdr_hooks(config_dir)
+
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            commands = [
+                hook["command"]
+                for group in settings["hooks"]["SessionStart"]
+                for hook in group["hooks"]
+            ]
+            self.assertEqual(commands, [own_hook, "echo keep-me"])
+
+    def test_install_claude_herdr_integrations_skip_current_accounts(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "herdr_command", return_value="herdr"),
+                mock.patch.object(
+                    install.subprocess,
+                    "check_output",
+                    return_value="claude: current (v9) (~/.claude/hooks/herdr-agent-state.sh)\n",
+                ) as status_mock,
+                mock.patch.object(install, "run") as run_mock,
+            ):
+                install.install_claude_herdr_integrations()
+
+            self.assertEqual(status_mock.call_count, 6)
+            run_mock.assert_not_called()
 
     def test_install_claude_herdr_skill_skips_without_herdr(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
