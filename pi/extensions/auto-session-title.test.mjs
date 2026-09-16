@@ -146,25 +146,50 @@ test("clears its terminal and Herdr titles on /new", async () => {
 		const reports = harness.execCalls.filter(
 			(call) => call.command === "herdr-test" && call.args[0] === "pane",
 		);
-		assert.equal(reports.length, 1);
-		const report = reports[0];
+		assert.equal(reports.length, 3);
+		for (const report of reports) {
+			const updates = report.args.filter(
+				(arg) => arg === "--token" || arg === "--clear-token",
+			);
+			assert.ok(updates.length <= 16);
+		}
+		const reportArgs = reports.flatMap((report) => report.args);
 		for (const token of [
 			"title1",
 			"title2",
 			"title3",
 			"repo",
 			"branch",
+			"model",
+			"subscription",
+			"model_fable",
+			"model_opus",
+			"model_sonnet",
+			"model_haiku",
+			"model_sol",
+			"model_terra",
+			"model_luna",
+			"model_other",
+			"subscription_codex",
+			"subscription_c1",
+			"subscription_c2",
+			"subscription_c3",
+			"subscription_c4",
+			"subscription_c5",
+			"subscription_c6",
 			"pr_open",
 			"pr_draft",
 			"pr_merged",
 			"pr_closed",
 		]) {
-			const tokenIndex = report.args.indexOf(token);
+			const tokenIndex = reportArgs.indexOf(token);
 			assert.ok(tokenIndex > 0, `missing clear for ${token}`);
-			assert.equal(report.args[tokenIndex - 1], "--clear-token");
+			assert.equal(reportArgs[tokenIndex - 1], "--clear-token");
 		}
-		const seq = report.args[report.args.indexOf("--seq") + 1];
-		assert.ok(BigInt(seq) > BigInt(Number.MAX_SAFE_INTEGER));
+		for (const report of reports) {
+			const seq = report.args[report.args.indexOf("--seq") + 1];
+			assert.ok(BigInt(seq) > BigInt(Number.MAX_SAFE_INTEGER));
+		}
 		assert.equal(
 			harness.execCalls.some((call) => call.command === "git" || call.command === "gh"),
 			false,
@@ -177,7 +202,7 @@ test("clears its terminal and Herdr titles on /new", async () => {
 	}
 });
 
-test("publishes the shared Claude sidebar tokens when running in Herdr", async () => {
+test("publishes runtime details with the shared sidebar tokens", async () => {
 	const originalEnvironment = {
 		HERDR_BIN_PATH: process.env.HERDR_BIN_PATH,
 		HERDR_ENV: process.env.HERDR_ENV,
@@ -218,6 +243,7 @@ test("publishes the shared Claude sidebar tokens when running in Herdr", async (
 			}
 			return { stdout: "", stderr: "", code: 0, killed: false };
 		});
+		harness.ctx.model = { id: "gpt-5.6-sol", provider: "openai-codex" };
 
 		harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
 		await new Promise((resolve) => setImmediate(resolve));
@@ -234,15 +260,58 @@ test("publishes the shared Claude sidebar tokens when running in Herdr", async (
 		);
 		await new Promise((resolve) => setImmediate(resolve));
 
-		const report = harness.execCalls.find(
+		const reports = harness.execCalls.filter(
 			(call) => call.command === "herdr-test" && call.args[0] === "pane",
 		);
+		assert.equal(reports.length, 3);
+		const bySource = (source) =>
+			reports.find(
+				(call) => call.args[call.args.indexOf("--source") + 1] === source,
+			);
+		const report = bySource("pi-auto-session-title");
+		const modelReport = bySource("pi-auto-session-title-model");
+		const subscriptionReport = bySource("pi-auto-session-title-subscription");
 		assert.ok(report);
+		assert.ok(modelReport);
+		assert.ok(subscriptionReport);
 		assert.ok(report.args.includes("title1=Fix blank agents menu in"));
 		assert.ok(report.args.includes("title2=herdr"));
 		assert.ok(report.args.includes("repo=📁 repo"));
 		assert.ok(report.args.includes("branch= main"));
+		assert.ok(modelReport.args.includes("model_sol=gpt-5.6-sol"));
+		assert.ok(subscriptionReport.args.includes("subscription_codex=codex"));
 		assert.ok(report.args.includes("pr_open= #42"));
+
+		harness.execCalls.length = 0;
+		const selectedModel = { id: "gpt-5.6-terra", provider: "openai-codex" };
+		harness.handlers.get("model_select")(
+			{ model: selectedModel, previousModel: harness.ctx.model, source: "set" },
+			harness.ctx,
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+
+		const changedReports = harness.execCalls.filter(
+			(call) => call.command === "herdr-test" && call.args[0] === "pane",
+		);
+		const changedModelReport = changedReports.find(
+			(call) =>
+				call.args[call.args.indexOf("--source") + 1] ===
+				"pi-auto-session-title-model",
+		);
+		const changedSubscriptionReport = changedReports.find(
+			(call) =>
+				call.args[call.args.indexOf("--source") + 1] ===
+				"pi-auto-session-title-subscription",
+		);
+		assert.ok(changedModelReport);
+		assert.ok(changedSubscriptionReport);
+		assert.ok(changedModelReport.args.includes("model_terra=gpt-5.6-terra"));
+		assert.ok(
+			changedSubscriptionReport.args.includes("subscription_codex=codex"),
+		);
+		const oldModelIndex = changedModelReport.args.indexOf("model_sol");
+		assert.ok(oldModelIndex > 0);
+		assert.equal(changedModelReport.args[oldModelIndex - 1], "--clear-token");
 	} finally {
 		for (const [name, value] of Object.entries(originalEnvironment)) {
 			if (value === undefined) delete process.env[name];

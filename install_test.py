@@ -517,19 +517,30 @@ class ClaudeStatuslineTest(unittest.TestCase):
             '  printf \'{"result":{"pane":{"cwd":"%s"}}}\\n\' "$HERDR_PANE_CWD"\n'
             "  exit\n"
             "fi\n"
-            'printf \'%s\\n\' "$@" > "$HERDR_REPORT_PATH"\n',
+            "source=unknown\n"
+            "previous=\n"
+            "for arg do\n"
+            '  [ "$previous" = --source ] && source=$arg\n'
+            "  previous=$arg\n"
+            "done\n"
+            'printf \'%s\\n\' "$@" > "$HERDR_REPORT_PATH.$source"\n',
             encoding="utf-8",
         )
         fake.chmod(0o755)
         return fake
 
     @staticmethod
-    def wait_for_report(path):
+    def wait_for_report(path, expected=3):
         for _ in range(100):
-            if path.is_file():
-                return path.read_text(encoding="utf-8").splitlines()
+            reports = sorted(path.parent.glob(f"{path.name}.*"))
+            if len(reports) == expected:
+                return [
+                    arg
+                    for report in reports
+                    for arg in report.read_text(encoding="utf-8").splitlines()
+                ]
             time.sleep(0.01)
-        raise AssertionError("statusline did not report Herdr metadata")
+        raise AssertionError("statusline did not report all Herdr metadata")
 
     def statusline_environment(self, root, fake, report):
         env = os.environ.copy()
@@ -565,6 +576,23 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 "title3",
                 "repo",
                 "branch",
+                "model",
+                "subscription",
+                "model_fable",
+                "model_opus",
+                "model_sonnet",
+                "model_haiku",
+                "model_sol",
+                "model_terra",
+                "model_luna",
+                "model_other",
+                "subscription_codex",
+                "subscription_c1",
+                "subscription_c2",
+                "subscription_c3",
+                "subscription_c4",
+                "subscription_c5",
+                "subscription_c6",
                 "pr_open",
                 "pr_draft",
                 "pr_merged",
@@ -611,7 +639,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
             payload = {
                 "cost": {"total_cost_usd": 0},
                 "context_window": {},
-                "model": {"display_name": "test"},
+                "model": {"display_name": "Fable 5.1"},
                 "session_id": "parent",
                 "session_name": "Adversarial review",
                 "transcript_path": str(root / "missing.jsonl"),
@@ -628,6 +656,8 @@ class ClaudeStatuslineTest(unittest.TestCase):
 
             args = self.wait_for_report(report)
             self.assertIn("title1=Adversarial review", args)
+            self.assertIn("model_fable=Fable 5.1", args)
+            self.assertIn("subscription_c1=c1", args)
             for token in ("title2", "title3"):
                 index = args.index(token)
                 self.assertEqual(args[index - 1], "--clear-token")
@@ -662,7 +692,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 env=env,
             )
 
-            self.assertFalse(report.exists())
+            self.assertFalse(list(root.glob("report.*")))
 
 
 class ClaudeSkillLinksTest(unittest.TestCase):

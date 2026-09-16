@@ -1,6 +1,8 @@
 #!/bin/sh
 
 HERDR_METADATA_SOURCE=claude-statusline
+HERDR_MODEL_SOURCE=claude-statusline-model
+HERDR_SUBSCRIPTION_SOURCE=claude-statusline-subscription
 
 herdr_metadata_seq() {
   python3 -c 'import time; print(time.time_ns())' 2>/dev/null ||
@@ -37,6 +39,22 @@ clear_herdr_metadata() {
     --clear-token pr_open --clear-token pr_draft \
     --clear-token pr_merged --clear-token pr_closed \
     </dev/null >/dev/null 2>&1 || true
+  "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
+    --source "$HERDR_MODEL_SOURCE" --seq "$(herdr_metadata_seq)" \
+    --clear-token model \
+    --clear-token model_fable --clear-token model_opus \
+    --clear-token model_sonnet --clear-token model_haiku \
+    --clear-token model_sol --clear-token model_terra \
+    --clear-token model_luna --clear-token model_other \
+    </dev/null >/dev/null 2>&1 || true
+  "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
+    --source "$HERDR_SUBSCRIPTION_SOURCE" --seq "$(herdr_metadata_seq)" \
+    --clear-token subscription \
+    --clear-token subscription_codex --clear-token subscription_c1 \
+    --clear-token subscription_c2 --clear-token subscription_c3 \
+    --clear-token subscription_c4 --clear-token subscription_c5 \
+    --clear-token subscription_c6 \
+    </dev/null >/dev/null 2>&1 || true
 }
 
 if [ "${1:-}" = --clear-herdr-metadata ]; then
@@ -62,7 +80,7 @@ print(display)
 # Which subscription the session is on. Every account runs this one statusline
 # out of ~/.claude, so the account cannot come from where the script lives, and
 # CLAUDE_CONFIG_DIR is unset on the default one; the transcript sits under the
-# config dir actually in use, so it answers for all four.
+# config dir actually in use, so it answers for every configured account.
 transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
 session_name=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_name',''))")
 account=$(TRANSCRIPT="$transcript" python3 -c "
@@ -278,6 +296,21 @@ EOF
   else
     set -- "$@" --clear-token repo --clear-token branch
   fi
+  model_key=$(printf '%s' "$model" | tr '[:upper:]' '[:lower:]')
+  case $model_key in
+    *fable*) model_token=model_fable ;;
+    *opus*) model_token=model_opus ;;
+    *sonnet*) model_token=model_sonnet ;;
+    *haiku*) model_token=model_haiku ;;
+    *sol*) model_token=model_sol ;;
+    *terra*) model_token=model_terra ;;
+    *luna*) model_token=model_luna ;;
+    *) model_token=model_other ;;
+  esac
+  case $account in
+    c1 | c2 | c3 | c4 | c5 | c6) subscription_token=subscription_$account ;;
+    *) subscription_token= ;;
+  esac
   case $pr_state in
     open | draft | merged) pr_token=pr_$pr_state ;;
     *) pr_token=pr_closed ;;
@@ -289,8 +322,36 @@ EOF
       set -- "$@" --clear-token "pr_$state"
     fi
   done
-  nohup "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
-    --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" "$@" \
+  report_herdr_metadata() {
+    report_bin=$1
+    report_pane=$2
+    shift 2
+    "$report_bin" pane report-metadata "$report_pane" \
+      --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
+
+    set -- --clear-token model
+    for token in model_fable model_opus model_sonnet model_haiku model_sol model_terra model_luna model_other; do
+      if [ "$token" = "$model_token" ]; then
+        set -- "$@" --token "$token=$model"
+      else
+        set -- "$@" --clear-token "$token"
+      fi
+    done
+    "$report_bin" pane report-metadata "$report_pane" \
+      --source "$HERDR_MODEL_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
+
+    set -- --clear-token subscription
+    for token in subscription_codex subscription_c1 subscription_c2 subscription_c3 subscription_c4 subscription_c5 subscription_c6; do
+      if [ "$token" = "$subscription_token" ]; then
+        set -- "$@" --token "$token=$account"
+      else
+        set -- "$@" --clear-token "$token"
+      fi
+    done
+    "$report_bin" pane report-metadata "$report_pane" \
+      --source "$HERDR_SUBSCRIPTION_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
+  }
+  report_herdr_metadata "$herdr_bin" "$HERDR_PANE_ID" "$@" \
     </dev/null >/dev/null 2>&1 &
 fi
 

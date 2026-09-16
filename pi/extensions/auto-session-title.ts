@@ -14,9 +14,30 @@ const TITLE_SYSTEM_PROMPT = `Name a coding-agent session from the user's opening
 
 Return only the title. Use 3-7 words and at most 50 characters. Preserve meaningful identifiers and capitalization. Do not use quotes, markdown, a trailing full stop, or filler such as "Help with".`;
 const HERDR_METADATA_SOURCE = "pi-auto-session-title";
+const HERDR_MODEL_SOURCE = "pi-auto-session-title-model";
+const HERDR_SUBSCRIPTION_SOURCE = "pi-auto-session-title-subscription";
 const HERDR_TITLE_FALLBACK_WIDTH = 26;
 const HERDR_TITLE_ROWS = 3;
-const HERDR_METADATA_TOKENS = [
+const HERDR_MODEL_TOKENS = [
+	"model_fable",
+	"model_opus",
+	"model_sonnet",
+	"model_haiku",
+	"model_sol",
+	"model_terra",
+	"model_luna",
+	"model_other",
+] as const;
+const HERDR_SUBSCRIPTION_TOKENS = [
+	"subscription_codex",
+	"subscription_c1",
+	"subscription_c2",
+	"subscription_c3",
+	"subscription_c4",
+	"subscription_c5",
+	"subscription_c6",
+] as const;
+const HERDR_MAIN_TOKENS = [
 	"title1",
 	"title2",
 	"title3",
@@ -27,6 +48,24 @@ const HERDR_METADATA_TOKENS = [
 	"pr_merged",
 	"pr_closed",
 ] as const;
+const HERDR_MODEL_METADATA_TOKENS = ["model", ...HERDR_MODEL_TOKENS] as const;
+const HERDR_SUBSCRIPTION_METADATA_TOKENS = [
+	"subscription",
+	...HERDR_SUBSCRIPTION_TOKENS,
+] as const;
+
+function herdrModelToken(modelId: string): (typeof HERDR_MODEL_TOKENS)[number] {
+	const normalized = modelId.toLowerCase();
+	const words = normalized.split(/[^a-z0-9]+/);
+	if (words.includes("fable")) return "model_fable";
+	if (words.includes("opus")) return "model_opus";
+	if (words.includes("sonnet")) return "model_sonnet";
+	if (words.includes("haiku")) return "model_haiku";
+	if (words.includes("sol")) return "model_sol";
+	if (words.includes("terra")) return "model_terra";
+	if (words.includes("luna")) return "model_luna";
+	return "model_other";
+}
 
 function truncateTitle(title: string): string {
 	const characters = [...title];
@@ -145,20 +184,23 @@ export default function (pi: ExtensionAPI) {
 	async function reportHerdrMetadata(
 		title: string | undefined,
 		ctx: ExtensionContext,
+		model: ExtensionContext["model"] = ctx.model,
 	): Promise<void> {
 		const paneId = process.env.HERDR_PANE_ID;
 		if (process.env.HERDR_ENV !== "1" || !paneId || ctx.mode !== "tui") return;
 
 		const herdr = process.env.HERDR_BIN_PATH || "herdr";
-		const args = [
+		const sequence = String(++herdrMetadataSeq);
+		const metadataArgs = (source: string) => [
 			"pane",
 			"report-metadata",
 			paneId,
 			"--source",
-			HERDR_METADATA_SOURCE,
+			source,
 			"--seq",
-			String(++herdrMetadataSeq),
+			sequence,
 		];
+		const args = metadataArgs(HERDR_METADATA_SOURCE);
 		const rows = title ? herdrTitleRows(title, herdrSidebarTitleWidth()) : [];
 		for (let index = 0; index < HERDR_TITLE_ROWS; index++) {
 			const row = rows[index];
@@ -260,8 +302,35 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
+		const modelArgs = metadataArgs(HERDR_MODEL_SOURCE);
+		modelArgs.push("--clear-token", "model");
+		const selectedModelToken = model?.id ? herdrModelToken(model.id) : undefined;
+		for (const token of HERDR_MODEL_TOKENS) {
+			if (token === selectedModelToken && model) {
+				modelArgs.push("--token", `${token}=${model.id}`);
+			} else {
+				modelArgs.push("--clear-token", token);
+			}
+		}
+
+		const subscriptionArgs = metadataArgs(HERDR_SUBSCRIPTION_SOURCE);
+		subscriptionArgs.push("--clear-token", "subscription");
+		const selectedSubscriptionToken =
+			model?.provider === "openai-codex" ? "subscription_codex" : undefined;
+		for (const token of HERDR_SUBSCRIPTION_TOKENS) {
+			if (token === selectedSubscriptionToken) {
+				subscriptionArgs.push("--token", `${token}=codex`);
+			} else {
+				subscriptionArgs.push("--clear-token", token);
+			}
+		}
+
 		try {
-			await pi.exec(herdr, args);
+			await Promise.all([
+				pi.exec(herdr, args),
+				pi.exec(herdr, modelArgs),
+				pi.exec(herdr, subscriptionArgs),
+			]);
 		} catch {}
 	}
 
@@ -269,20 +338,33 @@ export default function (pi: ExtensionAPI) {
 		const paneId = process.env.HERDR_PANE_ID;
 		if (process.env.HERDR_ENV !== "1" || !paneId || ctx.mode !== "tui") return;
 
-		const args = [
-			"pane",
-			"report-metadata",
-			paneId,
-			"--source",
-			HERDR_METADATA_SOURCE,
-			"--seq",
-			String(++herdrMetadataSeq),
-		];
-		for (const token of HERDR_METADATA_TOKENS) {
-			args.push("--clear-token", token);
-		}
+		const sequence = String(++herdrMetadataSeq);
+		const clearArgs = (source: string, tokens: readonly string[]) => {
+			const args = [
+				"pane",
+				"report-metadata",
+				paneId,
+				"--source",
+				source,
+				"--seq",
+				sequence,
+			];
+			for (const token of tokens) args.push("--clear-token", token);
+			return args;
+		};
+		const herdr = process.env.HERDR_BIN_PATH || "herdr";
 		try {
-			await pi.exec(process.env.HERDR_BIN_PATH || "herdr", args);
+			await Promise.all([
+				pi.exec(herdr, clearArgs(HERDR_METADATA_SOURCE, HERDR_MAIN_TOKENS)),
+				pi.exec(herdr, clearArgs(HERDR_MODEL_SOURCE, HERDR_MODEL_METADATA_TOKENS)),
+				pi.exec(
+					herdr,
+					clearArgs(
+						HERDR_SUBSCRIPTION_SOURCE,
+						HERDR_SUBSCRIPTION_METADATA_TOKENS,
+					),
+				),
+			]);
 		} catch {}
 	}
 
@@ -399,6 +481,10 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_settled", (_event, ctx) => {
 		generateTitle(ctx);
 		void reportHerdrMetadata(pi.getSessionName(), ctx);
+	});
+
+	pi.on("model_select", (event, ctx) => {
+		void reportHerdrMetadata(pi.getSessionName(), ctx, event.model);
 	});
 
 	pi.on("session_info_changed", (event, ctx) => {

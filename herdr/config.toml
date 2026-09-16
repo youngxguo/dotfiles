@@ -68,24 +68,42 @@ status_indicators = "dots"
 show_agent_labels_on_pane_borders = true
 
 # Pane metadata from Claude's statusline and Pi's auto-session-title extension:
-# Herdr has no repo, branch or PR token for agent rows, cannot wrap a row (hence
-# $title1..3) and fixes token colors here (hence one token per PR state).
+# Herdr has no repo, branch, PR, model or subscription token for agent rows,
+# cannot wrap a row (hence $title1..3) and fixes token colors here (hence one
+# token per colored value).
 [ui.sidebar.agents]
-# Bold titles keep neighbouring five-line entries from blurring together. The
+# Bold titles keep neighbouring six-line entries from blurring together. The
 # branch is the row that says which piece of work a pane is on, so it gets a row
-# to itself, undimmed; the repo folder is the least interesting token and sits
-# dim on the bottom row, with the PR beside it.
+# to itself, undimmed; the PR follows it, then the repo and color-coded runtime
+# details sit together on the bottom row.
 rows = [
   ["state_icon", { token = "$num", bold = true, dim = false }, { token = "$title1", bold = true, dim = false }],
   [{ token = "$title2", bold = true, dim = false }],
   [{ token = "$title3", bold = true, dim = false }],
   [{ token = "$branch", dim = false }],
   [
-    { token = "$repo", dim = true },
     { token = "$pr_open", dim = false, fg = "#3fb950" },
     { token = "$pr_draft", dim = false, fg = "#8b949e" },
     { token = "$pr_merged", dim = false, fg = "#a371f7" },
     { token = "$pr_closed", dim = false, fg = "#f85149" },
+  ],
+  [
+    { token = "$repo", dim = true },
+    { token = "$subscription_codex", bold = true, dim = false, fg = "#fab387" },
+    { token = "$subscription_c1", bold = true, dim = false, fg = "#89b4fa" },
+    { token = "$subscription_c2", bold = true, dim = false, fg = "#89dceb" },
+    { token = "$subscription_c3", bold = true, dim = false, fg = "#f9e2af" },
+    { token = "$subscription_c4", bold = true, dim = false, fg = "#a6e3a1" },
+    { token = "$subscription_c5", bold = true, dim = false, fg = "#f38ba8" },
+    { token = "$subscription_c6", bold = true, dim = false, fg = "#cba6f7" },
+    { token = "$model_fable", dim = false, fg = "#f5c2e7" },
+    { token = "$model_opus", dim = false, fg = "#cba6f7" },
+    { token = "$model_sonnet", dim = false, fg = "#89b4fa" },
+    { token = "$model_haiku", dim = false, fg = "#94e2d5" },
+    { token = "$model_sol", dim = false, fg = "#f9e2af" },
+    { token = "$model_terra", dim = false, fg = "#a6e3a1" },
+    { token = "$model_luna", dim = false, fg = "#b4befe" },
+    { token = "$model_other", dim = false, fg = "#74c7ec" },
   ],
 ]
 
