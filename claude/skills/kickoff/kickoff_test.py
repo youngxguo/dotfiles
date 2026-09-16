@@ -68,6 +68,41 @@ class MainTest(unittest.TestCase):
             kickoff.main(["new-work"])
 
 
+class LaunchChoiceTest(unittest.TestCase):
+    def setUp(self):
+        self.c2 = kickoff.rebump.Account(label="c2", config_dir="/cfg/c2")
+        self.c3 = kickoff.rebump.Account(label="c3", config_dir="/cfg/c3")
+        self.accounts = [self.c2, self.c3]
+        patcher = mock.patch.object(
+            kickoff.rebump, "read_accounts", return_value=self.accounts
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_an_account_request_still_uses_rebumps_default_model_logic(self):
+        expected = (self.c3, None, "CLAUDE_CONFIG_DIR=/cfg/c3")
+        with mock.patch.object(
+            kickoff.rebump, "launch_choice", return_value=expected
+        ) as choose:
+            self.assertEqual(kickoff.launch_choice("c3", None), expected)
+        choose.assert_called_once_with(self.accounts, "c3")
+
+    def test_an_explicit_account_and_model_are_both_pinned(self):
+        self.c3.fable_used = 100.0
+        account, model, prefix = kickoff.launch_choice("c3", "opus")
+        self.assertIs(account, self.c3)
+        self.assertEqual(model, "opus")
+        self.assertEqual(
+            prefix,
+            "CLAUDE_CONFIG_DIR=/cfg/c3 ANTHROPIC_MODEL=opus",
+        )
+
+    def test_a_spent_model_cap_rejects_the_requested_account(self):
+        self.c3.fable_used = 100.0
+        with self.assertRaisesRegex(SystemExit, "c3 cannot run 'fable'"):
+            kickoff.launch_choice("c3", "fable")
+
+
 class AgentNameTest(unittest.TestCase):
     def name(self, slug, live=()):
         agents = {"agent_list": {"result": {"agents": [{"name": n} for n in live]}}}

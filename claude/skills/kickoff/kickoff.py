@@ -96,9 +96,39 @@ def pane_agent(pane_id: str) -> str | None:
     return (got.get("agent") or {}).get("agent")
 
 
-def launch_claude(pane_id: str, log) -> str:
-    """Start Claude on the account rebump chooses."""
-    account, model, prefix = rebump.launch_choice(rebump.read_accounts(), None)
+def launch_choice(
+    to_label: str | None, requested_model: str | None
+) -> tuple[rebump.Account, str | None, str]:
+    """Choose the requested account and model, or use rebump's defaults."""
+    accounts = rebump.read_accounts()
+    if not requested_model:
+        return rebump.launch_choice(accounts, to_label)
+
+    if to_label:
+        account = rebump.pick_account(accounts, to_label)
+        if not rebump.can_run_model(account, requested_model):
+            raise SystemExit(
+                f"{account.label} cannot run {requested_model!r} with headroom"
+            )
+    else:
+        account = rebump.choose_session_target(accounts, requested_model)
+        if account is None:
+            raise SystemExit(f"no account can run {requested_model!r} with headroom")
+    return (
+        account,
+        requested_model,
+        rebump.launch_prefix(account.config_dir, requested_model),
+    )
+
+
+def launch_claude(
+    pane_id: str,
+    log,
+    to_label: str | None = None,
+    requested_model: str | None = None,
+) -> str:
+    """Start Claude with the requested launch constraints."""
+    account, model, prefix = launch_choice(to_label, requested_model)
     command = " ".join([prefix, "claude"])
     log(f"  account {account.label}{f' on {model}' if model else ''}")
     herdr("pane", "run", pane_id, command)
@@ -112,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("brief", nargs="*", help="the user's task")
     parser.add_argument("--brief-file", help="read the task from a file")
     parser.add_argument("--repo", help="use another open repository")
+    parser.add_argument(
+        "--to",
+        help="Claude account to use, by cusage label or alias such as c3",
+    )
+    parser.add_argument("--model", help="Claude model to pin for the new session")
 
     args = parser.parse_args(argv)
     brief = (
@@ -149,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     name = agent_name(slug)
-    launch_claude(pane_id, log)
+    launch_claude(pane_id, log, args.to, args.model)
     if not wait_for(lambda: pane_agent(pane_id) == "claude", 60):
         raise SystemExit(
             f"herdr never detected claude in {pane_id}; {workspace_id} is open at {path}"
