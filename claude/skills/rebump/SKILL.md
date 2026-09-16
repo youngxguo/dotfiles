@@ -105,19 +105,20 @@ It prints the environment the session should start under on stdout (the
 accounts table goes to stderr) and exits 1 when no account has headroom; stop
 and tell the user in that case instead of launching anyway. Headroom means the
 5-hour window is under 90% and the weekly cap is not blocked; a spent Fable
-weekly cap does not disqualify an account, it only decides the model. Fable is
-the model we want running, so accounts with Fable headroom come first. Among
-them it picks the one whose Fable week resets soonest, not the emptiest:
-weekly quota is lost at the reset, while quota on an account that resets later
-can still serve work until then, so the emptiest account is the reserve. An
-account whose 5-hour window is over 80% ranks after the open ones, by when
-that window resets, so a new session is not bumped straight away. Accounts
-with a spent Fable cap come last, soonest weekly reset first. Ties break on
-the emptiest 5-hour window. `--to c3` insists on a named account and fails if
-it is spent. `pick` reuses a cusage report younger than five minutes, so
-starting several agents in a row only pays for cusage once; `--max-age 0`
-forces a fresh read. Only this brand-new-session flow may choose Opus as a
-fallback; it never changes a model after a session has started.
+weekly cap does not disqualify an account, it only decides the model. It always
+spends the subscription whose overall weekly quota resets soonest, because
+unused quota is lost at reset while a later-resetting account can still serve
+work afterward. Model selection does not affect this ordering: Fable
+availability only determines whether an existing Fable session can use the
+account, or whether a new session needs the Opus fallback. A spent Fable cap
+never pushes an otherwise earlier-expiring subscription to the back. Equal
+weekly resets prefer an open (under 80%) 5-hour window; crowded ties prefer the
+one whose 5-hour window resets sooner, then the emptier window. `--to c3`
+insists on a named account and fails if it is spent. `pick` reuses a cusage
+report younger than five minutes, so starting several agents in a row only
+pays for cusage once; `--max-age 0` forces a fresh read. Only this
+brand-new-session flow may choose Opus as a fallback; it never changes a model
+after a session has started.
 
 What it prints is a shell prefix, not a `KEY=VALUE` pair. It is one of
 `CLAUDE_CONFIG_DIR=<dir>` or `env -u CLAUDE_CONFIG_DIR` (the default account is

@@ -318,32 +318,23 @@ def reset_epoch(iso: str | None) -> float:
 
 
 def target_rank(account: Account) -> tuple:
-    """Weekly quota is perishable: whatever is unspent when an account's week
-    resets is lost, while the same quota on an account that resets later can
-    still serve work until then. So the account whose quota expires soonest
-    is the one to spend first, and the emptiest account is the reserve. Fable
-    is the model we want running, so Fable headroom ranks ahead of a spent
-    Fable cap however the resets fall, and an account whose 5-hour window is
-    about to bind ranks after the open ones, soonest window reset first, so a
-    new session is not bumped straight away. Ties break on the emptiest
-    5-hour window, which is the only thing left that changes anything: it
-    keeps the session on its account longer."""
-    if account.fable_spent:
-        tier, resets = 2, account.week_resets
-    elif (account.session_used or 0.0) >= SESSION_CROWDED_PERCENT:
-        tier, resets = 1, account.session_resets
-    else:
-        tier, resets = 0, account.fable_resets
+    """Spend the subscription whose overall weekly quota expires soonest,
+    regardless of model or Fable availability. The Fable reset is only a
+    fallback when cusage omits the overall reset. Equal weekly resets are
+    broken by 5-hour-window pressure."""
+    weekly_resets = account.week_resets or account.fable_resets
+    crowded = (account.session_used or 0.0) >= SESSION_CROWDED_PERCENT
     return (
-        tier,
-        reset_epoch(resets),
+        reset_epoch(weekly_resets),
+        crowded,
+        reset_epoch(account.session_resets) if crowded else float("inf"),
         account.session_used or 0.0,
-        account.fable_used or 0.0,
+        account.week_used or 0.0,
     )
 
 
 def choose_target(accounts: list[Account], exclude: str = "") -> Account | None:
-    """The usable account whose quota expires soonest; see `target_rank`."""
+    """The usable account whose next consumed quota expires soonest."""
     candidates = [a for a in accounts if a.usable and a.config_dir != exclude]
     candidates.sort(key=target_rank)
     return candidates[0] if candidates else None
@@ -1286,8 +1277,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--to",
         help="account to move to or pick, by cusage label, alias (claude3, c3) or "
-        "config dir (default: the most Fable headroom, then the emptiest 5-hour "
-        "window)",
+        "config dir (default: the overall weekly quota that resets soonest; "
+        "ties prefer an open 5-hour window)",
     )
     parser.add_argument(
         "--pane", action="append", help="only these pane ids (repeatable)"

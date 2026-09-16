@@ -128,41 +128,58 @@ class AccountTest(unittest.TestCase):
         )
         self.assertEqual(target.label, "c4")
 
-    def test_target_is_the_account_whose_fable_week_resets_soonest(self):
+    def test_target_is_the_account_whose_overall_week_resets_soonest(self):
         c2, c4 = self.accounts[1], self.accounts[3]
-        c2.fable_resets, c4.fable_resets = resets_in(48), resets_in(120)
+        c2.week_resets, c4.week_resets = resets_in(48), resets_in(120)
         self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
-        c2.fable_resets, c4.fable_resets = resets_in(120), resets_in(48)
+        c2.week_resets, c4.week_resets = resets_in(120), resets_in(48)
         self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
 
     def test_a_known_reset_ranks_ahead_of_an_unknown_one(self):
-        self.accounts[1].fable_resets = resets_in(150)
+        self.accounts[1].week_resets = resets_in(150)
         self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
 
     def test_equal_resets_break_on_the_emptiest_session_window(self):
         c2, c4 = self.accounts[1], self.accounts[3]
-        c2.session_used, c2.fable_used = 70.0, 20.0
-        c4.session_used, c4.fable_used = 10.0, 60.0
+        c2.session_used, c2.week_used = 70.0, 20.0
+        c4.session_used, c4.week_used = 10.0, 60.0
         self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
 
-    def test_crowded_session_window_ranks_after_open_ones(self):
+    def test_earlier_weekly_reset_ranks_ahead_of_an_open_5h_window(self):
         c2, c4 = self.accounts[1], self.accounts[3]
-        c2.fable_resets, c4.fable_resets = resets_in(48), resets_in(120)
+        c2.week_resets, c4.week_resets = resets_in(48), resets_in(120)
         c2.session_used = 85.0
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
+
+    def test_equal_weekly_resets_prefer_an_open_5h_window(self):
+        c2, c4 = self.accounts[1], self.accounts[3]
+        c2.week_resets = c4.week_resets = resets_in(48)
+        c2.session_used, c4.session_used = 85.0, 20.0
         self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
 
-    def test_crowded_windows_rank_by_their_own_reset(self):
+    def test_equal_weekly_resets_rank_crowded_windows_by_their_reset(self):
         c2, c4 = self.accounts[1], self.accounts[3]
-        c2.fable_resets, c4.fable_resets = resets_in(48), resets_in(120)
+        c2.week_resets = c4.week_resets = resets_in(48)
         c2.session_used, c4.session_used = 85.0, 88.0
         c2.session_resets, c4.session_resets = resets_in(4), resets_in(0.25)
         self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
 
-    def test_spent_fable_cap_ranks_after_a_crowded_window(self):
+    def test_spent_fable_cap_does_not_hide_an_earlier_expiring_week(self):
         c2, c4 = self.accounts[1], self.accounts[3]
-        c2.session_used, c2.session_resets = 85.0, resets_in(4)
+        c2.week_resets = resets_in(48)
         c4.fable_used, c4.week_resets = 100.0, resets_in(1)
-        self.assertEqual(rebump.choose_target(self.accounts).label, "c2")
+        self.assertEqual(rebump.choose_target(self.accounts).label, "c4")
+
+    def test_every_model_uses_the_same_overall_weekly_reset(self):
+        c2, c4 = self.accounts[1], self.accounts[3]
+        c2.fable_resets, c2.week_resets = resets_in(1), resets_in(120)
+        c4.fable_resets, c4.week_resets = resets_in(120), resets_in(48)
+        self.assertEqual(
+            rebump.choose_session_target(self.accounts, "opus").label, "c4"
+        )
+        self.assertEqual(
+            rebump.choose_session_target(self.accounts, "fable").label, "c4"
+        )
 
     def test_target_excludes_the_source_account(self):
         c4 = self.accounts[3]
@@ -206,10 +223,10 @@ class PickTest(unittest.TestCase):
             rebump.pick_account(self.accounts, "claude")
         self.assertIn("100%", str(caught.exception))
 
-    def test_spent_fable_cap_only_deprioritises_an_account(self):
+    def test_spent_fable_cap_does_not_deprioritise_an_account(self):
         c4 = self.accounts[3]
         c4.fable_used = 100.0
-        self.assertEqual(rebump.pick_account(self.accounts, None).label, "c2")
+        self.assertEqual(rebump.pick_account(self.accounts, None).label, "c4")
         self.assertEqual(rebump.pick_account(self.accounts, "c4").label, "c4")
 
     def test_last_account_standing_keeps_its_spent_fable_cap(self):

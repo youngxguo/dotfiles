@@ -27,6 +27,9 @@ that it depends on. Do not inspect the codebase or plan the work first.
 
 The script creates a new worktree from the repository's main checkout, chooses
 or honors the requested Claude account, starts the requested model, sends the
-task, and returns.
+task, and returns. With no requested account, it always uses the eligible
+subscription whose overall weekly quota resets soonest. The requested model
+only affects eligibility, not ranking, so an Opus kickoff can use that account
+even when it has no Fable quota left.
 When it prints the final line, report that line and stop. Do not inspect the
 agent in the same turn.

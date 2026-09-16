@@ -97,6 +97,18 @@ class LaunchChoiceTest(unittest.TestCase):
             "CLAUDE_CONFIG_DIR=/cfg/c3 ANTHROPIC_MODEL=opus",
         )
 
+    def test_an_unassigned_opus_request_uses_the_earliest_expiring_week(self):
+        self.c2.week_resets = "2030-02-01T00:00:00+00:00"
+        self.c3.week_resets = "2030-01-01T00:00:00+00:00"
+        self.c3.fable_used = 100.0
+        account, model, prefix = kickoff.launch_choice(None, "opus")
+        self.assertIs(account, self.c3)
+        self.assertEqual(model, "opus")
+        self.assertEqual(
+            prefix,
+            "CLAUDE_CONFIG_DIR=/cfg/c3 ANTHROPIC_MODEL=opus",
+        )
+
     def test_a_spent_model_cap_rejects_the_requested_account(self):
         self.c3.fable_used = 100.0
         with self.assertRaisesRegex(SystemExit, "c3 cannot run 'fable'"):
