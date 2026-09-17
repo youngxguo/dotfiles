@@ -10,10 +10,13 @@ herdr_metadata_seq() {
 }
 
 herdr_pane_cwd() {
+  # A resumed Claude session can restore a nested worktree while the pane's
+  # launch cwd stays fixed. Route against the foreground process when present.
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   "$herdr_bin" pane get "$1" 2>/dev/null | python3 -c '
 import json, sys
-print(json.load(sys.stdin).get("result", {}).get("pane", {}).get("cwd", ""))
+pane = json.load(sys.stdin).get("result", {}).get("pane", {})
+print(pane.get("foreground_cwd") or pane.get("cwd", ""))
 ' 2>/dev/null
 }
 

@@ -514,7 +514,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
         fake.write_text(
             "#!/bin/sh\n"
             'if [ "$1 $2" = "pane get" ]; then\n'
-            '  printf \'{"result":{"pane":{"cwd":"%s"}}}\\n\' "$HERDR_PANE_CWD"\n'
+            '  printf \'{"result":{"pane":{"cwd":"%s","foreground_cwd":"%s"}}}\\n\' "$HERDR_PANE_CWD" "$HERDR_FOREGROUND_CWD"\n'
             "  exit\n"
             "fi\n"
             "source=unknown\n"
@@ -550,6 +550,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 "HERDR_BIN_PATH": str(fake),
                 "HERDR_PANE_ID": "w1:p1",
                 "HERDR_PANE_CWD": str(root),
+                "HERDR_FOREGROUND_CWD": "",
                 "HERDR_REPORT_PATH": str(report),
             }
         )
@@ -693,6 +694,42 @@ class ClaudeStatuslineTest(unittest.TestCase):
             )
 
             self.assertFalse(list(root.glob("report.*")))
+
+    def test_resumed_session_uses_the_panes_foreground_cwd(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            pane_cwd = root / "herdr-worktree"
+            resumed_cwd = root / "claude-worktree"
+            pane_cwd.mkdir()
+            resumed_cwd.mkdir()
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            script = Path(__file__).parent / "claude/statusline-command.sh"
+            payload = {
+                "cost": {"total_cost_usd": 0},
+                "context_window": {},
+                "model": {"display_name": "Fable 5.1"},
+                "session_id": "resumed-session",
+                "session_name": "Resumed session",
+                "transcript_path": str(root / "home/.claude4/projects/repo/session.jsonl"),
+                "workspace": {"current_dir": str(resumed_cwd)},
+            }
+            env = self.statusline_environment(root, fake, report)
+            env["HERDR_PANE_CWD"] = str(pane_cwd)
+            env["HERDR_FOREGROUND_CWD"] = str(resumed_cwd)
+            subprocess.run(
+                ["sh", str(script)],
+                input=json.dumps(payload),
+                text=True,
+                check=True,
+                capture_output=True,
+                env=env,
+            )
+
+            args = self.wait_for_report(report)
+            self.assertIn("title1=Resumed session", args)
+            self.assertIn("model_fable=Fable 5.1", args)
+            self.assertIn("subscription_c4=c4", args)
 
 
 class ClaudeSkillLinksTest(unittest.TestCase):
