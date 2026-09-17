@@ -98,26 +98,25 @@ def pane_agent(pane_id: str) -> str | None:
 
 def launch_choice(
     to_label: str | None, requested_model: str | None
-) -> tuple[rebump.Account, str | None, str]:
-    """Choose the requested account and model, or use rebump's defaults."""
+) -> tuple[rebump.Account, str, str]:
+    """Choose an eligible account and always pin the requested model."""
     accounts = rebump.read_accounts()
-    if not requested_model:
-        return rebump.launch_choice(accounts, to_label)
+    model = requested_model or rebump.PREFERRED_MODEL
 
     if to_label:
         account = rebump.pick_account(accounts, to_label)
-        if not rebump.can_run_model(account, requested_model):
+        if not rebump.can_run_model(account, model):
             raise SystemExit(
-                f"{account.label} cannot run {requested_model!r} with headroom"
+                f"{account.label} cannot run {model!r} with headroom"
             )
     else:
-        account = rebump.choose_session_target(accounts, requested_model)
+        account = rebump.choose_session_target(accounts, model)
         if account is None:
-            raise SystemExit(f"no account can run {requested_model!r} with headroom")
+            raise SystemExit(f"no account can run {model!r} with headroom")
     return (
         account,
-        requested_model,
-        rebump.launch_prefix(account.config_dir, requested_model),
+        model,
+        rebump.launch_prefix(account.config_dir, model),
     )
 
 
@@ -146,7 +145,10 @@ def main(argv: list[str] | None = None) -> int:
         "--to",
         help="Claude account to use, by cusage label or alias such as c3",
     )
-    parser.add_argument("--model", help="Claude model to pin for the new session")
+    parser.add_argument(
+        "--model",
+        help=f"Claude model to pin for the new session (default: {rebump.PREFERRED_MODEL})",
+    )
 
     args = parser.parse_args(argv)
     brief = (

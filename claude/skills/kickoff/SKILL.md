@@ -9,14 +9,15 @@ allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/kickoff.py *)
 Run `kickoff.py` as the first tool call:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/kickoff.py signup-rate-limit "the user's task"
+python3 ${CLAUDE_SKILL_DIR}/kickoff.py --model fable signup-rate-limit "the user's task"
 ```
 
 The slug names the new branch, workspace, and agent. Use `--brief-file` for a
 long task. Use `--repo <name>` when the work belongs to another open repository.
 
-When the user names a Claude account or model, pass the selection as launch
-flags instead of leaving it only in the brief:
+Always pass `--model`. Use `fable` unless the user explicitly requests another
+model. When the user names a Claude account, pass `--to` instead of leaving the
+selection only in the brief:
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/kickoff.py --to c3 --model opus comment-cleanup "the user's task"
@@ -27,9 +28,10 @@ that it depends on. Do not inspect the codebase or plan the work first.
 
 The script creates a new worktree from the repository's main checkout, chooses
 or honors the requested Claude account, starts the requested model, sends the
-task, and returns. With no requested account, it always uses the eligible
-subscription whose overall weekly quota resets soonest. The requested model
-only affects eligibility, not ranking, so an Opus kickoff can use that account
-even when it has no Fable quota left.
+task, and returns. It pins Fable when `--model` is omitted so the account's
+configured default cannot change the model. With no requested account, it uses
+the eligible subscription whose overall weekly quota resets soonest. Model
+eligibility is applied before ranking, so a default Fable kickoff skips accounts
+without Fable headroom.
 When it prints the final line, report that line and stop. Do not inspect the
 agent in the same turn.

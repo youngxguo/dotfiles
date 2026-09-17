@@ -79,13 +79,26 @@ class LaunchChoiceTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_an_account_request_still_uses_rebumps_default_model_logic(self):
-        expected = (self.c3, None, "CLAUDE_CONFIG_DIR=/cfg/c3")
-        with mock.patch.object(
-            kickoff.rebump, "launch_choice", return_value=expected
-        ) as choose:
-            self.assertEqual(kickoff.launch_choice("c3", None), expected)
-        choose.assert_called_once_with(self.accounts, "c3")
+    def test_no_model_request_pins_fable_and_skips_accounts_without_headroom(self):
+        self.c2.week_resets = "2030-02-01T00:00:00+00:00"
+        self.c3.week_resets = "2030-01-01T00:00:00+00:00"
+        self.c3.fable_used = 100.0
+        account, model, prefix = kickoff.launch_choice(None, None)
+        self.assertIs(account, self.c2)
+        self.assertEqual(model, "fable")
+        self.assertEqual(
+            prefix,
+            "CLAUDE_CONFIG_DIR=/cfg/c2 ANTHROPIC_MODEL=fable",
+        )
+
+    def test_an_account_request_without_a_model_still_pins_fable(self):
+        account, model, prefix = kickoff.launch_choice("c3", None)
+        self.assertIs(account, self.c3)
+        self.assertEqual(model, "fable")
+        self.assertEqual(
+            prefix,
+            "CLAUDE_CONFIG_DIR=/cfg/c3 ANTHROPIC_MODEL=fable",
+        )
 
     def test_an_explicit_account_and_model_are_both_pinned(self):
         self.c3.fable_used = 100.0
