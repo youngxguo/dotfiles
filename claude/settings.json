@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/skills/rebump/rebump.py hook",
+            "command": "if [ -z \"${CSEAT_SEAT:-}\" ]; then python3 ~/.claude/skills/rebump/rebump.py hook; fi",
             "timeout": 30
           }
         ]

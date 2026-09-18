@@ -156,12 +156,11 @@ def account_email(config_dir: str) -> str | None:
 
 
 def run_cusage(timeout: int) -> dict:
-    """cusage is a function sourced by the interactive zsh rc, which may print
-    to stdout before the JSON."""
+    """Read cseat's shared usage cache through the user's interactive shell."""
     shell = os.environ.get("SHELL") or "/bin/zsh"
     try:
         proc = subprocess.run(
-            [shell, "-ic", "claude-usage-all --json --no-color"],
+            [shell, "-ic", "cseat usage --raw"],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -169,7 +168,7 @@ def run_cusage(timeout: int) -> dict:
             stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
-        raise SystemExit(f"cusage timed out after {timeout}s")
+        raise SystemExit(f"cseat usage timed out after {timeout}s")
     except OSError as exc:
         raise SystemExit(f"could not run {shell}: {exc}")
     lines = proc.stdout.splitlines()
@@ -181,8 +180,8 @@ def run_cusage(timeout: int) -> dict:
                 break
     detail = (proc.stderr or proc.stdout).strip().splitlines()
     raise SystemExit(
-        "cusage produced no JSON (is zsh-helpers.zsh from the hsys checkout "
-        "sourced by the shell?)" + (f": {detail[-1]}" if detail else "")
+        "cseat usage produced no JSON"
+        + (f": {detail[-1]}" if detail else "")
     )
 
 

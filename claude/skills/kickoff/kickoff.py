@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -96,28 +99,85 @@ def pane_agent(pane_id: str) -> str | None:
     return (got.get("agent") or {}).get("agent")
 
 
-def launch_choice(
-    to_label: str | None, requested_model: str | None
-) -> tuple[rebump.Account, str, str]:
-    """Choose an eligible account and always pin the requested model."""
-    accounts = rebump.read_accounts()
-    model = requested_model or rebump.PREFERRED_MODEL
+def cseat_name(label: str) -> str:
+    """Translate the short account aliases the skill has historically accepted."""
+    if label in {"c1", "claude1", "default"}:
+        return "claude"
+    match = re.fullmatch(r"c(\d+)", label)
+    return f"claude{match.group(1)}" if match else label
 
-    if to_label:
-        account = rebump.pick_account(accounts, to_label)
-        if not rebump.can_run_model(account, model):
-            raise SystemExit(
-                f"{account.label} cannot run {model!r} with headroom"
-            )
+
+def cseat_args(
+    subcommand: str, to_label: str | None, requested_model: str | None
+) -> list[str]:
+    model = requested_model or "fable"
+    args = ["cseat", subcommand, "--model", model]
+    if subcommand == "run":
+        args.append("--handoff")
     else:
-        account = rebump.choose_session_target(accounts, model)
-        if account is None:
-            raise SystemExit(f"no account can run {model!r} with headroom")
-    return (
-        account,
-        model,
-        rebump.launch_prefix(account.config_dir, model),
-    )
+        args.extend(["--size", "M", "--json", "--dry-run"])
+    if to_label:
+        args.extend(["--seat", cseat_name(to_label)])
+    return args
+
+
+def run_in_login_shell(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess:
+    """Run a command that may be provided by the user's interactive shell."""
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    try:
+        return subprocess.run(
+            [shell, "-ic", shlex.join(args)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"{' '.join(args[:2])} timed out after {timeout}s")
+    except OSError as exc:
+        raise SystemExit(f"could not run {shell}: {exc}")
+
+
+def cseat_available() -> bool:
+    return run_in_login_shell(["command", "-v", "cseat"]).returncode == 0
+
+
+def preflight_cseat(to_label: str | None, requested_model: str | None) -> bool:
+    """Check cseat before changing the repo; false uses the portable fallback."""
+    if not cseat_available():
+        seat = cseat_name(to_label) if to_label else "claude"
+        if seat != "claude" and not re.fullmatch(r"claude\d+", seat):
+            raise SystemExit(f"account {to_label!r} needs cseat, but cseat is unavailable")
+        return False
+
+    args = cseat_args("pick", to_label, requested_model)
+    proc = run_in_login_shell(args)
+    if proc.returncode == 0:
+        return True
+    detail = ""
+    try:
+        detail = json.loads(proc.stdout).get("reason", "")
+    except (AttributeError, json.JSONDecodeError):
+        pass
+    if not detail:
+        lines = (proc.stderr or proc.stdout).strip().splitlines()
+        detail = lines[-1] if lines else f"exit {proc.returncode}"
+    raise SystemExit(f"cseat cannot start the agent: {detail}")
+
+
+def plain_claude_command(to_label: str | None, requested_model: str | None) -> str:
+    """Portable single-account fallback for machines without cseat."""
+    seat = cseat_name(to_label) if to_label else "claude"
+    if seat == "claude":
+        config_dir = rebump.normalize_config_dir(None)
+    else:
+        number = re.fullmatch(r"claude(\d+)", seat)
+        if not number:
+            raise SystemExit(f"account {to_label!r} needs cseat")
+        config_dir = rebump.normalize_config_dir(f"~/.claude{number.group(1)}")
+    prefix = rebump.launch_prefix(config_dir, requested_model or "fable")
+    return " ".join([prefix, "claude"])
 
 
 def launch_claude(
@@ -125,14 +185,16 @@ def launch_claude(
     log,
     to_label: str | None = None,
     requested_model: str | None = None,
-) -> str:
-    """Start Claude with the requested launch constraints."""
-    account, model, prefix = launch_choice(to_label, requested_model)
-    command = " ".join([prefix, "claude"])
-    log(f"  account {account.label}{f' on {model}' if model else ''}")
+    use_cseat: bool = True,
+) -> None:
+    """Start Claude with cseat handoffs, or directly when cseat is absent."""
+    command = (
+        shlex.join(cseat_args("run", to_label, requested_model))
+        if use_cseat
+        else plain_claude_command(to_label, requested_model)
+    )
     herdr("pane", "run", pane_id, command)
     log(f"  ran: {command}")
-    return account.label
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -147,7 +209,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--model",
-        help=f"Claude model to pin for the new session (default: {rebump.PREFERRED_MODEL})",
+        choices=("fable", "opus"),
+        help="Claude model to pin for the new session (default: fable)",
     )
 
     args = parser.parse_args(argv)
@@ -160,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     if not brief.strip():
         raise SystemExit("kickoff needs a task")
 
+    use_cseat = preflight_cseat(args.to, args.model)
     target, root = main_checkout(args.repo)
     prefix = branch_prefix(root)
     branch = f"{prefix}/{slug}" if prefix else slug
@@ -186,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     name = agent_name(slug)
-    launch_claude(pane_id, log, args.to, args.model)
+    launch_claude(pane_id, log, args.to, args.model, use_cseat)
     if not wait_for(lambda: pane_agent(pane_id) == "claude", 60):
         raise SystemExit(
             f"herdr never detected claude in {pane_id}; {workspace_id} is open at {path}"

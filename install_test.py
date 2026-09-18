@@ -55,6 +55,26 @@ class PiConfigInstallTest(unittest.TestCase):
                     len(list(target.parent.glob("settings.json.bak.*"))), 1
                 )
 
+    def test_latest_claude_synced_bundle_gets_a_stable_pi_path(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-pi-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            synced = home / ".claude/skills/synced"
+            older = synced / "older/docs"
+            newer = synced / "newer/docs"
+            older.mkdir(parents=True)
+            newer.mkdir(parents=True)
+            (older / "SKILL.md").write_text("old", encoding="utf-8")
+            (newer / "SKILL.md").write_text("new", encoding="utf-8")
+            os.utime(older.parent, (1, 1))
+            os.utime(newer.parent, (2, 2))
+
+            with mock.patch.object(install, "HOME", home):
+                install.link_pi_claude_synced_skills()
+
+            target = home / ".pi/agent/claude-synced-skills"
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(target.resolve(), newer.parent.resolve())
+
 
 class PiCliInstallTest(unittest.TestCase):
     @staticmethod
@@ -363,6 +383,60 @@ class ClaudeInstallTest(unittest.TestCase):
                 self.assertTrue(
                     skill_path.read_text(encoding="utf-8").endswith("## New section\n")
                 )
+
+    def test_merge_claude_settings_supports_cseat_shared_logins(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            repo = root / "repo"
+            (repo / "claude").mkdir(parents=True)
+            conditional_hook = [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "test -n \"$CSEAT_SEAT\" || rebump",
+                        }
+                    ]
+                }
+            ]
+            (repo / "claude/settings.json").write_text(
+                json.dumps(
+                    {
+                        "permissions": {},
+                        "hooks": {"Stop": [], "StopFailure": conditional_hook},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            primary = home / ".claude/settings.json"
+            primary.parent.mkdir(parents=True)
+            primary.write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "SessionStart": [{"hooks": []}],
+                            "StopFailure": [{"matcher": "rate_limit"}],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            secondary = home / ".claude2/settings.json"
+            secondary.parent.mkdir(parents=True)
+            secondary.symlink_to(primary)
+
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "REPO_ROOT", repo),
+            ):
+                install.merge_claude_settings()
+
+            settings = json.loads(primary.read_text(encoding="utf-8"))
+            self.assertIn("SessionStart", settings["hooks"])
+            self.assertIn("Stop", settings["hooks"])
+            self.assertEqual(settings["hooks"]["StopFailure"], conditional_hook)
+            self.assertTrue(secondary.is_symlink())
 
     def test_merge_claude_global_config_preserves_account_state(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:

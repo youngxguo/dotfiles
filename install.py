@@ -838,10 +838,15 @@ def merge_claude_settings():
         print(f"skipping claude settings: {source} is not a JSON object")
         return
 
+    merged_targets = set()
     for config_dir in claude_config_dirs():
-        merge_claude_settings_into(
-            template, config_dir / "settings.json", CLAUDE_SETTINGS_KEYS
-        )
+        target = config_dir / "settings.json"
+        resolved = target.resolve()
+        if resolved in merged_targets:
+            print(f"claude settings already shared through {target}")
+            continue
+        merge_claude_settings_into(template, target, CLAUDE_SETTINGS_KEYS)
+        merged_targets.add(resolved)
 
 
 def merge_claude_settings_into(template, target, keys):
@@ -864,7 +869,8 @@ def merge_claude_settings_into(template, target, keys):
 
     hooks = settings.setdefault("hooks", {})
     if isinstance(hooks, dict):
-        for event, groups in template.get("hooks", {}).items():
+        template_hooks = template.get("hooks", {})
+        for event, groups in template_hooks.items():
             hooks[event] = groups
     else:
         print(f"skipping claude hooks merge: {target} hooks is not a JSON object")
@@ -1041,6 +1047,23 @@ def install_pi_herdr_integration():
     install_herdr_integration("pi")
 
 
+def link_pi_claude_synced_skills():
+    """Expose one current Claude synced bundle to Pi without recursive collisions."""
+    synced = HOME / ".claude/skills/synced"
+    bundles = []
+    if synced.is_dir():
+        bundles = [
+            path
+            for path in synced.iterdir()
+            if path.is_dir() and any(path.glob("*/SKILL.md"))
+        ]
+    if not bundles:
+        print("skipping Pi Claude synced skills: no bundle is installed")
+        return
+    newest = max(bundles, key=lambda path: path.stat().st_mtime)
+    link_file(newest, HOME / ".pi/agent/claude-synced-skills")
+
+
 def install_pi():
     print("installing pi")
     if VERIFY_MODE:
@@ -1052,6 +1075,7 @@ def install_pi():
 
     print("applying pi config")
     apply_links(links_for("pi"))
+    link_pi_claude_synced_skills()
     if not VERIFY_MODE:
         install_pi_herdr_integration()
 

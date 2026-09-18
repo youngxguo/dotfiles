@@ -26,12 +26,12 @@ python3 ${CLAUDE_SKILL_DIR}/kickoff.py --to c3 --model opus comment-cleanup "the
 Pass the user's task close to verbatim. Add only earlier conversation context
 that it depends on. Do not inspect the codebase or plan the work first.
 
-The script creates a new worktree from the repository's main checkout, chooses
-or honors the requested Claude account, starts the requested model, sends the
-task, and returns. It pins Fable when `--model` is omitted so the account's
-configured default cannot change the model. With no requested account, it uses
-the eligible subscription whose overall weekly quota resets soonest. Model
-eligibility is applied before ranking, so a default Fable kickoff skips accounts
-without Fable headroom.
+The script checks `cseat` before changing the repository, creates a new
+worktree from the repository's main checkout, and launches Claude with cseat's
+native seat picker and automatic handoffs. It pins Fable when `--model` is
+omitted, honors `--to` by translating short aliases such as `c3` to cseat's
+`claude3` seat, sends the task, and returns. On a machine without cseat it
+falls back to a directly launched, explicitly pinned Claude session.
+
 When it prints the final line, report that line and stop. Do not inspect the
 agent in the same turn.

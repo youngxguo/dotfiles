@@ -68,64 +68,86 @@ class MainTest(unittest.TestCase):
             kickoff.main(["new-work"])
 
 
-class LaunchChoiceTest(unittest.TestCase):
-    def setUp(self):
-        self.c2 = kickoff.rebump.Account(label="c2", config_dir="/cfg/c2")
-        self.c3 = kickoff.rebump.Account(label="c3", config_dir="/cfg/c3")
-        self.accounts = [self.c2, self.c3]
-        patcher = mock.patch.object(
-            kickoff.rebump, "read_accounts", return_value=self.accounts
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+class CseatTest(unittest.TestCase):
+    def test_short_account_aliases_become_cseat_names(self):
+        self.assertEqual(kickoff.cseat_name("c1"), "claude")
+        self.assertEqual(kickoff.cseat_name("c6"), "claude6")
+        self.assertEqual(kickoff.cseat_name("work"), "work")
 
-    def test_no_model_request_pins_fable_and_skips_accounts_without_headroom(self):
-        self.c2.week_resets = "2030-02-01T00:00:00+00:00"
-        self.c3.week_resets = "2030-01-01T00:00:00+00:00"
-        self.c3.fable_used = 100.0
-        account, model, prefix = kickoff.launch_choice(None, None)
-        self.assertIs(account, self.c2)
-        self.assertEqual(model, "fable")
+    def test_default_launch_uses_fable_with_handoffs(self):
         self.assertEqual(
-            prefix,
-            "CLAUDE_CONFIG_DIR=/cfg/c2 ANTHROPIC_MODEL=fable",
+            kickoff.cseat_args("run", None, None),
+            ["cseat", "run", "--model", "fable", "--handoff"],
         )
 
-    def test_an_account_request_without_a_model_still_pins_fable(self):
-        account, model, prefix = kickoff.launch_choice("c3", None)
-        self.assertIs(account, self.c3)
-        self.assertEqual(model, "fable")
+    def test_account_and_model_are_forwarded(self):
         self.assertEqual(
-            prefix,
-            "CLAUDE_CONFIG_DIR=/cfg/c3 ANTHROPIC_MODEL=fable",
+            kickoff.cseat_args("run", "c3", "opus"),
+            [
+                "cseat",
+                "run",
+                "--model",
+                "opus",
+                "--handoff",
+                "--seat",
+                "claude3",
+            ],
         )
 
-    def test_an_explicit_account_and_model_are_both_pinned(self):
-        self.c3.fable_used = 100.0
-        account, model, prefix = kickoff.launch_choice("c3", "opus")
-        self.assertIs(account, self.c3)
-        self.assertEqual(model, "opus")
+    def test_preflight_uses_the_same_constraints(self):
+        result = mock.Mock(returncode=0, stdout="{}", stderr="")
+        with (
+            mock.patch.object(kickoff, "cseat_available", return_value=True),
+            mock.patch.object(
+                kickoff, "run_in_login_shell", return_value=result
+            ) as run,
+        ):
+            self.assertTrue(kickoff.preflight_cseat("c3", "opus"))
+        run.assert_called_once_with(
+            [
+                "cseat",
+                "pick",
+                "--model",
+                "opus",
+                "--size",
+                "M",
+                "--json",
+                "--dry-run",
+                "--seat",
+                "claude3",
+            ]
+        )
+
+    def test_preflight_reports_cseat_refusal(self):
+        result = mock.Mock(
+            returncode=2,
+            stdout='{"reason": "no seat has headroom"}',
+            stderr="",
+        )
+        with (
+            mock.patch.object(kickoff, "cseat_available", return_value=True),
+            mock.patch.object(kickoff, "run_in_login_shell", return_value=result),
+        ):
+            with self.assertRaisesRegex(SystemExit, "no seat has headroom"):
+                kickoff.preflight_cseat(None, None)
+
+    def test_missing_cseat_uses_the_portable_fallback(self):
+        with mock.patch.object(kickoff, "cseat_available", return_value=False):
+            self.assertFalse(kickoff.preflight_cseat(None, None))
         self.assertEqual(
-            prefix,
-            "CLAUDE_CONFIG_DIR=/cfg/c3 ANTHROPIC_MODEL=opus",
+            kickoff.plain_claude_command(None, None),
+            "env -u CLAUDE_CONFIG_DIR ANTHROPIC_MODEL=fable claude",
         )
 
-    def test_an_unassigned_opus_request_uses_the_earliest_expiring_week(self):
-        self.c2.week_resets = "2030-02-01T00:00:00+00:00"
-        self.c3.week_resets = "2030-01-01T00:00:00+00:00"
-        self.c3.fable_used = 100.0
-        account, model, prefix = kickoff.launch_choice(None, "opus")
-        self.assertIs(account, self.c3)
-        self.assertEqual(model, "opus")
-        self.assertEqual(
-            prefix,
-            "CLAUDE_CONFIG_DIR=/cfg/c3 ANTHROPIC_MODEL=opus",
+    def test_launch_runs_cseat_in_the_pane(self):
+        with mock.patch.object(kickoff, "herdr") as herdr:
+            kickoff.launch_claude("w1:p2", lambda _: None, "c3", "opus", True)
+        herdr.assert_called_once_with(
+            "pane",
+            "run",
+            "w1:p2",
+            "cseat run --model opus --handoff --seat claude3",
         )
-
-    def test_a_spent_model_cap_rejects_the_requested_account(self):
-        self.c3.fable_used = 100.0
-        with self.assertRaisesRegex(SystemExit, "c3 cannot run 'fable'"):
-            kickoff.launch_choice("c3", "fable")
 
 
 class AgentNameTest(unittest.TestCase):
