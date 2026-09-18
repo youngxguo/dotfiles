@@ -58,8 +58,8 @@ vec2 getRectangleCenter(vec4 rectangle) {
 }
 const float DURATION_SECONDS = 0.20;
 const float EASE_POWER = 2.0;
-const float GLOW_RADIUS = 0.02;
-const float GLOW_STRENGTH = 0.25;
+const float GLOW_RADIUS = 0.03;
+const float GLOW_STRENGTH = 0.30;
 
 vec3 screenBlend(vec3 base, vec3 light) {
  return 1.0 - (1.0 - base) * (1.0 - light);
