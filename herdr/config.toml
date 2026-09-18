@@ -50,6 +50,12 @@ type = "plugin_action"
 command = "herdr-splits.nav-right"
 
 [[keys.command]]
+key = "prefix+t"
+type = "shell"
+command = '\"$HERDR_BIN_PATH\" pane move \"$HERDR_ACTIVE_PANE_ID\" --new-tab --focus'
+description = "move pane to new tab"
+
+[[keys.command]]
 key = "prefix+f"
 type = "popup"
 command = 'export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"; dir=$(fd -H -t d -d 3 "^\.git$" ~/Documents/code -x dirname | sort -u | fzf --prompt="new workspace > ") && [ -n "$dir" ] && herdr workspace create --cwd "$dir" --label "${dir##*/}" --focus'
