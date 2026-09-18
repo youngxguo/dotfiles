@@ -56,22 +56,22 @@ local function find_codediff_tab()
 end
 
 -- codediff renamed `get_explorer` to `get_panel_view`. A plain working-tree
--- session also records an `original_revision` (`:0` or HEAD), so the git
--- context alone cannot tell a history session from a working-tree one.
-local function session_has_revision(lifecycle, tabpage)
+-- session also records an `original_revision` (`:0` or HEAD), so the panel is
+-- authoritative when it exists.
+local function session_revision(lifecycle, tabpage)
   local get_panel = lifecycle.get_panel_view or lifecycle.get_explorer
   if get_panel then
     local panel = get_panel(tabpage)
     if panel then
-      return panel.base_revision ~= nil
+      return panel.base_revision
     end
   end
 
   local context = lifecycle.get_git_context(tabpage)
-  return context and context.original_revision ~= nil or false
+  return context and context.original_revision or nil
 end
 
-local function activate_existing(layout, wants_revision)
+local function activate_existing(layout, revision)
   local current = vim.api.nvim_get_current_tabpage()
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
   if not ok then
@@ -79,7 +79,7 @@ local function activate_existing(layout, wants_revision)
   end
 
   if lifecycle.get_session(current) ~= nil then
-    if session_has_revision(lifecycle, current) == wants_revision then
+    if session_revision(lifecycle, current) == revision then
       vim.cmd("CodeDiff --" .. layout)
       return true
     end
@@ -88,7 +88,7 @@ local function activate_existing(layout, wants_revision)
 
   local existing = find_codediff_tab()
   if existing then
-    if session_has_revision(lifecycle, existing) == wants_revision then
+    if session_revision(lifecycle, existing) == revision then
       vim.api.nvim_set_current_tabpage(existing)
       return true
     end
@@ -99,7 +99,7 @@ local function activate_existing(layout, wants_revision)
 end
 
 local function command(layout, revision)
-  if activate_existing(layout, revision ~= nil) then
+  if activate_existing(layout, revision) then
     return
   end
 
@@ -140,11 +140,127 @@ function M.open_diff()
   command(layout)
 end
 
-local function git_ref_exists(dir, ref)
+local function git_ref_oid(dir, ref)
   local result = vim.system({
     "git", "-C", dir, "rev-parse", "--verify", "--quiet", ref .. "^{commit}",
-  }):wait()
-  return result.code == 0
+  }, { text = true }):wait()
+  if result.code == 0 then
+    return vim.trim(result.stdout or "")
+  end
+end
+
+local function git_ref_exists(dir, ref)
+  return git_ref_oid(dir, ref) ~= nil
+end
+
+local function github_pr_base_ref(dir)
+  if vim.fn.executable("gh") ~= 1 then
+    return
+  end
+
+  local result = vim.system({
+    "gh", "pr", "view", "--json", "baseRefName,baseRefOid",
+  }, { cwd = dir, text = true }):wait()
+  if result.code ~= 0 then
+    return
+  end
+
+  local ok, pr = pcall(vim.json.decode, result.stdout or "")
+  if not ok or type(pr) ~= "table" or type(pr.baseRefName) ~= "string" then
+    return
+  end
+
+  local refs = { "origin/" .. pr.baseRefName }
+  local remotes = vim.system({ "git", "-C", dir, "remote" }, { text = true }):wait()
+  if remotes.code == 0 then
+    for remote in (remotes.stdout or ""):gmatch("[^\r\n]+") do
+      local ref = remote .. "/" .. pr.baseRefName
+      if ref ~= refs[1] then
+        table.insert(refs, ref)
+      end
+    end
+  end
+  table.insert(refs, pr.baseRefName)
+
+  local fallback
+  for _, ref in ipairs(refs) do
+    local oid = git_ref_oid(dir, ref)
+    if oid then
+      fallback = fallback or ref
+      if type(pr.baseRefOid) ~= "string" or pr.baseRefOid == "" or oid == pr.baseRefOid then
+        return ref
+      end
+    end
+  end
+
+  if type(pr.baseRefOid) == "string" and pr.baseRefOid ~= "" and git_ref_exists(dir, pr.baseRefOid) then
+    return pr.baseRefOid
+  end
+  return fallback
+end
+
+local function local_stack_base_ref(dir)
+  local branch_result = vim.system({
+    "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD",
+  }, { text = true }):wait()
+  if branch_result.code ~= 0 then
+    return
+  end
+  local branch = vim.trim(branch_result.stdout or "")
+
+  local upstream = vim.system({
+    "git", "-C", dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}",
+  }, { text = true }):wait()
+  if upstream.code == 0 then
+    local ref = vim.trim(upstream.stdout or "")
+    if ref ~= branch and not vim.endswith(ref, "/" .. branch) then
+      return ref
+    end
+  end
+
+  local reflog = vim.system({
+    "git", "-C", dir, "reflog", "show", "--format=%H", "refs/heads/" .. branch,
+  }, { text = true }):wait()
+  if reflog.code ~= 0 then
+    return
+  end
+
+  local creation_oid
+  for oid in (reflog.stdout or ""):gmatch("[^\r\n]+") do
+    creation_oid = oid
+  end
+  if not creation_oid then
+    return
+  end
+
+  for _, namespace in ipairs({ "refs/remotes", "refs/heads" }) do
+    local refs = vim.system({
+      "git", "-C", dir, "for-each-ref", "--format=%(refname:short)", "--points-at", creation_oid, namespace,
+    }, { text = true }):wait()
+    if refs.code == 0 then
+      for ref in (refs.stdout or ""):gmatch("[^\r\n]+") do
+        if ref ~= branch and not vim.endswith(ref, "/" .. branch) then
+          return ref
+        end
+      end
+    end
+  end
+end
+
+local function merge_base(dir, base_ref, fork_point)
+  local args = { "git", "-C", dir, "merge-base" }
+  if fork_point then
+    table.insert(args, "--fork-point")
+  end
+  vim.list_extend(args, { base_ref, "HEAD" })
+
+  local result = vim.system(args, { text = true }):wait()
+  if result.code == 0 then
+    local ref = vim.trim(result.stdout or "")
+    if ref ~= "" then
+      return ref
+    end
+  end
 end
 
 local function trunk_ref(dir)
@@ -165,20 +281,27 @@ local function trunk_ref(dir)
   end
 end
 
-function M.open_trunk_diff()
+function M.open_base_diff()
   local layout = apply_view_defaults()
-  if activate_existing(layout, true) then
-    return
-  end
-
   local dir = probe_dir()
-  local base_ref = trunk_ref(dir)
+  local pr_base_ref = github_pr_base_ref(dir)
+  local stack_base_ref = not pr_base_ref and local_stack_base_ref(dir) or nil
+  local base_ref = pr_base_ref or stack_base_ref or trunk_ref(dir)
   if not base_ref then
-    vim.notify("Could not find a local trunk branch", vim.log.levels.ERROR)
+    vim.notify("Could not find a pull request, stacked branch, or local trunk base", vim.log.levels.ERROR)
     return
   end
 
-  command(layout, base_ref .. "...HEAD")
+  local base_oid
+  if pr_base_ref or stack_base_ref then
+    base_oid = merge_base(dir, base_ref, true)
+  end
+  base_oid = base_oid or merge_base(dir, base_ref, false) or git_ref_oid(dir, base_ref)
+  if not base_oid then
+    vim.notify("Could not resolve the comparison base", vim.log.levels.ERROR)
+    return
+  end
+  command(layout, base_oid)
 end
 
 return M
