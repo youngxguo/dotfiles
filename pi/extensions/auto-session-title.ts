@@ -18,6 +18,14 @@ const HERDR_MODEL_SOURCE = "pi-auto-session-title-model";
 const HERDR_SUBSCRIPTION_SOURCE = "pi-auto-session-title-subscription";
 const HERDR_TITLE_FALLBACK_WIDTH = 26;
 const HERDR_TITLE_ROWS = 3;
+const HERDR_REPO_TOKENS = [
+	"repo_color_1",
+	"repo_color_2",
+	"repo_color_3",
+	"repo_color_4",
+	"repo_color_5",
+	"repo_color_6",
+] as const;
 const HERDR_MODEL_TOKENS = [
 	"model_fable",
 	"model_opus",
@@ -42,6 +50,7 @@ const HERDR_MAIN_TOKENS = [
 	"title2",
 	"title3",
 	"repo",
+	...HERDR_REPO_TOKENS,
 	"branch",
 	"pr_open",
 	"pr_draft",
@@ -53,6 +62,18 @@ const HERDR_SUBSCRIPTION_METADATA_TOKENS = [
 	"subscription",
 	...HERDR_SUBSCRIPTION_TOKENS,
 ] as const;
+
+export function herdrRepoToken(
+	repoName: string,
+): (typeof HERDR_REPO_TOKENS)[number] {
+	// FNV-1a gives every repository a stable palette slot without putting
+	// work-specific repository names in these portable dotfiles.
+	let hash = 2_166_136_261;
+	for (const byte of new TextEncoder().encode(repoName)) {
+		hash = Math.imul(hash ^ byte, 16_777_619) >>> 0;
+	}
+	return HERDR_REPO_TOKENS[hash % HERDR_REPO_TOKENS.length];
+}
 
 function herdrModelToken(modelId: string): (typeof HERDR_MODEL_TOKENS)[number] {
 	const normalized = modelId.toLowerCase();
@@ -242,18 +263,24 @@ export default function (pi: ExtensionAPI) {
 						resolvedGitDir === resolvedCommonDir
 							? basename(repoRoot)
 							: basename(dirname(resolvedCommonDir));
-					args.push(
-						"--token",
-						`repo=📁 ${repoName}`,
-						"--token",
-						`branch= ${branch}`,
-					);
+					const selectedRepoToken = herdrRepoToken(repoName);
+					args.push("--clear-token", "repo");
+					for (const token of HERDR_REPO_TOKENS) {
+						args.push(
+							token === selectedRepoToken ? "--token" : "--clear-token",
+							token === selectedRepoToken ? `${token}=📁 ${repoName}` : token,
+						);
+					}
+					args.push("--token", `branch= ${branch}`);
 					hasGitMetadata = true;
 				}
 			}
 		} catch {}
 		if (!hasGitMetadata) {
-			args.push("--clear-token", "repo", "--clear-token", "branch");
+			for (const token of ["repo", ...HERDR_REPO_TOKENS]) {
+				args.push("--clear-token", token);
+			}
+			args.push("--clear-token", "branch");
 		}
 
 		let pullRequestToken: { state: string; value: string } | undefined;

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -175,6 +176,36 @@ class PiCliInstallTest(unittest.TestCase):
 
 
 class HerdrInstallTest(unittest.TestCase):
+    def test_agent_sidebar_color_namespaces_do_not_reuse_shades(self):
+        config_path = Path(__file__).parent / "herdr/config.toml"
+        config = config_path.read_text(encoding="utf-8")
+        prefixes = ("$repo_color_", "$pr_", "$subscription_", "$model_")
+        colors = {}
+
+        for line in config.splitlines():
+            token_match = re.search(r'token = "(\$[^"]+)"', line)
+            color_match = re.search(r'fg = "(#[0-9a-fA-F]{6})"', line)
+            if not token_match or not color_match:
+                continue
+            token = token_match.group(1)
+            if not token.startswith(prefixes):
+                continue
+            color = color_match.group(1).lower()
+            self.assertNotIn(
+                color,
+                colors,
+                f"{token} reuses the shade assigned to {colors.get(color)}",
+            )
+            colors[color] = token
+
+        self.assertTrue(
+            any(token.startswith("$repo_color_") for token in colors.values())
+        )
+        self.assertTrue(
+            any(token.startswith("$subscription_") for token in colors.values())
+        )
+        self.assertTrue(any(token.startswith("$model_") for token in colors.values()))
+
     def test_install_herdr_downloads_once_then_links_config(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-herdr-test-") as tmpdir:
             root = Path(tmpdir)
@@ -395,7 +426,7 @@ class ClaudeInstallTest(unittest.TestCase):
                     "hooks": [
                         {
                             "type": "command",
-                            "command": "test -n \"$CSEAT_SEAT\" || rebump",
+                            "command": 'test -n "$CSEAT_SEAT" || rebump',
                         }
                     ]
                 }
@@ -650,6 +681,12 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 "title2",
                 "title3",
                 "repo",
+                "repo_color_1",
+                "repo_color_2",
+                "repo_color_3",
+                "repo_color_4",
+                "repo_color_5",
+                "repo_color_6",
                 "branch",
                 "model",
                 "subscription",
@@ -737,6 +774,90 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 index = args.index(token)
                 self.assertEqual(args[index - 1], "--clear-token")
 
+    def test_pr_is_reported_to_herdr_but_left_out_of_custom_statusline(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            workspace = root / "workspace"
+            branch = "young/ui-design-system-guidance"
+            subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(workspace),
+                    "symbolic-ref",
+                    "HEAD",
+                    f"refs/heads/{branch}",
+                ],
+                check=True,
+            )
+            (workspace / "tracked").write_text("test\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(workspace), "add", "tracked"], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(workspace),
+                    "-c",
+                    "user.name=test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "-qm",
+                    "initial",
+                ],
+                check=True,
+            )
+
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            fake_gh = root / "gh"
+            fake_gh.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+            fake_gh.chmod(0o755)
+            repo_root = subprocess.run(
+                ["git", "-C", str(workspace), "rev-parse", "--show-toplevel"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            cache_name = "".join(
+                char if char.isalnum() or char in "._-" else "_"
+                for char in f"{repo_root}/{branch}"
+            )
+            pr_cache = root / "home/.claude/pr-cache" / cache_name
+            pr_cache.parent.mkdir(parents=True)
+            pr_cache.write_text(
+                "open 4426 https://github.com/example/repo/pull/4426\n",
+                encoding="utf-8",
+            )
+
+            payload = {
+                "cost": {"total_cost_usd": 0},
+                "context_window": {},
+                "model": {"display_name": "Fable 5.1"},
+                "session_id": "pr-session",
+                "session_name": "PR session",
+                "transcript_path": str(root / "missing.jsonl"),
+                "workspace": {"current_dir": str(workspace)},
+            }
+            env = self.statusline_environment(root, fake, report)
+            env["PATH"] = f"{root}{os.pathsep}{env['PATH']}"
+            result = subprocess.run(
+                ["sh", str(Path(__file__).parent / "claude/statusline-command.sh")],
+                input=json.dumps(payload),
+                text=True,
+                check=True,
+                capture_output=True,
+                env=env,
+            )
+
+            self.assertNotIn("#4426", result.stdout)
+            args = self.wait_for_report(report)
+            self.assertIn("repo_color_5=📁 workspace", args)
+            repo_index = args.index("repo")
+            self.assertEqual(args[repo_index - 1], "--clear-token")
+            self.assertIn("pr_open= #4426", args)
+
     def test_shared_daemon_does_not_report_to_another_workspace(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             root = Path(tmpdir)
@@ -785,7 +906,9 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 "model": {"display_name": "Fable 5.1"},
                 "session_id": "resumed-session",
                 "session_name": "Resumed session",
-                "transcript_path": str(root / "home/.claude4/projects/repo/session.jsonl"),
+                "transcript_path": str(
+                    root / "home/.claude4/projects/repo/session.jsonl"
+                ),
                 "workspace": {"current_dir": str(resumed_cwd)},
             }
             env = self.statusline_environment(root, fake, report)

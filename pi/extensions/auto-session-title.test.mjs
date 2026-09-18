@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import autoSessionTitle, {
+	herdrRepoToken,
 	herdrTitleRows,
 	titleFromPrompt,
 } from "./auto-session-title.ts";
@@ -86,6 +87,11 @@ test("wraps Herdr titles into the shared three-row layout", () => {
 	);
 });
 
+test("assigns repositories stable palette colors", () => {
+	assert.equal(herdrRepoToken("frontend"), herdrRepoToken("frontend"));
+	assert.notEqual(herdrRepoToken("frontend"), herdrRepoToken("backend"));
+});
+
 test("names a new session and its terminal from the opening request", () => {
 	const harness = extensionHarness();
 	harness.handlers.get("before_agent_start")(
@@ -159,6 +165,12 @@ test("clears its terminal and Herdr titles on /new", async () => {
 			"title2",
 			"title3",
 			"repo",
+			"repo_color_1",
+			"repo_color_2",
+			"repo_color_3",
+			"repo_color_4",
+			"repo_color_5",
+			"repo_color_6",
 			"branch",
 			"model",
 			"subscription",
@@ -276,7 +288,8 @@ test("publishes runtime details with the shared sidebar tokens", async () => {
 		assert.ok(subscriptionReport);
 		assert.ok(report.args.includes("title1=Fix blank agents menu in"));
 		assert.ok(report.args.includes("title2=herdr"));
-		assert.ok(report.args.includes("repo=📁 repo"));
+		assert.ok(report.args.includes("repo_color_4=📁 repo"));
+		assert.equal(report.args[report.args.indexOf("repo") - 1], "--clear-token");
 		assert.ok(report.args.includes("branch= main"));
 		assert.ok(modelReport.args.includes("model_sol=gpt-5.6-sol"));
 		assert.ok(subscriptionReport.args.includes("subscription_codex=codex"));

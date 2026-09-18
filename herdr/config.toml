@@ -52,7 +52,7 @@ command = "herdr-splits.nav-right"
 [[keys.command]]
 key = "prefix+t"
 type = "shell"
-command = '\"$HERDR_BIN_PATH\" pane move \"$HERDR_ACTIVE_PANE_ID\" --new-tab --focus'
+command = '"$HERDR_BIN_PATH" pane move "$HERDR_ACTIVE_PANE_ID" --new-tab --focus'
 description = "move pane to new tab"
 
 [[keys.command]]
@@ -80,36 +80,49 @@ show_agent_labels_on_pane_borders = true
 [ui.sidebar.agents]
 # Bold titles keep neighbouring six-line entries from blurring together. The
 # branch is the row that says which piece of work a pane is on, so it gets a row
-# to itself, undimmed; the PR follows it, then the repo and color-coded runtime
-# details sit together on the bottom row.
+# to itself, undimmed; the color-coded repo and PR follow it, with runtime details
+# together on the bottom row.
 rows = [
   ["state_icon", { token = "$num", bold = true, dim = false }, { token = "$title1", bold = true, dim = false }],
   [{ token = "$title2", bold = true, dim = false }],
   [{ token = "$title3", bold = true, dim = false }],
   [{ token = "$branch", dim = false }],
   [
+    # Repositories own the bright-pastel color namespace. Integrations hash
+    # names into this palette so projects stay recognizable without adding
+    # work-specific configuration here.
+    { token = "$repo_color_1", dim = false, fg = "#94e2d5" },
+    { token = "$repo_color_2", dim = false, fg = "#f5c2e7" },
+    { token = "$repo_color_3", dim = false, fg = "#a6e3a1" },
+    { token = "$repo_color_4", dim = false, fg = "#89b4fa" },
+    { token = "$repo_color_5", dim = false, fg = "#f38ba8" },
+    { token = "$repo_color_6", dim = false, fg = "#cba6f7" },
+    # Keep older, already-running integrations visible until they reload.
+    { token = "$repo", dim = true },
     { token = "$pr_open", dim = false, fg = "#3fb950" },
     { token = "$pr_draft", dim = false, fg = "#8b949e" },
     { token = "$pr_merged", dim = false, fg = "#a371f7" },
     { token = "$pr_closed", dim = false, fg = "#f85149" },
   ],
   [
-    { token = "$repo", dim = true },
-    { token = "$subscription_codex", bold = true, dim = false, fg = "#fab387" },
-    { token = "$subscription_c1", bold = true, dim = false, fg = "#89b4fa" },
-    { token = "$subscription_c2", bold = true, dim = false, fg = "#89dceb" },
-    { token = "$subscription_c3", bold = true, dim = false, fg = "#f9e2af" },
-    { token = "$subscription_c4", bold = true, dim = false, fg = "#a6e3a1" },
-    { token = "$subscription_c5", bold = true, dim = false, fg = "#f38ba8" },
-    { token = "$subscription_c6", bold = true, dim = false, fg = "#cba6f7" },
-    { token = "$model_fable", dim = false, fg = "#f5c2e7" },
-    { token = "$model_opus", dim = false, fg = "#cba6f7" },
-    { token = "$model_sonnet", dim = false, fg = "#89b4fa" },
-    { token = "$model_haiku", dim = false, fg = "#94e2d5" },
-    { token = "$model_sol", dim = false, fg = "#f9e2af" },
-    { token = "$model_terra", dim = false, fg = "#a6e3a1" },
-    { token = "$model_luna", dim = false, fg = "#b4befe" },
-    { token = "$model_other", dim = false, fg = "#74c7ec" },
+    # Subscriptions use saturated accents and bold text; models use a quieter,
+    # muted namespace. Literal shades stay disjoint from each other and from
+    # repository colors, so adjacent metadata cannot collapse into one color.
+    { token = "$subscription_codex", bold = true, dim = false, fg = "#ff7a00" },
+    { token = "$subscription_c1", bold = true, dim = false, fg = "#168cff" },
+    { token = "$subscription_c2", bold = true, dim = false, fg = "#00b8d9" },
+    { token = "$subscription_c3", bold = true, dim = false, fg = "#d9a400" },
+    { token = "$subscription_c4", bold = true, dim = false, fg = "#16b364" },
+    { token = "$subscription_c5", bold = true, dim = false, fg = "#ff5a52" },
+    { token = "$subscription_c6", bold = true, dim = false, fg = "#9d73f7" },
+    { token = "$model_fable", dim = false, fg = "#d8a0df" },
+    { token = "$model_opus", dim = false, fg = "#b9a0dc" },
+    { token = "$model_sonnet", dim = false, fg = "#82a9d8" },
+    { token = "$model_haiku", dim = false, fg = "#79c8bd" },
+    { token = "$model_sol", dim = false, fg = "#d8c27a" },
+    { token = "$model_terra", dim = false, fg = "#83c891" },
+    { token = "$model_luna", dim = false, fg = "#929bd2" },
+    { token = "$model_other", dim = false, fg = "#72b7d5" },
   ],
 ]
 

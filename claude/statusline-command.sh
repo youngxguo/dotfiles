@@ -9,6 +9,16 @@ herdr_metadata_seq() {
     printf '%s000000000\n' "$(date +%s)"
 }
 
+herdr_repo_token() {
+  HERDR_REPO_NAME=$1 python3 -c '
+import os
+value = 2166136261
+for byte in os.environ["HERDR_REPO_NAME"].encode():
+    value = ((value ^ byte) * 16777619) & 0xffffffff
+print("repo_color_%d" % (value % 6 + 1))
+'
+}
+
 herdr_pane_cwd() {
   # A resumed Claude session can restore a nested worktree while the pane's
   # launch cwd stays fixed. Route against the foreground process when present.
@@ -38,8 +48,11 @@ clear_herdr_metadata() {
   "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
     --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" \
     --clear-token title1 --clear-token title2 --clear-token title3 \
-    --clear-token repo --clear-token branch \
-    --clear-token pr_open --clear-token pr_draft \
+    --clear-token repo \
+    --clear-token repo_color_1 --clear-token repo_color_2 \
+    --clear-token repo_color_3 --clear-token repo_color_4 \
+    --clear-token repo_color_5 --clear-token repo_color_6 \
+    --clear-token branch --clear-token pr_open --clear-token pr_draft \
     --clear-token pr_merged --clear-token pr_closed \
     </dev/null >/dev/null 2>&1 || true
   "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
@@ -199,11 +212,10 @@ EOF
   fi
 fi
 
-# Claude Code's own footer shows a PR only for a session it linked one to
-# itself, so a resumed session, or a branch whose PR was opened outside it, gets
-# nothing there; this looks the PR up by branch instead. --state all keeps it
-# showing once merged or closed.
-pr_state="" pr_number="" pr_url="" pr_label=""
+# Claude Code owns the in-pane PR badge. Look the PR up separately for Herdr's
+# agent sidebar, including resumed sessions and PRs opened outside Claude.
+# --state all keeps the sidebar metadata available once a PR is merged or closed.
+pr_state="" pr_number="" pr_label=""
 if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
   PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
   pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
@@ -212,36 +224,23 @@ if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
     find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
   fi
   refresh_if_stale "$pr_cache" sh -c '
-    cd "$1" && gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft,url \
-      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring) + \" \" + .url" \
+    cd "$1" && gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft \
+      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring)" \
       > "$3.tmp" && mv -f "$3.tmp" "$3" || rm -f "$3.tmp"
   ' _ "$workspace_dir" "$git_branch" "$pr_cache"
 
-  [ -f "$pr_cache" ] && read -r pr_state pr_number pr_url < "$pr_cache"
+  # The third field consumes URLs written by caches from older versions.
+  [ -f "$pr_cache" ] && read -r pr_state pr_number _pr_url < "$pr_cache"
   if [ -n "$pr_number" ]; then
-    case $pr_state in
-      open) pr_color='01;32' ;;
-      draft) pr_color=90 ;;
-      merged) pr_color='01;35' ;;
-      *) pr_color='01;31' ;;
-    esac
     pr_label="#$pr_number"
     [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
-    pr_text=$pr_label
-    if [ -n "$pr_url" ]; then
-      # OSC 8: ESC ] 8 ; ; <url> ST <text> ESC ] 8 ; ; ST, with ESC \ as ST.
-      # $pr_label stays plain text for the herdr token below.
-      pr_text=$(printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$pr_url" "$pr_label")
-    fi
-    printf " \033[%sm %s\033[00m" "$pr_color" "$pr_text"
   fi
 fi
 
 # herdr has no repo, branch or PR token for agent rows, so they go out as pane
-# metadata. A token's color is fixed in herdr/config.toml, so the PR is sent as
-# one of pr_open, pr_draft, pr_merged or pr_closed, each colored there to match
-# the statusline. herdr strips escape bytes from metadata, so the PR cannot be a
-# hyperlink; the clickable link remains in Claude's own statusline instead.
+# metadata. Token colors are fixed in herdr/config.toml, so repositories are
+# assigned deterministic palette tokens and the PR is sent as one token per
+# state. Claude owns the clickable in-pane PR link.
 if [ -n "$HERDR_PANE_ID" ]; then
   herdr_bin=${HERDR_BIN_PATH:-herdr}
   # Claude's shared daemon can leak another session's Herdr pane ID. Never
@@ -295,9 +294,22 @@ EOF
       repo_dir=${git_common_dir%/.git}
       repo_name=${repo_dir##*/}
     fi
-    set -- "$@" --token "repo=📁 $repo_name" --token "branch= $git_branch"
+    repo_token=$(herdr_repo_token "$repo_name")
+    set -- "$@" --clear-token repo
+    for token in repo_color_1 repo_color_2 repo_color_3 repo_color_4 repo_color_5 repo_color_6; do
+      if [ "$token" = "$repo_token" ]; then
+        set -- "$@" --token "$token=📁 $repo_name"
+      else
+        set -- "$@" --clear-token "$token"
+      fi
+    done
+    set -- "$@" --token "branch= $git_branch"
   else
-    set -- "$@" --clear-token repo --clear-token branch
+    set -- "$@" --clear-token repo
+    for token in repo_color_1 repo_color_2 repo_color_3 repo_color_4 repo_color_5 repo_color_6; do
+      set -- "$@" --clear-token "$token"
+    done
+    set -- "$@" --clear-token branch
   fi
   model_key=$(printf '%s' "$model" | tr '[:upper:]' '[:lower:]')
   case $model_key in
