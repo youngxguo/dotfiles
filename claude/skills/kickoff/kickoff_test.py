@@ -74,20 +74,22 @@ class CseatTest(unittest.TestCase):
         self.assertEqual(kickoff.cseat_name("c6"), "claude6")
         self.assertEqual(kickoff.cseat_name("work"), "work")
 
-    def test_default_launch_uses_fable_with_handoffs(self):
+    def test_default_launch_uses_fable_medium_with_handoffs(self):
         self.assertEqual(
             kickoff.cseat_args("run", None, None),
-            ["cseat", "run", "--model", "fable", "--handoff"],
+            ["cseat", "run", "--model", "fable", "--size", "M", "--handoff"],
         )
 
-    def test_account_and_model_are_forwarded(self):
+    def test_account_model_and_size_are_forwarded(self):
         self.assertEqual(
-            kickoff.cseat_args("run", "c3", "opus"),
+            kickoff.cseat_args("run", "c3", "opus", "S"),
             [
                 "cseat",
                 "run",
                 "--model",
                 "opus",
+                "--size",
+                "S",
                 "--handoff",
                 "--seat",
                 "claude3",
@@ -102,7 +104,7 @@ class CseatTest(unittest.TestCase):
                 kickoff, "run_in_login_shell", return_value=result
             ) as run,
         ):
-            self.assertTrue(kickoff.preflight_cseat("c3", "opus"))
+            self.assertTrue(kickoff.preflight_cseat("c3", "opus", "S"))
         run.assert_called_once_with(
             [
                 "cseat",
@@ -110,7 +112,7 @@ class CseatTest(unittest.TestCase):
                 "--model",
                 "opus",
                 "--size",
-                "M",
+                "S",
                 "--json",
                 "--dry-run",
                 "--seat",
@@ -141,12 +143,12 @@ class CseatTest(unittest.TestCase):
 
     def test_launch_runs_cseat_in_the_pane(self):
         with mock.patch.object(kickoff, "herdr") as herdr:
-            kickoff.launch_claude("w1:p2", lambda _: None, "c3", "opus", True)
+            kickoff.launch_claude("w1:p2", lambda _: None, "c3", "opus", True, "S")
         herdr.assert_called_once_with(
             "pane",
             "run",
             "w1:p2",
-            "cseat run --model opus --handoff --seat claude3",
+            "cseat run --model opus --size S --handoff --seat claude3",
         )
 
 

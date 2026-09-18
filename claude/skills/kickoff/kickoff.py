@@ -108,14 +108,17 @@ def cseat_name(label: str) -> str:
 
 
 def cseat_args(
-    subcommand: str, to_label: str | None, requested_model: str | None
+    subcommand: str,
+    to_label: str | None,
+    requested_model: str | None,
+    task_size: str = "M",
 ) -> list[str]:
     model = requested_model or "fable"
-    args = ["cseat", subcommand, "--model", model]
+    args = ["cseat", subcommand, "--model", model, "--size", task_size]
     if subcommand == "run":
         args.append("--handoff")
     else:
-        args.extend(["--size", "M", "--json", "--dry-run"])
+        args.extend(["--json", "--dry-run"])
     if to_label:
         args.extend(["--seat", cseat_name(to_label)])
     return args
@@ -143,7 +146,9 @@ def cseat_available() -> bool:
     return run_in_login_shell(["command", "-v", "cseat"]).returncode == 0
 
 
-def preflight_cseat(to_label: str | None, requested_model: str | None) -> bool:
+def preflight_cseat(
+    to_label: str | None, requested_model: str | None, task_size: str = "M"
+) -> bool:
     """Check cseat before changing the repo; false uses the portable fallback."""
     if not cseat_available():
         seat = cseat_name(to_label) if to_label else "claude"
@@ -151,7 +156,7 @@ def preflight_cseat(to_label: str | None, requested_model: str | None) -> bool:
             raise SystemExit(f"account {to_label!r} needs cseat, but cseat is unavailable")
         return False
 
-    args = cseat_args("pick", to_label, requested_model)
+    args = cseat_args("pick", to_label, requested_model, task_size)
     proc = run_in_login_shell(args)
     if proc.returncode == 0:
         return True
@@ -186,10 +191,11 @@ def launch_claude(
     to_label: str | None = None,
     requested_model: str | None = None,
     use_cseat: bool = True,
+    task_size: str = "M",
 ) -> None:
     """Start Claude with cseat handoffs, or directly when cseat is absent."""
     command = (
-        shlex.join(cseat_args("run", to_label, requested_model))
+        shlex.join(cseat_args("run", to_label, requested_model, task_size))
         if use_cseat
         else plain_claude_command(to_label, requested_model)
     )
@@ -212,6 +218,13 @@ def main(argv: list[str] | None = None) -> int:
         choices=("fable", "opus"),
         help="Claude model to pin for the new session (default: fable)",
     )
+    parser.add_argument(
+        "--size",
+        type=str.upper,
+        choices=("S", "M", "L"),
+        default="M",
+        help="task size passed to cseat (default: M)",
+    )
 
     args = parser.parse_args(argv)
     brief = (
@@ -223,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     if not brief.strip():
         raise SystemExit("kickoff needs a task")
 
-    use_cseat = preflight_cseat(args.to, args.model)
+    use_cseat = preflight_cseat(args.to, args.model, args.size)
     target, root = main_checkout(args.repo)
     prefix = branch_prefix(root)
     branch = f"{prefix}/{slug}" if prefix else slug
@@ -250,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     name = agent_name(slug)
-    launch_claude(pane_id, log, args.to, args.model, use_cseat)
+    launch_claude(pane_id, log, args.to, args.model, use_cseat, args.size)
     if not wait_for(lambda: pane_agent(pane_id) == "claude", 60):
         raise SystemExit(
             f"herdr never detected claude in {pane_id}; {workspace_id} is open at {path}"
