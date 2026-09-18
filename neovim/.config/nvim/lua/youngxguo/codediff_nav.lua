@@ -218,30 +218,28 @@ local function local_stack_base_ref(dir)
     end
   end
 
-  local reflog = vim.system({
-    "git", "-C", dir, "reflog", "show", "--format=%H", "refs/heads/" .. branch,
+  local refs = vim.system({
+    "git", "-C", dir, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/remotes", "refs/heads",
   }, { text = true }):wait()
-  if reflog.code ~= 0 then
+  if refs.code ~= 0 then
     return
   end
 
-  local creation_oid
-  for oid in (reflog.stdout or ""):gmatch("[^\r\n]+") do
-    creation_oid = oid
-  end
-  if not creation_oid then
-    return
+  local refs_by_oid = {}
+  for line in (refs.stdout or ""):gmatch("[^\r\n]+") do
+    local oid, ref = line:match("^(%x+)%s+(.+)$")
+    if oid and ref and ref ~= branch and not vim.endswith(ref, "/" .. branch) and not ref:match("/HEAD$") then
+      refs_by_oid[oid] = refs_by_oid[oid] or ref
+    end
   end
 
-  for _, namespace in ipairs({ "refs/remotes", "refs/heads" }) do
-    local refs = vim.system({
-      "git", "-C", dir, "for-each-ref", "--format=%(refname:short)", "--points-at", creation_oid, namespace,
-    }, { text = true }):wait()
-    if refs.code == 0 then
-      for ref in (refs.stdout or ""):gmatch("[^\r\n]+") do
-        if ref ~= branch and not vim.endswith(ref, "/" .. branch) then
-          return ref
-        end
+  local history = vim.system({
+    "git", "-C", dir, "rev-list", "--first-parent", "--max-count=256", "HEAD",
+  }, { text = true }):wait()
+  if history.code == 0 then
+    for oid in (history.stdout or ""):gmatch("[^\r\n]+") do
+      if refs_by_oid[oid] then
+        return refs_by_oid[oid]
       end
     end
   end
