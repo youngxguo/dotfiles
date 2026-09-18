@@ -20,6 +20,55 @@ end
 
 local COMPACT_POLL_INTERVAL_MS = 50
 local COMPACT_POLL_MAX_ATTEMPTS = 40
+local INLINE_WRAP_POLL_INTERVAL_MS = 50
+local INLINE_WRAP_POLL_MAX_ATTEMPTS = 40
+
+local function codediff_session(tabpage)
+  if not package.loaded["codediff.ui.lifecycle"] then
+    return nil
+  end
+  local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
+  return ok and lifecycle.get_session(tabpage) or nil
+end
+
+local function wrap_inline_diff(tabpage)
+  local session = codediff_session(tabpage)
+  if not session or session.layout ~= "inline" then
+    return
+  end
+
+  local win = session.modified_win
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.wo[win].wrap = true
+    vim.wo[win].linebreak = true
+    vim.wo[win].breakindent = true
+  end
+end
+
+-- CodeDiff forces nowrap whenever it renders or enters a diff pane. That is
+-- required by side-by-side scroll synchronization, but inline has only one
+-- pane. Wait for asynchronous file rendering, then restore normal wrapping.
+local function wrap_after_inline_render(tabpage, previous_result, attempts)
+  attempts = attempts or 0
+  local session = codediff_session(tabpage)
+  if session and session.layout ~= "inline" then
+    return
+  end
+
+  local result = session and session.stored_diff_result
+  if result and result ~= previous_result and result.changes then
+    wrap_inline_diff(tabpage)
+    return
+  end
+
+  if attempts < INLINE_WRAP_POLL_MAX_ATTEMPTS and vim.api.nvim_tabpage_is_valid(tabpage) then
+    vim.defer_fn(function()
+      wrap_after_inline_render(tabpage, previous_result, attempts + 1)
+    end, INLINE_WRAP_POLL_INTERVAL_MS)
+  else
+    wrap_inline_diff(tabpage)
+  end
+end
 
 -- codediff computes the diff asynchronously, so `stored_diff_result.changes` is
 -- briefly nil after CodeDiffOpen fires; calling compact.enable() too early bails
@@ -124,14 +173,49 @@ local function probe_dir()
   return vim.fn.getcwd()
 end
 
+local codediff_nav_group = vim.api.nvim_create_augroup("CodeDiffNav", { clear = true })
+
 vim.api.nvim_create_autocmd("User", {
-  group = vim.api.nvim_create_augroup("CodeDiffNavCompact", { clear = true }),
+  group = codediff_nav_group,
   pattern = "CodeDiffOpen",
   callback = function(args)
     local tabpage = args.data and args.data.tabpage
     if tabpage then
+      local session = codediff_session(tabpage)
       enable_compact(tabpage)
+      wrap_inline_diff(tabpage)
+      wrap_after_inline_render(tabpage, session and session.stored_diff_result)
     end
+  end,
+})
+
+vim.api.nvim_create_autocmd("User", {
+  group = codediff_nav_group,
+  pattern = "CodeDiffFileSelect",
+  callback = function(args)
+    local tabpage = args.data and args.data.tabpage
+    if tabpage then
+      local session = codediff_session(tabpage)
+      wrap_inline_diff(tabpage)
+      wrap_after_inline_render(tabpage, session and session.stored_diff_result)
+    end
+  end,
+})
+
+vim.api.nvim_create_autocmd({ "BufWinEnter", "BufEnter", "WinEnter", "FileType", "TabEnter" }, {
+  group = codediff_nav_group,
+  callback = function()
+    if not package.loaded["codediff.ui.lifecycle"] then
+      return
+    end
+    local tabpage = vim.api.nvim_get_current_tabpage()
+    vim.schedule(function()
+      vim.schedule(function()
+        if vim.api.nvim_tabpage_is_valid(tabpage) then
+          wrap_inline_diff(tabpage)
+        end
+      end)
+    end)
   end,
 })
 
