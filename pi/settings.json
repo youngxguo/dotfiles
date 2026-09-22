@@ -1,8 +1,8 @@
 {
   "theme": "dark",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
-  "defaultThinkingLevel": "xhigh",
+  "defaultModel": "gpt-6-astra",
+  "defaultThinkingLevel": "medium",
   "externalEditor": "nvim",
   "showHardwareCursor": true,
   "quietStartup": true,
@@ -30,5 +30,5 @@
   "markdown": {
     "mermaid": "final"
   },
-  "lastChangelogVersion": "0.85.1"
+  "lastChangelogVersion": "0.87.0"
 }
