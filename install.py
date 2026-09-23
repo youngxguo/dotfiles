@@ -762,7 +762,7 @@ def install_vscode():
     apply_links(links_for("vscode"))
 
 
-CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine")
+CLAUDE_SETTINGS_KEYS = ("permissions", "statusLine", "model")
 CLAUDE_GLOBAL_CONFIG = {
     "lspRecommendationDisabled": True,
     # Fullscreen TUI auto-opens the /diff panel on terminals >= 144 columns
