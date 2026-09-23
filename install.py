@@ -445,7 +445,11 @@ def managed_links():
 
     for config_dir in claude_config_dirs():
         links.append(
-            ("claude", REPO_ROOT / "claude/CLAUDE.md", config_dir / "CLAUDE.md")
+            (
+                "claude",
+                REPO_ROOT / "agents/AGENTS.md",
+                config_dir / "rules/dotfiles-agents.md",
+            )
         )
         for skill_dir in sorted((REPO_ROOT / "claude/skills").glob("*/SKILL.md")):
             links.append(
@@ -464,7 +468,7 @@ def managed_links():
     )
     for script in sorted((REPO_ROOT / "claude/hooks").glob("*.sh")):
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
-    links.append(("codex", REPO_ROOT / "codex/AGENTS.md", HOME / ".codex/AGENTS.md"))
+    links.append(("codex", REPO_ROOT / "agents/AGENTS.md", HOME / ".codex/AGENTS.md"))
 
     links.append(
         ("pi", REPO_ROOT / "pi/settings.json", HOME / ".pi/agent/settings.json")
@@ -763,7 +767,7 @@ CLAUDE_GLOBAL_CONFIG = {"lspRecommendationDisabled": True}
 
 
 def claude_config_dirs():
-    """claude resolves user-level CLAUDE.md, skills and settings.json relative
+    """claude resolves user-level rules, skills and settings.json relative
     to CLAUDE_CONFIG_DIR, so global config has to land in each dir."""
     return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4, 5, 6)]
 
@@ -882,7 +886,20 @@ def merge_claude_settings_into(template, target, keys):
 
 def install_claude():
     print("applying claude config")
+    # Resolve every link before removing any: secondary accounts may link
+    # through the primary account's CLAUDE.md.
+    legacy_links = [
+        config_dir / "CLAUDE.md"
+        for config_dir in claude_config_dirs()
+        if (config_dir / "CLAUDE.md").is_symlink()
+        and (config_dir / "CLAUDE.md").resolve()
+        == (REPO_ROOT / "claude/CLAUDE.md").resolve()
+    ]
+    # AGENTS.md is a project convention; global Claude instructions must live
+    # under rules/ to load in every project (including older worktrees).
     apply_links(links_for("claude"))
+    for legacy in legacy_links:
+        legacy.unlink()
     merge_claude_settings()
     merge_claude_global_config()
     install_claude_herdr_skill()

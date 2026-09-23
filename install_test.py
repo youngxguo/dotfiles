@@ -322,7 +322,8 @@ class ClaudeInstallTest(unittest.TestCase):
     def make_repo(root):
         repo = root / "repo"
         (repo / "claude/hooks").mkdir(parents=True)
-        (repo / "claude/CLAUDE.md").write_text("# rules\n", encoding="utf-8")
+        (repo / "agents").mkdir()
+        (repo / "agents/AGENTS.md").write_text("# rules\n", encoding="utf-8")
         (repo / "claude/statusline-command.sh").write_text("", encoding="utf-8")
         (repo / "claude/settings.json").write_text(
             json.dumps(
@@ -341,6 +342,30 @@ class ClaudeInstallTest(unittest.TestCase):
         )
         return repo
 
+    def test_install_claude_preserves_unmanaged_instructions(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            repo = self.make_repo(root)
+            primary = home / ".claude/CLAUDE.md"
+            primary.parent.mkdir(parents=True)
+            primary.write_text("personal rules\n", encoding="utf-8")
+            secondary = home / ".claude2/CLAUDE.md"
+            secondary.parent.mkdir(parents=True)
+            secondary.symlink_to(primary)
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "REPO_ROOT", repo),
+                mock.patch.object(install, "merge_claude_settings"),
+                mock.patch.object(install, "merge_claude_global_config"),
+                mock.patch.object(install, "install_claude_herdr_skill"),
+                mock.patch.object(install, "install_claude_herdr_integrations"),
+            ):
+                install.install_claude()
+            self.assertEqual(primary.read_text(encoding="utf-8"), "personal rules\n")
+            self.assertTrue(secondary.is_symlink())
+            self.assertEqual(secondary.resolve(), primary.resolve())
+
     def test_install_claude_covers_every_config_dir(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             root = Path(tmpdir)
@@ -356,6 +381,14 @@ class ClaudeInstallTest(unittest.TestCase):
                     install.subprocess, "check_output", return_value=self.SKILL
                 ) as skill_mock,
             ):
+                for config_dir in install.claude_config_dirs():
+                    config_dir.mkdir(parents=True)
+                    target = (
+                        repo / "claude/CLAUDE.md"
+                        if config_dir == home / ".claude"
+                        else home / ".claude/CLAUDE.md"
+                    )
+                    (config_dir / "CLAUDE.md").symlink_to(target)
                 install.install_claude()
 
                 config_dirs = install.claude_config_dirs()
@@ -372,9 +405,10 @@ class ClaudeInstallTest(unittest.TestCase):
                 )
                 for config_dir in config_dirs:
                     self.assertEqual(
-                        (config_dir / "CLAUDE.md").resolve(),
-                        (repo / "claude/CLAUDE.md").resolve(),
+                        (config_dir / "rules/dotfiles-agents.md").resolve(),
+                        (repo / "agents/AGENTS.md").resolve(),
                     )
+                    self.assertFalse((config_dir / "CLAUDE.md").is_symlink())
                     skill = config_dir / "skills/herdr/SKILL.md"
                     self.assertFalse(skill.is_symlink())
                     self.assertEqual(skill.read_text(encoding="utf-8"), self.SKILL)
