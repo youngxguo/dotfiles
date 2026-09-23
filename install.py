@@ -769,7 +769,7 @@ CLAUDE_GLOBAL_CONFIG = {"lspRecommendationDisabled": True}
 def claude_config_dirs():
     """claude resolves user-level rules, skills and settings.json relative
     to CLAUDE_CONFIG_DIR, so global config has to land in each dir."""
-    return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4, 5, 6)]
+    return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4, 5, 6, 7, 8)]
 
 
 def claude_global_config_path(config_dir):

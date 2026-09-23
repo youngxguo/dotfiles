@@ -401,6 +401,8 @@ class ClaudeInstallTest(unittest.TestCase):
                         ".claude4",
                         ".claude5",
                         ".claude6",
+                        ".claude7",
+                        ".claude8",
                     ],
                 )
                 for config_dir in config_dirs:
@@ -544,10 +546,10 @@ class ClaudeInstallTest(unittest.TestCase):
                 install.install_claude_herdr_integrations()
 
             config_dirs = [home / ".claude"] + [
-                home / f".claude{number}" for number in (2, 3, 4, 5, 6)
+                home / f".claude{number}" for number in (2, 3, 4, 5, 6, 7, 8)
             ]
-            self.assertEqual(len(run_mock.mock_calls), 6)
-            self.assertEqual(status_mock.call_count, 6)
+            self.assertEqual(len(run_mock.mock_calls), 8)
+            self.assertEqual(status_mock.call_count, 8)
             for status_call, run_call, config_dir in zip(
                 status_mock.mock_calls, run_mock.mock_calls, config_dirs, strict=True
             ):
@@ -615,7 +617,7 @@ class ClaudeInstallTest(unittest.TestCase):
             ):
                 install.install_claude_herdr_integrations()
 
-            self.assertEqual(status_mock.call_count, 6)
+            self.assertEqual(status_mock.call_count, 8)
             run_mock.assert_not_called()
 
     def test_install_claude_herdr_skill_skips_without_herdr(self):
@@ -991,6 +993,8 @@ class ClaudeSkillLinksTest(unittest.TestCase):
                 ".claude4",
                 ".claude5",
                 ".claude6",
+                ".claude7",
+                ".claude8",
             ):
                 link = home / config_dir / "skills/rebump"
                 self.assertTrue(link.is_symlink())
