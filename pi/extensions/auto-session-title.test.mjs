@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 import autoSessionTitle, {
 	herdrRepoToken,
+	herdrSubscriptionToken,
 	herdrTitleRows,
 	titleFromPrompt,
 } from "./auto-session-title.ts";
@@ -90,6 +93,20 @@ test("wraps Herdr titles into the shared three-row layout", () => {
 test("assigns repositories stable palette colors", () => {
 	assert.equal(herdrRepoToken("frontend"), herdrRepoToken("frontend"));
 	assert.notEqual(herdrRepoToken("frontend"), herdrRepoToken("backend"));
+});
+
+test("subscription palettes accept arbitrary labels and agree with Claude", () => {
+	const shell = readFileSync(new URL("../../claude/statusline-command.sh", import.meta.url), "utf8");
+	const python = shell.match(/account_slot=\$\(ACCOUNT="\$account" python3 -c '([\s\S]*?)'\)/)[1];
+	for (const label of ["c1", "c7", "c8", "c9", "c99", "c1000", "c99999999999999999999", "codex", ".claude-test", ".claude-é"]) {
+		const slot = execFileSync("python3", ["-c", python], {
+			env: { ...process.env, ACCOUNT: label }, encoding: "utf8",
+		}).trim();
+		assert.equal(herdrSubscriptionToken(label), slot === "8" ? "subscription_codex" : `subscription_color_${slot}`);
+		assert.match(herdrSubscriptionToken(label), /^subscription_(color_[1-7]|codex)$/);
+	}
+	assert.equal(herdrSubscriptionToken("c8"), herdrSubscriptionToken("c1"));
+	assert.equal(herdrSubscriptionToken("codex"), "subscription_codex");
 });
 
 test("names a new session and its terminal from the opening request", () => {
@@ -182,13 +199,8 @@ test("clears its terminal and Herdr titles on /new", async () => {
 			"model_terra",
 			"model_luna",
 			"model_other",
+			...Array.from({ length: 7 }, (_, index) => `subscription_color_${index + 1}`),
 			"subscription_codex",
-			"subscription_c1",
-			"subscription_c2",
-			"subscription_c3",
-			"subscription_c4",
-			"subscription_c5",
-			"subscription_c6",
 			"pr_open",
 			"pr_draft",
 			"pr_merged",

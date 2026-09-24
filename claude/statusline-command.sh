@@ -66,10 +66,10 @@ clear_herdr_metadata() {
   "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
     --source "$HERDR_SUBSCRIPTION_SOURCE" --seq "$(herdr_metadata_seq)" \
     --clear-token subscription \
-    --clear-token subscription_codex --clear-token subscription_c1 \
-    --clear-token subscription_c2 --clear-token subscription_c3 \
-    --clear-token subscription_c4 --clear-token subscription_c5 \
-    --clear-token subscription_c6 \
+    --clear-token subscription_color_1 --clear-token subscription_color_2 \
+    --clear-token subscription_color_3 --clear-token subscription_color_4 \
+    --clear-token subscription_color_5 --clear-token subscription_color_6 \
+    --clear-token subscription_color_7 --clear-token subscription_codex \
     </dev/null >/dev/null 2>&1 || true
 }
 
@@ -185,16 +185,27 @@ print(color + bar + reset + overflow, end='')
 "
 }
 
-# One colour per account, so which subscription a window is on reads at a
-# glance rather than by spelling out the label.
-case $account in
-  c1) account_color=34 ;;
-  c2) account_color=36 ;;
-  c3) account_color=33 ;;
-  c4) account_color=32 ;;
-  c5) account_color=31 ;;
-  c6) account_color=35 ;;
-  *) account_color=37 ;;
+# A fixed palette, not an account allowlist. Numbered subscriptions cycle through
+# seven slots; named ones use FNV-1a. Slot eight is Codex. Keep in sync with Pi's
+# herdrSubscriptionToken; tests compare both implementations.
+account_slot=$(ACCOUNT="$account" python3 -c '
+import os, re
+name = os.environ["ACCOUNT"]
+match = re.fullmatch(r"c([0-9]+)", name)
+value = 2166136261
+for byte in name.encode():
+    value = ((value ^ byte) * 16777619) & 0xffffffff
+print(8 if name == "codex" else (int(match.group(1)) - 1 if match else value) % 7 + 1)
+')
+case $account_slot in
+  1) account_color=34 ;;
+  2) account_color=36 ;;
+  3) account_color=33 ;;
+  4) account_color=32 ;;
+  5) account_color=31 ;;
+  6) account_color=35 ;;
+  7) account_color=95 ;;
+  *) account_color=33 ;;
 esac
 printf "\033[01;%sm%s\033[00m | " "$account_color" "$account"
 printf "\033[01;35m%s\033[00m" "$model"
@@ -322,10 +333,8 @@ EOF
     *luna*) model_token=model_luna ;;
     *) model_token=model_other ;;
   esac
-  case $account in
-    c1 | c2 | c3 | c4 | c5 | c6) subscription_token=subscription_$account ;;
-    *) subscription_token= ;;
-  esac
+  subscription_token=subscription_color_$account_slot
+  [ "$account_slot" = 8 ] && subscription_token=subscription_codex
   case $pr_state in
     open | draft | merged) pr_token=pr_$pr_state ;;
     *) pr_token=pr_closed ;;
@@ -356,7 +365,7 @@ EOF
       --source "$HERDR_MODEL_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
 
     set -- --clear-token subscription
-    for token in subscription_codex subscription_c1 subscription_c2 subscription_c3 subscription_c4 subscription_c5 subscription_c6; do
+    for token in subscription_color_1 subscription_color_2 subscription_color_3 subscription_color_4 subscription_color_5 subscription_color_6 subscription_color_7 subscription_codex; do
       if [ "$token" = "$subscription_token" ]; then
         set -- "$@" --token "$token=$account"
       else

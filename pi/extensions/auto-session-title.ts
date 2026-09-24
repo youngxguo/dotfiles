@@ -37,14 +37,9 @@ const HERDR_MODEL_TOKENS = [
 	"model_other",
 ] as const;
 const HERDR_SUBSCRIPTION_TOKENS = [
+	...Array.from({ length: 7 }, (_, index) => `subscription_color_${index + 1}`),
 	"subscription_codex",
-	"subscription_c1",
-	"subscription_c2",
-	"subscription_c3",
-	"subscription_c4",
-	"subscription_c5",
-	"subscription_c6",
-] as const;
+];
 const HERDR_MAIN_TOKENS = [
 	"title1",
 	"title2",
@@ -73,6 +68,18 @@ export function herdrRepoToken(
 		hash = Math.imul(hash ^ byte, 16_777_619) >>> 0;
 	}
 	return HERDR_REPO_TOKENS[hash % HERDR_REPO_TOKENS.length];
+}
+
+export function herdrSubscriptionToken(label: string): string {
+	// Match Claude's statusline: seven reusable colors, plus Codex orange.
+	if (label === "codex") return "subscription_codex";
+	const numbered = /^c([0-9]+)$/.exec(label);
+	let hash = 2_166_136_261;
+	for (const byte of new TextEncoder().encode(label)) {
+		hash = Math.imul(hash ^ byte, 16_777_619) >>> 0;
+	}
+	const value = numbered ? BigInt(numbered[1]) - 1n : BigInt(hash);
+	return `subscription_color_${((value % 7n) + 7n) % 7n + 1n}`;
 }
 
 function herdrModelToken(modelId: string): (typeof HERDR_MODEL_TOKENS)[number] {
@@ -343,7 +350,7 @@ export default function (pi: ExtensionAPI) {
 		const subscriptionArgs = metadataArgs(HERDR_SUBSCRIPTION_SOURCE);
 		subscriptionArgs.push("--clear-token", "subscription");
 		const selectedSubscriptionToken =
-			model?.provider === "openai-codex" ? "subscription_codex" : undefined;
+			model?.provider === "openai-codex" ? herdrSubscriptionToken("codex") : undefined;
 		for (const token of HERDR_SUBSCRIPTION_TOKENS) {
 			if (token === selectedSubscriptionToken) {
 				subscriptionArgs.push("--token", `${token}=codex`);

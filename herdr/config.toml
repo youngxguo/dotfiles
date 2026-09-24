@@ -108,13 +108,17 @@ rows = [
     # Subscriptions use saturated accents and bold text; models use a quieter,
     # muted namespace. Literal shades stay disjoint from each other and from
     # repository colors, so adjacent metadata cannot collapse into one color.
+    # Fixed palette: arbitrary labels share slots, never extra rows/tokens.
+    # Seven cycling Claude colors plus Codex orange leave room for eight models
+    # within Herdr's 16-token row limit.
+    { token = "$subscription_color_1", bold = true, dim = false, fg = "#168cff" },
+    { token = "$subscription_color_2", bold = true, dim = false, fg = "#00b8d9" },
+    { token = "$subscription_color_3", bold = true, dim = false, fg = "#d9a400" },
+    { token = "$subscription_color_4", bold = true, dim = false, fg = "#16b364" },
+    { token = "$subscription_color_5", bold = true, dim = false, fg = "#ff5a52" },
+    { token = "$subscription_color_6", bold = true, dim = false, fg = "#9d73f7" },
+    { token = "$subscription_color_7", bold = true, dim = false, fg = "#ed4fa8" },
     { token = "$subscription_codex", bold = true, dim = false, fg = "#ff7a00" },
-    { token = "$subscription_c1", bold = true, dim = false, fg = "#168cff" },
-    { token = "$subscription_c2", bold = true, dim = false, fg = "#00b8d9" },
-    { token = "$subscription_c3", bold = true, dim = false, fg = "#d9a400" },
-    { token = "$subscription_c4", bold = true, dim = false, fg = "#16b364" },
-    { token = "$subscription_c5", bold = true, dim = false, fg = "#ff5a52" },
-    { token = "$subscription_c6", bold = true, dim = false, fg = "#9d73f7" },
     { token = "$model_fable", dim = false, fg = "#d8a0df" },
     { token = "$model_opus", dim = false, fg = "#b9a0dc" },
     { token = "$model_sonnet", dim = false, fg = "#82a9d8" },

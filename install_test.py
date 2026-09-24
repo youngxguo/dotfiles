@@ -371,6 +371,9 @@ class ClaudeInstallTest(unittest.TestCase):
             root = Path(tmpdir)
             home = root / "home"
             repo = self.make_repo(root)
+            for name in (".claude2", ".claude99", ".claude-test"):
+                (home / name).mkdir(parents=True)
+            (home / ".claude-test/.claude.json").write_text("{}")
 
             with (
                 mock.patch.object(install, "HOME", home),
@@ -382,7 +385,7 @@ class ClaudeInstallTest(unittest.TestCase):
                 ) as skill_mock,
             ):
                 for config_dir in install.claude_config_dirs():
-                    config_dir.mkdir(parents=True)
+                    config_dir.mkdir(parents=True, exist_ok=True)
                     target = (
                         repo / "claude/CLAUDE.md"
                         if config_dir == home / ".claude"
@@ -396,13 +399,9 @@ class ClaudeInstallTest(unittest.TestCase):
                     [d.name for d in config_dirs],
                     [
                         ".claude",
+                        ".claude-test",
                         ".claude2",
-                        ".claude3",
-                        ".claude4",
-                        ".claude5",
-                        ".claude6",
-                        ".claude7",
-                        ".claude8",
+                        ".claude99",
                     ],
                 )
                 for config_dir in config_dirs:
@@ -450,6 +449,25 @@ class ClaudeInstallTest(unittest.TestCase):
                 self.assertTrue(
                     skill_path.read_text(encoding="utf-8").endswith("## New section\n")
                 )
+
+    def test_config_discovery_has_no_account_limit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.dict(os.environ, {}, clear=True),
+            ):
+                self.assertEqual(install.claude_config_dirs(), [home / ".claude"])
+                for name in (".claude99", ".claude1000", ".claude-backup"):
+                    (home / name).mkdir()
+                (home / ".claude101").touch()  # Not a directory.
+                self.assertEqual(
+                    set(install.claude_config_dirs()),
+                    {home / ".claude", home / ".claude99", home / ".claude1000"},
+                )
+                custom = home / "custom login"
+                with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(custom)}):
+                    self.assertIn(custom, install.claude_config_dirs())
 
     def test_merge_claude_settings_supports_cseat_shared_logins(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
@@ -533,6 +551,9 @@ class ClaudeInstallTest(unittest.TestCase):
     def test_install_claude_herdr_integrations_cover_every_config_dir(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             home = Path(tmpdir) / "home"
+            config_dirs = [home / name for name in (".claude", ".claude2", ".claude99")]
+            for config_dir in config_dirs:
+                config_dir.mkdir(parents=True)
             with (
                 mock.patch.object(install, "HOME", home),
                 mock.patch.object(install, "herdr_command", return_value="herdr"),
@@ -545,11 +566,8 @@ class ClaudeInstallTest(unittest.TestCase):
             ):
                 install.install_claude_herdr_integrations()
 
-            config_dirs = [home / ".claude"] + [
-                home / f".claude{number}" for number in (2, 3, 4, 5, 6, 7, 8)
-            ]
-            self.assertEqual(len(run_mock.mock_calls), 8)
-            self.assertEqual(status_mock.call_count, 8)
+            self.assertEqual(len(run_mock.mock_calls), len(config_dirs))
+            self.assertEqual(status_mock.call_count, len(config_dirs))
             for status_call, run_call, config_dir in zip(
                 status_mock.mock_calls, run_mock.mock_calls, config_dirs, strict=True
             ):
@@ -605,6 +623,7 @@ class ClaudeInstallTest(unittest.TestCase):
     def test_install_claude_herdr_integrations_skip_current_accounts(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             home = Path(tmpdir) / "home"
+            (home / ".claude99").mkdir(parents=True)
             with (
                 mock.patch.object(install, "HOME", home),
                 mock.patch.object(install, "herdr_command", return_value="herdr"),
@@ -617,7 +636,7 @@ class ClaudeInstallTest(unittest.TestCase):
             ):
                 install.install_claude_herdr_integrations()
 
-            self.assertEqual(status_mock.call_count, 8)
+            self.assertEqual(status_mock.call_count, 2)
             run_mock.assert_not_called()
 
     def test_install_claude_herdr_skill_skips_without_herdr(self):
@@ -734,13 +753,8 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 "model_terra",
                 "model_luna",
                 "model_other",
+                *(f"subscription_color_{n}" for n in range(1, 8)),
                 "subscription_codex",
-                "subscription_c1",
-                "subscription_c2",
-                "subscription_c3",
-                "subscription_c4",
-                "subscription_c5",
-                "subscription_c6",
                 "pr_open",
                 "pr_draft",
                 "pr_merged",
@@ -748,6 +762,51 @@ class ClaudeStatuslineTest(unittest.TestCase):
             ):
                 index = args.index(token)
                 self.assertEqual(args[index - 1], "--clear-token")
+
+    def test_new_subscriptions_are_reported_and_renderable(self):
+        import tomllib
+
+        repo = Path(__file__).parent
+        config = tomllib.loads((repo / "herdr/config.toml").read_text())
+        self.assertEqual(len(config["ui"]["sidebar"]["agents"]["rows"]), 6)
+        for row in config["ui"]["sidebar"]["agents"]["rows"]:
+            self.assertLessEqual(len(row), 16, "Herdr limits sidebar rows to 16 tokens")
+        sidebar_tokens = {
+            cell["token"]
+            for row in config["ui"]["sidebar"]["agents"]["rows"]
+            for cell in row
+            if isinstance(cell, dict)
+        }
+        for account in ("c1", "c7", "c8", "c9", "c99", "c1000", ".claude-test", ".claude-é"):
+            with self.subTest(account=account), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                report = root / "report"
+                fake = self.fake_herdr(root)
+                payload = {
+                    "model": {"display_name": "Fable 5.1"},
+                    "transcript_path": str(
+                        root / (f".claude{account[1:]}" if account.startswith("c") else account)
+                        / "projects" / "test.jsonl"
+                    ),
+                    "workspace": {"current_dir": str(root)},
+                }
+                subprocess.run(
+                    ["sh", str(repo / "claude/statusline-command.sh")],
+                    input=json.dumps(payload),
+                    text=True,
+                    check=True,
+                    capture_output=True,
+                    env=self.statusline_environment(root, fake, report),
+                )
+                args = self.wait_for_report(report)
+                published = [arg for arg in args if arg.startswith("subscription_color_") and "=" in arg]
+                self.assertEqual(len(published), 1)
+                token, label = published[0].split("=", 1)
+                self.assertEqual(label, account)
+                self.assertIn(f"${token}", sidebar_tokens)
+                for other in [*(f"subscription_color_{n}" for n in range(1, 8)), "subscription_codex"]:
+                    if other != token:
+                        self.assertEqual(args[args.index(other) - 1], "--clear-token")
 
     def test_unnamed_task_does_not_clear_parent_title_rows(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
@@ -805,7 +864,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
             args = self.wait_for_report(report)
             self.assertIn("title1=Adversarial review", args)
             self.assertIn("model_fable=Fable 5.1", args)
-            self.assertIn("subscription_c1=c1", args)
+            self.assertIn("subscription_color_1=c1", args)
             for token in ("title2", "title3"):
                 index = args.index(token)
                 self.assertEqual(args[index - 1], "--clear-token")
@@ -962,7 +1021,34 @@ class ClaudeStatuslineTest(unittest.TestCase):
             args = self.wait_for_report(report)
             self.assertIn("title1=Resumed session", args)
             self.assertIn("model_fable=Fable 5.1", args)
-            self.assertIn("subscription_c4=c4", args)
+            self.assertIn("subscription_color_4=c4", args)
+
+
+class ClaudeShellAliasesTest(unittest.TestCase):
+    def test_aliases_discover_numbered_accounts_and_preserve_arguments(self):
+        import shutil
+
+        if not shutil.which("zsh"):
+            self.skipTest("zsh is not installed")
+        rc = (Path(__file__).parent / "zsh/.zshrc").read_text()
+        aliases = rc[rc.index('alias c="'):rc.index("unset _claude_dir _claude_number")]
+        with tempfile.TemporaryDirectory(prefix="claude aliases ") as tmpdir:
+            home = Path(tmpdir)
+            for name in (".claude2", ".claude99", ".claude1000"):
+                (home / name).mkdir()
+            result = subprocess.run(
+                ["zsh", "-f", "-c", aliases + '''
+claude() { printf '%s\\n' "$CLAUDE_CONFIG_DIR" "$@"; }
+eval 'c99 "two words"'
+eval 'c1000 --resume'
+'''],
+                env={**os.environ, "HOME": str(home)},
+                text=True, capture_output=True, check=True,
+            )
+            self.assertEqual(result.stdout.splitlines(), [
+                str(home / ".claude99"), "--chrome", "two words",
+                str(home / ".claude1000"), "--chrome", "--resume",
+            ])
 
 
 class ClaudeSkillLinksTest(unittest.TestCase):
@@ -978,6 +1064,8 @@ class ClaudeSkillLinksTest(unittest.TestCase):
             )
             (skill / "rebump.py").write_text("", encoding="utf-8")
             (repo / "claude/skills/notes").mkdir()
+            for name in (".claude2", ".claude99"):
+                (home / name).mkdir(parents=True)
 
             with (
                 mock.patch.object(install, "HOME", home),
@@ -986,16 +1074,7 @@ class ClaudeSkillLinksTest(unittest.TestCase):
                 links = install.links_for("claude")
                 install.apply_links(links)
 
-            for config_dir in (
-                ".claude",
-                ".claude2",
-                ".claude3",
-                ".claude4",
-                ".claude5",
-                ".claude6",
-                ".claude7",
-                ".claude8",
-            ):
+            for config_dir in (".claude", ".claude2", ".claude99"):
                 link = home / config_dir / "skills/rebump"
                 self.assertTrue(link.is_symlink())
                 self.assertEqual(link.resolve(), skill.resolve())

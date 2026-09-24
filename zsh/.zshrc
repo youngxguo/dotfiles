@@ -85,13 +85,13 @@ alias cx="codex"
 alias gcb="git checkout -b"
 
 alias c="claude --chrome"
-alias c2="CLAUDE_CONFIG_DIR=~/.claude2 claude --chrome"
-alias c3="CLAUDE_CONFIG_DIR=~/.claude3 claude --chrome"
-alias c4="CLAUDE_CONFIG_DIR=~/.claude4 claude --chrome"
-alias c5="CLAUDE_CONFIG_DIR=~/.claude5 claude --chrome"
-alias c6="CLAUDE_CONFIG_DIR=~/.claude6 claude --chrome"
-alias c7="CLAUDE_CONFIG_DIR=~/.claude7 claude --chrome"
-alias c8="CLAUDE_CONFIG_DIR=~/.claude8 claude --chrome"
+# Discover numbered logins instead of maintaining c2, c3, ... by hand.
+# A new shell (or sourcing this file) picks up newly created directories.
+for _claude_dir in "$HOME"/.claude<->(N/); do
+  _claude_number=${${_claude_dir:t}#.claude}
+  alias "c${_claude_number}=CLAUDE_CONFIG_DIR=${(q)_claude_dir} claude --chrome"
+done
+unset _claude_dir _claude_number
 
 if [[ -n ${TMUX_PANE:-} ]]; then
   autoload -Uz add-zsh-hook

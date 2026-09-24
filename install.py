@@ -774,7 +774,24 @@ CLAUDE_GLOBAL_CONFIG = {
 def claude_config_dirs():
     """claude resolves user-level rules, skills and settings.json relative
     to CLAUDE_CONFIG_DIR, so global config has to land in each dir."""
-    return [HOME / ".claude"] + [HOME / f".claude{n}" for n in (2, 3, 4, 5, 6, 7, 8)]
+    # Numbered logins need no registry. Named ~/.claude* logins follow cseat's
+    # discovery convention (a .claude.json inside the directory). Do not create
+    # phantom accounts on a new machine or mistake backup files for accounts.
+    default = HOME / ".claude"
+    discovered = {
+        path
+        for path in HOME.glob(".claude*")
+        if path.is_dir()
+        and (
+            path.name.removeprefix(".claude").isascii()
+            and path.name.removeprefix(".claude").isdigit()
+            or (path / ".claude.json").is_file()
+        )
+    }
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    if configured:
+        discovered.add(Path(configured).expanduser().absolute())
+    return [default] + sorted(discovered - {default}, key=lambda path: str(path))
 
 
 def claude_global_config_path(config_dir):

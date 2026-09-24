@@ -1,7 +1,7 @@
 # Claude accounts
 
-Several Claude subscriptions live side by side (`~/.claude`, `~/.claude2`,
-`~/.claude3`, `~/.claude4`, `~/.claude5`, `~/.claude6`). Start new Claude
+Claude subscriptions live side by side (`~/.claude`, numbered `~/.claudeN`,
+or named login directories). Start new Claude
 agents through `cseat run --handoff`, which chooses an account with headroom,
 pins the model, and moves the session safely when that account reaches a usage
 limit. The kickoff skill handles this automatically. A conditional
