@@ -52,6 +52,17 @@ jobs:
             python3 -m unittest "$test"
           done
 
+      - name: validate herdr plugins
+        run: |
+          for script in herdr/plugins/*/*.py; do
+            [ -f "$script" ] || continue
+            python3 -m py_compile "$script"
+          done
+          for test in herdr/plugins/*/*_test.py; do
+            [ -f "$test" ] || continue
+            python3 -m unittest "$test"
+          done
+
       - name: validate github settings
         run: |
           python3 -m py_compile github/repository_settings.py
