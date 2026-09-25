@@ -206,11 +206,17 @@ return {
 
   {
     "MeanderingProgrammer/render-markdown.nvim",
-    ft = "markdown",
+    ft = { "markdown", "octo" },
+    init = function()
+      -- Octo PR/issue bodies use Markdown under a custom filetype.
+      vim.treesitter.language.register("markdown", "octo")
+    end,
     dependencies = {
       "nvim-treesitter/nvim-treesitter",
       "nvim-tree/nvim-web-devicons",
     },
-    opts = {},
+    opts = {
+      file_types = { "markdown", "octo" },
+    },
   },
 }
