@@ -1,4 +1,6 @@
 import sys
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -210,6 +212,102 @@ class MainCheckoutTest(unittest.TestCase):
                 kickoff.main_checkout(None),
                 (["--cwd", "/repos/widget"], "/repos/widget"),
             )
+
+
+class StackingTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "repo"
+        self.root.mkdir()
+        self.git("init", "-b", "main")
+        self.git("config", "user.name", "Test")
+        self.git("config", "user.email", "test@example.invalid")
+        self.git("config", "commit.gpgsign", "false")
+        self.git("commit", "--allow-empty", "-m", "main")
+        self.main_oid = self.git("rev-parse", "HEAD")
+        self.linked = Path(self.tmp.name) / "linked"
+        self.git("worktree", "add", "-b", "parent", str(self.linked))
+        self.git("commit", "--allow-empty", "-m", "parent", path=self.linked)
+        self.parent_oid = self.git("rev-parse", "HEAD", path=self.linked)
+
+    def git(self, *args, path=None):
+        return subprocess.run(
+            ["git", "-C", str(path or self.root), *args],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+    def test_linked_checkout_keeps_its_parent_and_pins_commit(self):
+        self.assertEqual(
+            kickoff.starting_point(str(self.linked), None),
+            ("parent", self.parent_oid),
+        )
+        self.assertEqual(
+            kickoff.starting_point(str(self.root), None),
+            ("main", self.main_oid),
+        )
+
+    def test_explicit_base_overrides_worktree_and_detached_head(self):
+        self.git("checkout", "--detach", path=self.linked)
+        with self.assertRaisesRegex(SystemExit, "detached HEAD"):
+            kickoff.starting_point(str(self.linked), None)
+        self.assertEqual(
+            kickoff.starting_point(str(self.linked), "main"),
+            ("main", self.main_oid),
+        )
+        with self.assertRaisesRegex(SystemExit, "existing local branch"):
+            kickoff.starting_point(str(self.linked), "missing")
+
+    def test_parent_metadata_survives_upstream_change(self):
+        kickoff.record_parent(str(self.linked), "parent", "main")
+        self.git("config", "branch.parent.remote", "origin")
+        self.git("config", "branch.parent.merge", "refs/heads/parent")
+        self.assertEqual(self.git("config", "branch.parent.gh-merge-base"), "main")
+
+    def test_dirty_source_warns_without_copying_or_committing(self):
+        (self.linked / "uncommitted").write_text("keep here")
+        with mock.patch("sys.stderr") as stderr:
+            self.assertEqual(
+                kickoff.starting_point(str(self.linked), None),
+                ("parent", self.parent_oid),
+            )
+        self.assertIn("uncommitted", "".join(c.args[0] for c in stderr.write.call_args_list))
+        self.assertEqual(self.git("status", "--porcelain", path=self.linked), "?? uncommitted")
+
+    def test_source_selection_keeps_cwd_for_same_repo(self):
+        listing = {"result": {"source": {"repo_root": str(self.root)}}}
+        result = mock.Mock(returncode=0, stdout=str(self.linked) + "\n")
+        with (
+            mock.patch.object(kickoff.subprocess, "run", return_value=result),
+            mock.patch.object(kickoff, "herdr", return_value=listing),
+            mock.patch.object(kickoff, "main_checkout", return_value=(["--cwd", "/other"], "/other")) as other,
+        ):
+            for repo in (None, "repo"):
+                self.assertEqual(kickoff.source_checkout(repo), (["--cwd", str(self.linked)], str(self.linked)))
+            other.assert_not_called()
+            self.assertEqual(kickoff.source_checkout("other"), (["--cwd", "/other"], "/other"))
+            other.assert_called_once_with("other")
+
+    def test_launch_passes_pinned_base_and_records_parent_before_agent(self):
+        opened = {"result": {
+            "workspace": {"workspace_id": "w1"},
+            "root_pane": {"pane_id": "w1:p1"},
+            "worktree": {"path": "/new-worktree"},
+        }}
+        with (
+            mock.patch.object(kickoff, "preflight_cseat", return_value=True),
+            mock.patch.object(kickoff, "source_checkout", return_value=(["--cwd", str(self.linked)], str(self.linked))),
+            mock.patch.object(kickoff, "herdr", return_value=opened) as herdr,
+            mock.patch.object(kickoff, "record_parent") as record,
+            mock.patch.object(kickoff, "wait_for", return_value=True),
+            mock.patch.object(kickoff, "agent_name", return_value="child"),
+            mock.patch.object(kickoff, "launch_claude") as launch,
+            mock.patch.object(kickoff.rebump, "settle_agent", return_value="idle"),
+            mock.patch("builtins.print"),
+        ):
+            launch.side_effect = lambda *a: record.assert_called_once_with("/new-worktree", "test/child", "parent")
+            self.assertEqual(kickoff.main(["child", "do work"]), 0)
+        herdr.assert_any_call("worktree", "create", "--cwd", str(self.linked), "--branch", "test/child", "--base", self.parent_oid, "--no-focus")
 
 
 class ShellReadyTest(unittest.TestCase):

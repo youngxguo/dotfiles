@@ -61,12 +61,27 @@ python3 ${CLAUDE_SKILL_DIR}/kickoff.py --to c3 --model opus --size S comment-cle
 ```
 
 The script checks `cseat` before changing the repository, creates a new
-worktree from the repository's main checkout, and launches Claude with cseat's
+worktree from the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
 preflight and launched session, pins Fable when `--model` is omitted, honors
 `--to` by translating short aliases such as `c3` to cseat's `claude3` seat,
 sends the task, and returns. On a machine without cseat it falls back to a
 directly launched, explicitly pinned Claude session.
+
+Run it from the checkout whose work the new task should build on. From a linked
+worktree, this stacks the new branch on that worktree's current branch—not main.
+Uncommitted changes stay in the source checkout; commit needed changes first
+with the user's authorization. The script prints the parent and exact starting
+commit and records `branch.<child>.gh-merge-base`, which both `gh pr create` and
+`<leader>gD` use without changing the child's push/pull upstream.
+
+Use `--base main` (or another local branch) when the user wants an independent
+start instead of stacking. Detached HEAD requires an explicit `--base`.
+`--repo` keeps the current checkout when it names the current repository;
+for a different repository it uses that repository's open main checkout.
+The recorded parent is intent, not a stack manager: after merging/deleting or
+rebasing the parent, retarget/rebase the child as appropriate. An existing PR's
+base takes precedence in `<leader>gD`.
 
 When it prints the final line, report that line and stop. Do not inspect the
 agent in the same turn.

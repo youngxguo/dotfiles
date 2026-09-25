@@ -283,7 +283,29 @@ local function github_pr_base_ref(dir)
   return fallback
 end
 
-local function local_stack_base_ref(dir)
+local function configured_base_ref(dir)
+  local branch = vim.system({
+    "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD",
+  }, { text = true }):wait()
+  if branch.code ~= 0 then
+    return
+  end
+  local result = vim.system({
+    "git", "-C", dir, "config", "--get", "branch." .. vim.trim(branch.stdout) .. ".gh-merge-base",
+  }, { text = true }):wait()
+  local ref = result.code == 0 and vim.trim(result.stdout or "") or ""
+  if ref == "" then
+    return
+  end
+  if git_ref_exists(dir, "refs/heads/" .. ref) then
+    return "refs/heads/" .. ref
+  end
+  -- Preserve explicit intent when the local parent was deleted; don't silently
+  -- infer a different stack if neither the local nor remote parent exists.
+  return "refs/remotes/origin/" .. ref
+end
+
+local function local_stack_base_ref(dir, trunk)
   local branch_result = vim.system({
     "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD",
   }, { text = true }):wait()
@@ -302,6 +324,12 @@ local function local_stack_base_ref(dir)
     end
   end
 
+  -- A branch name on old trunk history is not evidence of a stack parent.
+  -- Without a trunk boundary, prefer the normal fallback over guessing.
+  if not trunk then
+    return
+  end
+
   local refs = vim.system({
     "git", "-C", dir, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/remotes", "refs/heads",
   }, { text = true }):wait()
@@ -318,7 +346,7 @@ local function local_stack_base_ref(dir)
   end
 
   local history = vim.system({
-    "git", "-C", dir, "rev-list", "--first-parent", "--max-count=256", "HEAD",
+    "git", "-C", dir, "rev-list", "--first-parent", "--max-count=256", "HEAD", "^" .. trunk,
   }, { text = true }):wait()
   if history.code == 0 then
     for oid in (history.stdout or ""):gmatch("[^\r\n]+") do
@@ -366,9 +394,11 @@ end
 function M.open_base_diff()
   local layout = apply_view_defaults()
   local dir = probe_dir()
+  local trunk = trunk_ref(dir)
   local pr_base_ref = github_pr_base_ref(dir)
-  local stack_base_ref = not pr_base_ref and local_stack_base_ref(dir) or nil
-  local base_ref = pr_base_ref or stack_base_ref or trunk_ref(dir)
+  local stack_base_ref = not pr_base_ref
+    and (configured_base_ref(dir) or local_stack_base_ref(dir, trunk)) or nil
+  local base_ref = pr_base_ref or stack_base_ref or trunk
   if not base_ref then
     vim.notify("Could not find a pull request, stacked branch, or local trunk base", vim.log.levels.ERROR)
     return

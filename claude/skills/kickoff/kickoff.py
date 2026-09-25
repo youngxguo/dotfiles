@@ -72,6 +72,56 @@ def main_checkout(repo: str | None) -> tuple[list[str], str]:
     return ["--cwd", root], root
 
 
+def source_checkout(repo: str | None) -> tuple[list[str], str]:
+    """Keep the caller's checkout, including when --repo names this repository."""
+    current = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, check=False,
+    )
+    if current.returncode == 0:
+        path = current.stdout.strip()
+        listing = herdr("worktree", "list", "--cwd", path)["result"]
+        if not repo or Path(listing["source"]["repo_root"]).name == repo:
+            return ["--cwd", path], path
+    if repo:
+        return main_checkout(repo)
+    raise SystemExit("kickoff needs a Git checkout, or --repo for another open repository")
+
+
+def starting_point(path: str, base: str | None) -> tuple[str, str]:
+    """Resolve a local parent branch and pin its commit before creating anything."""
+    if not base:
+        result = subprocess.run(
+            ["git", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode:
+            raise SystemExit("detached HEAD: pass --base with a local parent branch")
+        base = result.stdout.strip()
+    result = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--verify", f"refs/heads/{base}^{{commit}}"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode:
+        raise SystemExit(f"base {base!r} must name an existing local branch")
+    dirty = subprocess.run(
+        ["git", "-C", path, "status", "--porcelain"],
+        capture_output=True, text=True, check=True,
+    )
+    if dirty.stdout:
+        print("Note: uncommitted changes stay in the source checkout; only commits are inherited.", file=sys.stderr)
+    return base, result.stdout.strip()
+
+
+def record_parent(path: str, branch: str, parent: str) -> None:
+    # Native gh pr create setting; separate from the push/pull upstream, which
+    # changes when the child is first pushed with git push -u.
+    subprocess.run(
+        ["git", "-C", path, "config", "--local", f"branch.{branch}.gh-merge-base", parent],
+        check=True,
+    )
+
+
 def branch_prefix(root: str) -> str:
     email = subprocess.run(
         ["git", "-C", root, "config", "user.email"],
@@ -209,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("brief", nargs="*", help="the user's task")
     parser.add_argument("--brief-file", help="read the task from a file")
     parser.add_argument("--repo", help="use another open repository")
+    parser.add_argument("--base", help="local parent branch (default: current checkout's branch)")
     parser.add_argument(
         "--to",
         help="Claude account to use, by cusage label or alias such as c3",
@@ -237,24 +288,29 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("kickoff needs a task")
 
     use_cseat = preflight_cseat(args.to, args.model, args.size)
-    target, root = main_checkout(args.repo)
+    target, root = source_checkout(args.repo)
+    parent, base_oid = starting_point(root, args.base)
     prefix = branch_prefix(root)
     branch = f"{prefix}/{slug}" if prefix else slug
     log = print
 
-    print(f"{Path(root).name}: {branch} ({' '.join(target)})")
+    print(f"{Path(root).name}: {branch} from {parent} ({base_oid[:12]}; {' '.join(target)})")
     opened = herdr(
         "worktree",
         "create",
         *target,
         "--branch",
         branch,
+        "--base",
+        base_oid,
         "--no-focus",
     )["result"]
 
     workspace_id = opened["workspace"]["workspace_id"]
     pane_id = opened["root_pane"]["pane_id"]
     path = opened["worktree"]["path"]
+    record_parent(path, branch, parent)
+    brief = f"This branch starts from {parent} ({base_oid}). Use {parent} as the PR base unless the task requires otherwise.\n\n{brief}"
     log(f"  workspace {workspace_id} pane {pane_id} at {path}")
 
     if not wait_for(lambda: shell_ready(pane_id), 20):
