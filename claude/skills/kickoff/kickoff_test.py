@@ -275,15 +275,23 @@ class StackingTest(unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain", path=self.linked), "?? uncommitted")
 
     def test_source_selection_keeps_cwd_for_same_repo(self):
-        listing = {"result": {"source": {"repo_root": str(self.root)}}}
+        # Herdr refuses linked_worktree_source, so the target is the parent
+        # workspace while git reads the parent branch from the linked checkout.
+        root = str(self.root)
+        main = {"workspace_id": "w2", "worktree": {"checkout_path": root, "is_linked_worktree": False}}
+        linked = {"workspace_id": "w9", "worktree": {"checkout_path": str(self.linked), "is_linked_worktree": True}}
+        calls = fake_herdr(
+            worktree_list={"result": {"source": {"repo_root": root}}},
+            workspace_list={"result": {"workspaces": [linked, main]}},
+        )
         result = mock.Mock(returncode=0, stdout=str(self.linked) + "\n")
         with (
             mock.patch.object(kickoff.subprocess, "run", return_value=result),
-            mock.patch.object(kickoff, "herdr", return_value=listing),
+            mock.patch.object(kickoff, "herdr", calls),
             mock.patch.object(kickoff, "main_checkout", return_value=(["--cwd", "/other"], "/other")) as other,
         ):
             for repo in (None, "repo"):
-                self.assertEqual(kickoff.source_checkout(repo), (["--cwd", str(self.linked)], str(self.linked)))
+                self.assertEqual(kickoff.source_checkout(repo), (["--workspace", "w2"], str(self.linked)))
             other.assert_not_called()
             self.assertEqual(kickoff.source_checkout("other"), (["--cwd", "/other"], "/other"))
             other.assert_called_once_with("other")
@@ -296,7 +304,7 @@ class StackingTest(unittest.TestCase):
         }}
         with (
             mock.patch.object(kickoff, "preflight_cseat", return_value=True),
-            mock.patch.object(kickoff, "source_checkout", return_value=(["--cwd", str(self.linked)], str(self.linked))),
+            mock.patch.object(kickoff, "source_checkout", return_value=(["--workspace", "w2"], str(self.linked))),
             mock.patch.object(kickoff, "herdr", return_value=opened) as herdr,
             mock.patch.object(kickoff, "record_parent") as record,
             mock.patch.object(kickoff, "wait_for", return_value=True),
@@ -307,7 +315,7 @@ class StackingTest(unittest.TestCase):
         ):
             launch.side_effect = lambda *a: record.assert_called_once_with("/new-worktree", "test/child", "parent")
             self.assertEqual(kickoff.main(["child", "do work"]), 0)
-        herdr.assert_any_call("worktree", "create", "--cwd", str(self.linked), "--branch", "test/child", "--base", self.parent_oid, "--no-focus")
+        herdr.assert_any_call("worktree", "create", "--workspace", "w2", "--branch", "test/child", "--base", self.parent_oid, "--no-focus")
 
 
 class ShellReadyTest(unittest.TestCase):

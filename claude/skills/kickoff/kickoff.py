@@ -62,7 +62,11 @@ def main_checkout(repo: str | None) -> tuple[list[str], str]:
         )
 
     listing = herdr("worktree", "list", "--cwd", str(Path.cwd()))["result"]
-    root = listing["source"]["repo_root"]
+    return parent_workspace(listing["source"]["repo_root"])
+
+
+def parent_workspace(root: str) -> tuple[list[str], str]:
+    """Herdr creates worktrees only from the repo's parent workspace, never a linked one."""
     for workspace in workspaces():
         worktree = workspace.get("worktree") or {}
         if worktree.get("checkout_path") == root and not worktree.get(
@@ -73,7 +77,8 @@ def main_checkout(repo: str | None) -> tuple[list[str], str]:
 
 
 def source_checkout(repo: str | None) -> tuple[list[str], str]:
-    """Keep the caller's checkout, including when --repo names this repository."""
+    """Keep the caller's checkout as the git source, including when --repo names
+    this repository; Herdr still creates the worktree from the parent workspace."""
     current = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, check=False,
@@ -81,8 +86,9 @@ def source_checkout(repo: str | None) -> tuple[list[str], str]:
     if current.returncode == 0:
         path = current.stdout.strip()
         listing = herdr("worktree", "list", "--cwd", path)["result"]
-        if not repo or Path(listing["source"]["repo_root"]).name == repo:
-            return ["--cwd", path], path
+        root = listing["source"]["repo_root"]
+        if not repo or Path(root).name == repo:
+            return parent_workspace(root)[0], path
     if repo:
         return main_checkout(repo)
     raise SystemExit("kickoff needs a Git checkout, or --repo for another open repository")

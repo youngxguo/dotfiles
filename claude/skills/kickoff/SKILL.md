@@ -61,7 +61,8 @@ python3 ${CLAUDE_SKILL_DIR}/kickoff.py --to c3 --model opus --size S comment-cle
 ```
 
 The script checks `cseat` before changing the repository, creates a new
-worktree from the current checkout's committed HEAD, and launches Claude with cseat's
+worktree (via the repo's parent Herdr workspace, which Herdr requires) based on
+the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
 preflight and launched session, pins Fable when `--model` is omitted, honors
 `--to` by translating short aliases such as `c3` to cseat's `claude3` seat,
