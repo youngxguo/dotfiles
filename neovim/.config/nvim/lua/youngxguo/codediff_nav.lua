@@ -237,6 +237,12 @@ local function git_ref_exists(dir, ref)
   return git_ref_oid(dir, ref) ~= nil
 end
 
+local function is_ancestor(dir, ancestor, descendant)
+  return vim.system({
+    "git", "-C", dir, "merge-base", "--is-ancestor", ancestor, descendant,
+  }, { text = true }):wait().code == 0
+end
+
 local function github_pr_base_ref(dir)
   if vim.fn.executable("gh") ~= 1 then
     return
@@ -296,12 +302,26 @@ local function configured_base_ref(dir)
   if ref == "" then
     return
   end
-  if git_ref_exists(dir, "refs/heads/" .. ref) then
-    return "refs/heads/" .. ref
+  local local_ref = "refs/heads/" .. ref
+  local remote_ref = "refs/remotes/origin/" .. ref
+  local has_local = git_ref_exists(dir, local_ref)
+  local has_remote = git_ref_exists(dir, remote_ref)
+  if has_local and has_remote then
+    -- The local parent goes stale when nobody pulls the parent workspace.
+    -- After rebasing onto the remote tip, a stale local ref puts the
+    -- merge-base before the rebased-onto commits and drags every one of them
+    -- into the diff. Prefer whichever ref is strictly ahead.
+    if is_ancestor(dir, local_ref, remote_ref) and not is_ancestor(dir, remote_ref, local_ref) then
+      return remote_ref
+    end
+    return local_ref
+  end
+  if has_local then
+    return local_ref
   end
   -- Preserve explicit intent when the local parent was deleted; don't silently
   -- infer a different stack if neither the local nor remote parent exists.
-  return "refs/remotes/origin/" .. ref
+  return remote_ref
 end
 
 local function local_stack_base_ref(dir, trunk)
@@ -354,12 +374,6 @@ local function local_stack_base_ref(dir, trunk)
       end
     end
   end
-end
-
-local function is_ancestor(dir, ancestor, descendant)
-  return vim.system({
-    "git", "-C", dir, "merge-base", "--is-ancestor", ancestor, descendant,
-  }, { text = true }):wait().code == 0
 end
 
 local function merge_base(dir, base_ref, fork_point)
