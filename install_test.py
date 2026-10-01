@@ -808,6 +808,37 @@ class ClaudeStatuslineTest(unittest.TestCase):
                     if other != token:
                         self.assertEqual(args[args.index(other) - 1], "--clear-token")
 
+    def test_pane_shows_account_email_but_sidebar_keeps_label(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            root = Path(tmpdir)
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            script = Path(__file__).parent / "claude/statusline-command.sh"
+            config_dir = root / ".claude8"
+            config_dir.mkdir()
+            (config_dir / ".claude.json").write_text(
+                json.dumps({"oauthAccount": {"emailAddress": "young@example.com"}}),
+                encoding="utf-8",
+            )
+            payload = {
+                "model": {"display_name": "Fable 5.1"},
+                "transcript_path": str(config_dir / "projects" / "test.jsonl"),
+                "workspace": {"current_dir": str(root)},
+            }
+            result = subprocess.run(
+                ["sh", str(script)],
+                input=json.dumps(payload),
+                text=True,
+                check=True,
+                capture_output=True,
+                env=self.statusline_environment(root, fake, report),
+            )
+            self.assertIn("c8", result.stdout)
+            self.assertIn("young@example.com", result.stdout)
+            args = self.wait_for_report(report)
+            self.assertIn("subscription_color_1=c8", args)
+            self.assertFalse(any("example.com" in arg for arg in args))
+
     def test_unnamed_task_does_not_clear_parent_title_rows(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             root = Path(tmpdir)

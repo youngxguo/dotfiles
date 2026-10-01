@@ -99,15 +99,29 @@ print(display)
 # config dir actually in use, so it answers for every configured account.
 transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
 session_name=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_name',''))")
-account=$(TRANSCRIPT="$transcript" python3 -c "
-import os, re
+# The login email comes from the account's .claude.json: the default account
+# keeps that state file beside ~/.claude, every other account keeps it inside
+# its config dir. It is shown in the pane only; Herdr's sidebar keeps the short
+# account label.
+{ read -r account; read -r account_email; } <<EOF
+$(TRANSCRIPT="$transcript" python3 -c "
+import json, os, re
 transcript = os.environ['TRANSCRIPT']
 config_dir = transcript.split('/projects/')[0] if '/projects/' in transcript else ''
 config_dir = config_dir or os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR') or '~/.claude')
+config_dir = os.path.realpath(config_dir)
 name = os.path.basename(config_dir.rstrip('/'))
 match = re.fullmatch(r'\.?claude(\d*)', name)
 print('c' + (match.group(1) or '1') if match else name)
+default_dir = os.path.realpath(os.path.expanduser('~/.claude'))
+state = os.path.expanduser('~/.claude.json') if config_dir == default_dir else os.path.join(config_dir, '.claude.json')
+try:
+    email = (json.load(open(state)).get('oauthAccount') or {}).get('emailAddress') or ''
+except (OSError, ValueError, AttributeError):
+    email = ''
+print(email)
 ")
+EOF
 
 CLAUDE_DIR="$HOME/.claude"
 TRACKING_DIR="$CLAUDE_DIR/cost-tracking"
@@ -207,7 +221,9 @@ case $account_slot in
   7) account_color=95 ;;
   *) account_color=33 ;;
 esac
-printf "\033[01;%sm%s\033[00m | " "$account_color" "$account"
+printf "\033[01;%sm%s\033[00m" "$account_color" "$account"
+[ -n "$account_email" ] && printf " \033[02m%s\033[00m" "$account_email"
+printf " | "
 printf "\033[01;35m%s\033[00m" "$model"
 
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
