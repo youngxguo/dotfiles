@@ -180,8 +180,7 @@ def run_cusage(timeout: int) -> dict:
                 break
     detail = (proc.stderr or proc.stdout).strip().splitlines()
     raise SystemExit(
-        "cseat usage produced no JSON"
-        + (f": {detail[-1]}" if detail else "")
+        "cseat usage produced no JSON" + (f": {detail[-1]}" if detail else "")
     )
 
 

@@ -13,6 +13,41 @@ from unittest import mock
 import install
 
 
+class RepoHooksInstallTest(unittest.TestCase):
+    def test_installs_hooks_in_repo_not_callers_directory(self):
+        with (
+            mock.patch.object(install, "VERIFY_MODE", False),
+            mock.patch.object(install, "install_package") as package,
+            mock.patch.object(install, "command_exists", return_value=True),
+            mock.patch.object(install.subprocess, "run") as run,
+        ):
+            install.install_repo_hooks()
+        package.assert_called_once_with("pre-commit")
+        run.assert_called_once_with(
+            ["pre-commit", "install"], cwd=install.REPO_ROOT, check=True
+        )
+
+    def test_verify_mode_does_not_install_packages_or_hooks(self):
+        with (
+            mock.patch.object(install, "VERIFY_MODE", True),
+            mock.patch.object(install, "install_package") as package,
+            mock.patch.object(install.subprocess, "run") as run,
+        ):
+            install.install_repo_hooks()
+        package.assert_not_called()
+        run.assert_not_called()
+
+    def test_missing_pre_commit_skips_hook_installation(self):
+        with (
+            mock.patch.object(install, "VERIFY_MODE", False),
+            mock.patch.object(install, "install_package"),
+            mock.patch.object(install, "command_exists", return_value=False),
+            mock.patch.object(install.subprocess, "run") as run,
+        ):
+            install.install_repo_hooks()
+        run.assert_not_called()
+
+
 class PiConfigInstallTest(unittest.TestCase):
     def test_install_pi_links_settings_themes_and_is_idempotent(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-pi-test-") as tmpdir:
@@ -708,6 +743,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
             {
                 "HOME": str(root / "home"),
                 "HERDR_BIN_PATH": str(fake),
+                "HERDR_SOCKET_PATH": str(root / "herdr.sock"),
                 "HERDR_PANE_ID": "w1:p1",
                 "HERDR_PANE_CWD": str(root),
                 "HERDR_FOREGROUND_CWD": "",
@@ -777,7 +813,16 @@ class ClaudeStatuslineTest(unittest.TestCase):
             for cell in row
             if isinstance(cell, dict)
         }
-        for account in ("c1", "c7", "c8", "c9", "c99", "c1000", ".claude-test", ".claude-é"):
+        for account in (
+            "c1",
+            "c7",
+            "c8",
+            "c9",
+            "c99",
+            "c1000",
+            ".claude-test",
+            ".claude-é",
+        ):
             with self.subTest(account=account), tempfile.TemporaryDirectory() as tmpdir:
                 root = Path(tmpdir)
                 report = root / "report"
@@ -785,8 +830,14 @@ class ClaudeStatuslineTest(unittest.TestCase):
                 payload = {
                     "model": {"display_name": "Fable 5.1"},
                     "transcript_path": str(
-                        root / (f".claude{account[1:]}" if account.startswith("c") else account)
-                        / "projects" / "test.jsonl"
+                        root
+                        / (
+                            f".claude{account[1:]}"
+                            if account.startswith("c")
+                            else account
+                        )
+                        / "projects"
+                        / "test.jsonl"
                     ),
                     "workspace": {"current_dir": str(root)},
                 }
@@ -799,12 +850,19 @@ class ClaudeStatuslineTest(unittest.TestCase):
                     env=self.statusline_environment(root, fake, report),
                 )
                 args = self.wait_for_report(report)
-                published = [arg for arg in args if arg.startswith("subscription_color_") and "=" in arg]
+                published = [
+                    arg
+                    for arg in args
+                    if arg.startswith("subscription_color_") and "=" in arg
+                ]
                 self.assertEqual(len(published), 1)
                 token, label = published[0].split("=", 1)
                 self.assertEqual(label, account)
                 self.assertIn(f"${token}", sidebar_tokens)
-                for other in [*(f"subscription_color_{n}" for n in range(1, 8)), "subscription_codex"]:
+                for other in [
+                    *(f"subscription_color_{n}" for n in range(1, 8)),
+                    "subscription_codex",
+                ]:
                     if other != token:
                         self.assertEqual(args[args.index(other) - 1], "--clear-token")
 
@@ -1062,24 +1120,41 @@ class ClaudeShellAliasesTest(unittest.TestCase):
         if not shutil.which("zsh"):
             self.skipTest("zsh is not installed")
         rc = (Path(__file__).parent / "zsh/.zshrc").read_text()
-        aliases = rc[rc.index('alias c="'):rc.index("unset _claude_dir _claude_number")]
+        aliases = rc[
+            rc.index('alias c="') : rc.index("unset _claude_dir _claude_number")
+        ]
         with tempfile.TemporaryDirectory(prefix="claude aliases ") as tmpdir:
             home = Path(tmpdir)
             for name in (".claude2", ".claude99", ".claude1000"):
                 (home / name).mkdir()
             result = subprocess.run(
-                ["zsh", "-f", "-c", aliases + '''
+                [
+                    "zsh",
+                    "-f",
+                    "-c",
+                    aliases
+                    + """
 claude() { printf '%s\\n' "$CLAUDE_CONFIG_DIR" "$@"; }
 eval 'c99 "two words"'
 eval 'c1000 --resume'
-'''],
+""",
+                ],
                 env={**os.environ, "HOME": str(home)},
-                text=True, capture_output=True, check=True,
+                text=True,
+                capture_output=True,
+                check=True,
             )
-            self.assertEqual(result.stdout.splitlines(), [
-                str(home / ".claude99"), "--chrome", "two words",
-                str(home / ".claude1000"), "--chrome", "--resume",
-            ])
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str(home / ".claude99"),
+                    "--chrome",
+                    "two words",
+                    str(home / ".claude1000"),
+                    "--chrome",
+                    "--resume",
+                ],
+            )
 
 
 class ClaudeSkillLinksTest(unittest.TestCase):

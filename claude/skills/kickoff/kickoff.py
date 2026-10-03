@@ -81,7 +81,9 @@ def source_checkout(repo: str | None) -> tuple[list[str], str]:
     this repository; Herdr still creates the worktree from the parent workspace."""
     current = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if current.returncode == 0:
         path = current.stdout.strip()
@@ -91,7 +93,9 @@ def source_checkout(repo: str | None) -> tuple[list[str], str]:
             return parent_workspace(root)[0], path
     if repo:
         return main_checkout(repo)
-    raise SystemExit("kickoff needs a Git checkout, or --repo for another open repository")
+    raise SystemExit(
+        "kickoff needs a Git checkout, or --repo for another open repository"
+    )
 
 
 def starting_point(path: str, base: str | None) -> tuple[str, str]:
@@ -99,23 +103,32 @@ def starting_point(path: str, base: str | None) -> tuple[str, str]:
     if not base:
         result = subprocess.run(
             ["git", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode:
             raise SystemExit("detached HEAD: pass --base with a local parent branch")
         base = result.stdout.strip()
     result = subprocess.run(
         ["git", "-C", path, "rev-parse", "--verify", f"refs/heads/{base}^{{commit}}"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode:
         raise SystemExit(f"base {base!r} must name an existing local branch")
     dirty = subprocess.run(
         ["git", "-C", path, "status", "--porcelain"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     if dirty.stdout:
-        print("Note: uncommitted changes stay in the source checkout; only commits are inherited.", file=sys.stderr)
+        print(
+            "Note: uncommitted changes stay in the source checkout; only commits are inherited.",
+            file=sys.stderr,
+        )
     return base, result.stdout.strip()
 
 
@@ -123,7 +136,15 @@ def record_parent(path: str, branch: str, parent: str) -> None:
     # Native gh pr create setting; separate from the push/pull upstream, which
     # changes when the child is first pushed with git push -u.
     subprocess.run(
-        ["git", "-C", path, "config", "--local", f"branch.{branch}.gh-merge-base", parent],
+        [
+            "git",
+            "-C",
+            path,
+            "config",
+            "--local",
+            f"branch.{branch}.gh-merge-base",
+            parent,
+        ],
         check=True,
     )
 
@@ -180,7 +201,9 @@ def cseat_args(
     return args
 
 
-def run_in_login_shell(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess:
+def run_in_login_shell(
+    args: list[str], timeout: int = 20
+) -> subprocess.CompletedProcess:
     """Run a command that may be provided by the user's interactive shell."""
     shell = os.environ.get("SHELL") or "/bin/zsh"
     try:
@@ -209,7 +232,9 @@ def preflight_cseat(
     if not cseat_available():
         seat = cseat_name(to_label) if to_label else "claude"
         if seat != "claude" and not re.fullmatch(r"claude\d+", seat):
-            raise SystemExit(f"account {to_label!r} needs cseat, but cseat is unavailable")
+            raise SystemExit(
+                f"account {to_label!r} needs cseat, but cseat is unavailable"
+            )
         return False
 
     args = cseat_args("pick", to_label, requested_model, task_size)
@@ -265,7 +290,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("brief", nargs="*", help="the user's task")
     parser.add_argument("--brief-file", help="read the task from a file")
     parser.add_argument("--repo", help="use another open repository")
-    parser.add_argument("--base", help="local parent branch (default: current checkout's branch)")
+    parser.add_argument(
+        "--base", help="local parent branch (default: current checkout's branch)"
+    )
     parser.add_argument(
         "--to",
         help="Claude account to use, by cusage label or alias such as c3",
@@ -300,7 +327,9 @@ def main(argv: list[str] | None = None) -> int:
     branch = f"{prefix}/{slug}" if prefix else slug
     log = print
 
-    print(f"{Path(root).name}: {branch} from {parent} ({base_oid[:12]}; {' '.join(target)})")
+    print(
+        f"{Path(root).name}: {branch} from {parent} ({base_oid[:12]}; {' '.join(target)})"
+    )
     opened = herdr(
         "worktree",
         "create",

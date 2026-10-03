@@ -1223,6 +1223,17 @@ def install_neovim():
         run(command)
 
 
+def install_repo_hooks():
+    if VERIFY_MODE:
+        print("verify mode: skipping repository hooks")
+        return
+    install_package("pre-commit")
+    if not command_exists("pre-commit"):
+        print("skipping repository hooks: pre-commit is not installed")
+        return
+    subprocess.run(["pre-commit", "install"], cwd=REPO_ROOT, check=True)
+
+
 def run_install_flow():
     install_homebrew()
     install_github_cli()
@@ -1236,6 +1247,7 @@ def run_install_flow():
     install_codex()
     install_pi()
     install_neovim()
+    install_repo_hooks()
     print("Done")
 
 
