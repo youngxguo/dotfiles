@@ -217,6 +217,14 @@ return {
     },
     opts = {
       file_types = { "markdown", "octo" },
+      overrides = {
+        filetype = {
+          -- Octo keeps 'wrap' on, and padded cells scatter once a wrapped
+          -- table row breaks. Raw cells only swap the pipes, so a wide table
+          -- wraps like its source text.
+          octo = { pipe_table = { cell = "raw" } },
+        },
+      },
     },
   },
 }

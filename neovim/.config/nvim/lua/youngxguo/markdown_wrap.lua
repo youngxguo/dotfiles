@@ -3,11 +3,12 @@
 -- so any table wider than the window renders as scattered borders (see the
 -- plugin's doc/limitations.md). There is no wrap-compatible fix, so turn
 -- wrap off for a window only when its buffer holds a table that would not
--- fit. Prose-only documents keep wrapping.
+-- fit. Prose-only documents keep wrapping. Octo buffers always wrap and
+-- render tables with raw cells instead (see plugins/markdown.lua).
 
 local M = {}
 
-local FILETYPES = { markdown = true, octo = true }
+local FILETYPES = { markdown = true }
 local CELL_PADDING = 1 -- render-markdown pipe_table.padding default
 
 local function is_table_row(line)
