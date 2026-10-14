@@ -10,16 +10,127 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "rebump"))
-try:
-    import rebump
-except ImportError as exc:  # the account picker lives there
-    raise SystemExit(f"the rebump skill must sit beside this one: {exc}")
+DEFAULT_CONFIG_DIR = Path.home() / ".claude"
+MODEL_ENV = "ANTHROPIC_MODEL"
 
-herdr = rebump.herdr
-wait_for = rebump.wait_for
+
+def herdr(*args: str, check: bool = True, timeout: int = 60) -> dict:
+    proc = subprocess.run(
+        ["herdr", *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    payload = proc.stdout.strip() or proc.stderr.strip()
+    try:
+        data = json.loads(payload) if payload else {}
+    except ValueError:
+        data = {"error": {"message": payload}}
+    if proc.returncode != 0 and "error" not in data:
+        data["error"] = {"message": payload or f"exit status {proc.returncode}"}
+    if check and "error" in data:
+        message = (data.get("error") or {}).get("message") or payload
+        raise SystemExit(f"herdr {' '.join(args)} failed: {message}")
+    return data
+
+
+def wait_for(predicate, timeout: float, interval: float = 0.5) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
+
+
+def pane_screen(pane_id: str) -> str:
+    proc = subprocess.run(
+        ["herdr", "pane", "read", pane_id, "--source", "visible", "--lines", "60"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.stdout
+
+
+def dismiss_startup_dialogs(pane_id: str, log) -> bool:
+    """A config dir shows folder-trust, bypass-permissions and Chrome-extension
+    dialogs for a folder it has never opened; herdr classifies them as idle, so
+    the screen is the only signal."""
+    answered = False
+    for _ in range(5):
+        screen = pane_screen(pane_id)
+        if "Enter to confirm" not in screen:
+            return answered
+        if "No, exit" in screen:
+            # Trust and bypass dialogs start on "No, exit"; the yes is below.
+            herdr("pane", "send-keys", pane_id, "down", check=False)
+            time.sleep(0.3)
+            what = "the folder trust dialog" if "trust" in screen else "a yes/no dialog"
+        else:
+            what = "a notice"
+        herdr("pane", "send-keys", pane_id, "enter", check=False)
+        log(f"  confirmed {what}")
+        answered = True
+        wait_for(lambda: pane_screen(pane_id) != screen, 5)
+        time.sleep(1)
+    return answered
+
+
+def settle_agent(pane_id: str, log) -> str:
+    """Wait for a freshly launched agent to come to rest, answering the
+    first-run dialogs a config dir shows for a folder it has never opened.
+    Only idle and blocked count: herdr keeps the record of the claude that
+    just quit, marked `done`, until it detects the new one, and a plain wait
+    would return that at once."""
+
+    def wait() -> dict:
+        return herdr(
+            "agent",
+            "wait",
+            pane_id,
+            "--until",
+            "idle",
+            "--until",
+            "blocked",
+            "--timeout",
+            "90000",
+            check=False,
+            timeout=120,
+        )
+
+    settled = wait()
+    if dismiss_startup_dialogs(pane_id, log):
+        settled = wait()
+    result = settled.get("result") or {}
+    status = (result.get("agent") or {}).get("agent_status")
+    return status or result.get("status") or "unknown"
+
+
+def normalize_config_dir(raw: str | None) -> str:
+    if not raw:
+        return str(DEFAULT_CONFIG_DIR.resolve())
+    return str(Path(os.path.expandvars(os.path.expanduser(raw))).resolve())
+
+
+def launch_prefix(config_dir: str, model: str | None = None) -> str:
+    """The environment a claude session starts under. The default account is
+    only reachable with CLAUDE_CONFIG_DIR unset: setting it, even to ~/.claude,
+    gives claude its own .claude.json inside the dir and its own `Claude
+    Code-credentials-<hash>` keychain entry, so the session lands on a login
+    prompt instead of the subscription."""
+    default = not config_dir or config_dir == normalize_config_dir(None)
+    unset = ["CLAUDE_CONFIG_DIR"] if default else []
+    assign = [] if unset else [f"CLAUDE_CONFIG_DIR={shlex.quote(config_dir)}"]
+    if model:
+        assign.append(f"{MODEL_ENV}={shlex.quote(model)}")
+    parts = ["env " + " ".join(f"-u {name}" for name in unset)] if unset else []
+    return " ".join([*parts, *assign])
+
 
 NAME_RE = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
 
@@ -190,8 +301,9 @@ def cseat_args(
     requested_model: str | None,
     task_size: str = "M",
 ) -> list[str]:
-    model = requested_model or "fable"
-    args = ["cseat", subcommand, "--model", model, "--size", task_size]
+    args = ["cseat", subcommand, "--size", task_size]
+    if requested_model:
+        args.extend(["--model", requested_model])
     if subcommand == "run":
         args.append("--handoff")
     else:
@@ -256,13 +368,13 @@ def plain_claude_command(to_label: str | None, requested_model: str | None) -> s
     """Portable single-account fallback for machines without cseat."""
     seat = cseat_name(to_label) if to_label else "claude"
     if seat == "claude":
-        config_dir = rebump.normalize_config_dir(None)
+        config_dir = normalize_config_dir(None)
     else:
         number = re.fullmatch(r"claude(\d+)", seat)
         if not number:
             raise SystemExit(f"account {to_label!r} needs cseat")
-        config_dir = rebump.normalize_config_dir(f"~/.claude{number.group(1)}")
-    prefix = rebump.launch_prefix(config_dir, requested_model or "fable")
+        config_dir = normalize_config_dir(f"~/.claude{number.group(1)}")
+    prefix = launch_prefix(config_dir, requested_model)
     return " ".join([prefix, "claude"])
 
 
@@ -300,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--model",
         choices=("fable", "opus"),
-        help="Claude model to pin for the new session (default: fable)",
+        help="Claude model to pin for the new session (default: cseat's policy)",
     )
     parser.add_argument(
         "--size",
@@ -360,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             f"herdr never detected claude in {pane_id}; {workspace_id} is open at {path}"
         )
 
-    status = rebump.settle_agent(pane_id, log)
+    status = settle_agent(pane_id, log)
     herdr("agent", "rename", pane_id, name, check=False)
     log(f"  agent {name} is {status}")
 

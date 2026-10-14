@@ -1,5 +1,5 @@
 {
-  "model": "claude-opus-5-5[1m]",
+  "model": "opus",
   "permissions": {
     "allow": [
       "Bash",
@@ -14,10 +14,11 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "skipDangerousModePermissionPrompt": true,
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/statusline-command.sh",
-    "refreshInterval": 1
+    "refreshInterval": 10
   },
   "hooks": {
     "UserPromptSubmit": [
@@ -46,22 +47,14 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/prompt-timer.sh clear"
-          },
-          {
-            "type": "command",
-            "command": "bash ~/.claude/statusline-command.sh --clear-herdr-metadata"
           }
         ]
-      }
-    ],
-    "StopFailure": [
+      },
       {
-        "matcher": "rate_limit",
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -z \"${CSEAT_SEAT:-}\" ]; then python3 ~/.claude/skills/rebump/rebump.py hook; fi",
-            "timeout": 30
+            "command": "bash ~/.claude/statusline-command.sh --clear-herdr-metadata"
           }
         ]
       }

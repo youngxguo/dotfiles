@@ -46,15 +46,17 @@ is genuinely blocking.
 Run `kickoff.py` after preparing the brief:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/kickoff.py --model fable --size M signup-rate-limit "the scoped task brief"
+python3 ${CLAUDE_SKILL_DIR}/kickoff.py --size M signup-rate-limit "the scoped task brief"
 ```
 
 The slug names the new branch, workspace, and agent. Use `--brief-file` for a
 long task. Use `--repo <name>` when the work belongs to another open repository.
 
-Always pass `--model` and `--size`. Use `fable` and `M` unless the user
-explicitly requests another model or task size. When the user names a Claude
-account, pass `--to` instead of leaving the selection only in the brief:
+Always pass `--size`; use `M` unless the user names a task size. Pass
+`--model` only when the user names a model: otherwise cseat's own policy picks
+it (Opus for every task kind on this machine), which keeps Fable for the
+sessions a person drives. When the user names a Claude account, pass `--to`
+instead of leaving the selection only in the brief:
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/kickoff.py --to c3 --model opus --size S comment-cleanup "the user's task"
@@ -64,8 +66,8 @@ The script checks `cseat` before changing the repository, creates a new
 worktree (via the repo's parent Herdr workspace, which Herdr requires) based on
 the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
-preflight and launched session, pins Fable when `--model` is omitted, honors
-`--to` by translating short aliases such as `c3` to cseat's `claude3` seat,
+preflight and launched session, leaves the model to cseat's policy when
+`--model` is omitted, honors `--to` by translating short aliases such as `c3` to cseat's `claude3` seat,
 sends the task, and returns. On a machine without cseat it falls back to a
 directly launched, explicitly pinned Claude session.
 
