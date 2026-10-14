@@ -303,23 +303,40 @@ export default function (pi: ExtensionAPI) {
 					"--limit",
 					"1",
 					"--json",
-					"number,state,isDraft",
+					"number,state,isDraft,headRefOid",
 				]);
 				const pullRequest = (
 					JSON.parse(pullRequests.stdout) as Array<{
 						number?: number;
 						state?: string;
 						isDraft?: boolean;
+						headRefOid?: string;
 					}>
 				)[0];
-				if (pullRequest?.number) {
-					const state = pullRequest.isDraft
-						? "draft"
-						: pullRequest.state?.toLowerCase() === "open"
-							? "open"
-							: pullRequest.state?.toLowerCase() === "merged"
-								? "merged"
-								: "closed";
+				const state = pullRequest?.isDraft
+					? "draft"
+					: pullRequest?.state?.toLowerCase() === "open"
+						? "open"
+						: pullRequest?.state?.toLowerCase() === "merged"
+							? "merged"
+							: "closed";
+				// A branch name can be reused after its PR merges, so a merged or
+				// closed PR counts only when its head commit is in this branch's history.
+				const belongsToBranch =
+					state === "open" ||
+					state === "draft" ||
+					(!!pullRequest?.headRefOid &&
+						(
+							await pi.exec("git", [
+								"-C",
+								ctx.cwd,
+								"merge-base",
+								"--is-ancestor",
+								pullRequest.headRefOid,
+								"HEAD",
+							])
+						).code === 0);
+				if (pullRequest?.number && belongsToBranch) {
 					const suffix = state === "open" || state === "draft" ? "" : ` ${state}`;
 					pullRequestToken = {
 						state,

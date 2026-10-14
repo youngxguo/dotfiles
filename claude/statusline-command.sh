@@ -242,6 +242,8 @@ fi
 # Claude Code owns the in-pane PR badge. Look the PR up separately for Herdr's
 # agent sidebar, including resumed sessions and PRs opened outside Claude.
 # --state all keeps the sidebar metadata available once a PR is merged or closed.
+# A branch name can be reused after its PR merges, so a merged or closed PR
+# counts only when its head commit is in this branch's history.
 pr_state="" pr_number="" pr_label=""
 if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
   PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
@@ -251,9 +253,17 @@ if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
     find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
   fi
   refresh_if_stale "$pr_cache" sh -c '
-    cd "$1" && gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft \
-      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring)" \
-      > "$3.tmp" && mv -f "$3.tmp" "$3" || rm -f "$3.tmp"
+    cache=$3
+    cd "$1" || exit
+    pr=$(gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft,headRefOid \
+      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring) + \" \" + .headRefOid") || exit
+    set -- $pr
+    case "${1:-}" in
+      ""|open|draft) ;;
+      *) git merge-base --is-ancestor "$3" HEAD 2>/dev/null || set -- ;;
+    esac
+    { [ -z "${1:-}" ] || printf "%s %s\n" "$1" "$2"; } > "$cache.tmp" &&
+      mv -f "$cache.tmp" "$cache" || rm -f "$cache.tmp"
   ' _ "$workspace_dir" "$git_branch" "$pr_cache"
 
   # The third field consumes URLs written by caches from older versions.

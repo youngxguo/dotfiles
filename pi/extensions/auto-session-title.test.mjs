@@ -344,3 +344,81 @@ test("publishes runtime details with the shared sidebar tokens", async () => {
 		}
 	}
 });
+
+test("reports a finished PR only when its head is in the branch history", async () => {
+	const originalEnvironment = {
+		HERDR_BIN_PATH: process.env.HERDR_BIN_PATH,
+		HERDR_ENV: process.env.HERDR_ENV,
+		HERDR_PANE_ID: process.env.HERDR_PANE_ID,
+		HERDR_SOCKET_PATH: process.env.HERDR_SOCKET_PATH,
+	};
+	process.env.HERDR_BIN_PATH = "herdr-test";
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
+	delete process.env.HERDR_SOCKET_PATH;
+
+	const cases = [
+		{ state: "OPEN", inHistory: false, token: "pr_open #42" },
+		{ state: "MERGED", inHistory: true, token: "pr_merged #42 merged" },
+		{ state: "MERGED", inHistory: false, token: undefined },
+		{ state: "CLOSED", inHistory: false, token: undefined },
+	];
+	try {
+		for (const { state, inHistory, token } of cases) {
+			const harness = extensionHarness([], async (command, args) => {
+				if (command === "herdr-test" && args[0] === "agent") {
+					return {
+						stdout: '{"result":{"agents":[{"pane_id":"w1:p1"}]}}',
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (command === "git" && args.includes("merge-base")) {
+					return { stdout: "", stderr: "", code: inHistory ? 0 : 1, killed: false };
+				}
+				if (command === "git") {
+					return {
+						stdout: "/repo\nyoung/reused\n/repo/.git\n/repo/.git\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (command === "gh") {
+					return {
+						stdout: JSON.stringify([
+							{ number: 42, state, isDraft: false, headRefOid: "a75bdd4d" },
+						]),
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 0, killed: false };
+			});
+
+			harness.handlers.get("before_agent_start")(
+				{ prompt: "Fix the sidebar PR tag" },
+				harness.ctx,
+			);
+			await new Promise((resolve) => setImmediate(resolve));
+
+			const report = harness.execCalls.find(
+				(call) =>
+					call.command === "herdr-test" &&
+					call.args[call.args.indexOf("--source") + 1] === "pi-auto-session-title",
+			);
+			assert.ok(report, `${state} in history ${inHistory}`);
+			const prTokens = report.args
+				.filter((arg) => arg.startsWith("pr_") && arg.includes("="))
+				.map((arg) => `${arg.split("=")[0]} ${arg.slice(arg.indexOf("#"))}`);
+			assert.deepEqual(prTokens, token ? [token] : [], `${state} in history ${inHistory}`);
+		}
+	} finally {
+		for (const [name, value] of Object.entries(originalEnvironment)) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	}
+});

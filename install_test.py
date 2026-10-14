@@ -1042,6 +1042,99 @@ class ClaudeStatuslineTest(unittest.TestCase):
             self.assertEqual(args[repo_index - 1], "--clear-token")
             self.assertIn("pr_open= #4426", args)
 
+    def test_pr_lookup_skips_a_finished_pr_from_a_reused_branch_name(self):
+        unrelated_oid = "a75bdd4d5307a5a327d277dcb0732f889f8aa713"
+        cases = [
+            ("open PR off this branch's history", "open", unrelated_oid, "open 7"),
+            ("merged PR at this branch's head", "merged", "HEAD", "merged 7"),
+            ("merged PR from a reused branch name", "merged", unrelated_oid, ""),
+            ("closed PR from a reused branch name", "closed", unrelated_oid, ""),
+        ]
+        for name, state, head_oid, expected in cases:
+            with (
+                self.subTest(name),
+                tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir,
+            ):
+                root = Path(tmpdir)
+                workspace = root / "workspace"
+                subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(workspace),
+                        "-c",
+                        "user.name=test",
+                        "-c",
+                        "user.email=test@example.com",
+                        "commit",
+                        "-q",
+                        "--allow-empty",
+                        "-m",
+                        "initial",
+                    ],
+                    check=True,
+                )
+                if head_oid == "HEAD":
+                    head_oid = subprocess.run(
+                        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    ).stdout.strip()
+
+                report = root / "report"
+                fake = self.fake_herdr(root)
+                refresher_pid = root / "refresher-pid"
+                fake_gh = root / "gh"
+                fake_gh.write_text(
+                    f"#!/bin/sh\necho $PPID $(ps -o ppid= -p $PPID) > '{refresher_pid}'\necho '{state} 7 {head_oid}'\n",
+                    encoding="utf-8",
+                )
+                fake_gh.chmod(0o755)
+                payload = {
+                    "cost": {"total_cost_usd": 0},
+                    "context_window": {},
+                    "model": {"display_name": "Opus 5.5"},
+                    "session_id": "pr-session",
+                    "session_name": "PR session",
+                    "transcript_path": str(root / "missing.jsonl"),
+                    "workspace": {"current_dir": str(workspace)},
+                }
+                env = self.statusline_environment(root, fake, report)
+                env["PATH"] = f"{root}{os.pathsep}{env['PATH']}"
+                subprocess.run(
+                    ["sh", str(Path(__file__).parent / "claude/statusline-command.sh")],
+                    input=json.dumps(payload),
+                    text=True,
+                    check=True,
+                    capture_output=True,
+                    env=env,
+                )
+
+                self.wait_for_exit(refresher_pid)
+                caches = list((root / "home/.claude/pr-cache").iterdir())
+                self.assertEqual(
+                    [cache.read_text(encoding="utf-8").strip() for cache in caches],
+                    [expected],
+                )
+
+    @staticmethod
+    def wait_for_exit(pid_file):
+        def running(pid):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return False
+            return True
+
+        for _ in range(500):
+            pids = pid_file.read_text(encoding="utf-8").split() if pid_file.exists() else []
+            if pids and not any(running(int(pid)) for pid in pids if int(pid) > 1):
+                return
+            time.sleep(0.01)
+        raise AssertionError("the PR cache refresh did not finish")
+
     def test_shared_daemon_does_not_report_to_another_workspace(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             root = Path(tmpdir)
