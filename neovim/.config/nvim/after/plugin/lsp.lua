@@ -60,7 +60,9 @@ vim.lsp.config('ts_ls', {
   },
 })
 
-local enabled_servers = { 'ts_ls' }
+-- ts_ls is configured but not started by default; enable it on demand with
+-- :lua vim.lsp.enable('ts_ls')
+local enabled_servers = {}
 
 if vim.fn.executable('basedpyright-langserver') == 1 then
   vim.lsp.config('basedpyright', {
