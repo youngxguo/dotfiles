@@ -29,9 +29,11 @@ return {
 
       -- Screenshots attached to private-repo PRs live at
       -- github.com/user-attachments/... and 404 without credentials, while
-      -- image.nvim downloads with a bare `curl`. Fetch github.com URLs with the
+      -- image.nvim downloads with a bare `curl`. Fetch GitHub URLs with the
       -- gh token instead. curl drops the Authorization header when the redirect
       -- lands on S3, and the header goes in via stdin so it never shows in `ps`.
+      -- github.com's blob/raw file links ignore the token and 404, so those are
+      -- fetched from raw.githubusercontent.com, which honors it.
       local gh_token
       local function github_token()
         if gh_token == nil then
@@ -120,8 +122,26 @@ return {
         end
       end
 
+      -- The URL to fetch with the gh token, or nil when `url` is not GitHub's.
+      local function github_fetch_url(url, host)
+        if host == "raw.githubusercontent.com" then
+          return url
+        end
+        if host ~= "github.com" then
+          return nil
+        end
+        local repo, file = url:match("^https?://[^/]+/([^/]+/[^/]+)/blob/([^?#]+)")
+        if not repo then
+          repo, file = url:match("^https?://[^/]+/([^/]+/[^/]+)/raw/([^?#]+)")
+        end
+        if repo then
+          return ("https://raw.githubusercontent.com/%s/%s"):format(repo, file)
+        end
+        return url
+      end
+
       local github_downloads = {}
-      local function download_from_github(url, options, callback)
+      local function download_from_github(url, fetch_url, options, callback)
         local function deliver(path)
           local ok, img = pcall(image.from_file, path, options)
           img = ok and img or nil
@@ -134,7 +154,7 @@ return {
           return
         end
         local path = vim.fn.tempname() .. ".png"
-        vim.system({ "curl", "-L", "-s", "-f", "-o", path, "-K", "-", url }, {
+        vim.system({ "curl", "-L", "-s", "-f", "-o", path, "-K", "-", fetch_url }, {
           stdin = ('header = "Authorization: token %s"\n'):format(github_token()),
         }, function(result)
           vim.schedule(function()
@@ -161,8 +181,9 @@ return {
           callback(nil)
           return
         end
-        if host == "github.com" and github_token() then
-          download_from_github(url, options, callback)
+        local fetch_url = github_fetch_url(url, host)
+        if fetch_url and github_token() then
+          download_from_github(url, fetch_url, options, callback)
           return
         end
         original_from_url(url, options, function(img)
