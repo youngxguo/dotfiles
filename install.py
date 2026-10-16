@@ -22,6 +22,7 @@ UPDATE_PLUGINS = False
 BTOP_VERSION = "v1.4.7"
 GH_EXTENSIONS = ("dlvhdr/gh-dash",)
 HERDR_INSTALL_URL = "https://herdr.dev/install.sh"
+TERMINAL_BROWSER_INSTALL_URL = "https://terminal-browser.sh/install"
 HERDR_PLUGINS = (
     ("lmilojevicc/herdr-splits.nvim", "herdr-splits"),
     # HERDR_AUTO_TITLE_PREFER_AGENT is pending upstream:
@@ -757,6 +758,24 @@ def install_tmux():
     apply_links(links_for("tmux"))
 
 
+def install_terminal_browser():
+    print("installing terminal-browser")
+    if VERIFY_MODE:
+        print("verify mode: skipping terminal-browser bootstrap")
+    elif (
+        command_exists("terminal-browser")
+        or (HOME / ".local/bin/terminal-browser").is_file()
+    ):
+        print("terminal-browser already installed")
+    elif command_exists("brew"):
+        install_package("terminal-browser")
+    else:
+        try:
+            run(["bash", "-c", f"curl -fsSL {TERMINAL_BROWSER_INSTALL_URL} | bash"])
+        except subprocess.CalledProcessError:
+            print("warning: unable to install terminal-browser; continuing")
+
+
 def install_vscode():
     print("copying vscode configs")
     apply_links(links_for("vscode"))
@@ -1247,6 +1266,7 @@ def run_install_flow():
     install_herdr()
     install_tmux()
     install_btop()
+    install_terminal_browser()
     install_vscode()
     install_claude()
     install_codex()
