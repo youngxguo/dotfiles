@@ -42,6 +42,7 @@ local function wrap_inline_diff(tabpage)
     vim.wo[win].wrap = true
     vim.wo[win].linebreak = true
     vim.wo[win].breakindent = true
+    require("youngxguo.codediff_wrap").reflow(vim.api.nvim_win_get_buf(win))
   end
 end
 

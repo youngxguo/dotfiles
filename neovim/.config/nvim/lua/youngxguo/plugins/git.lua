@@ -125,6 +125,7 @@ return {
     },
     config = function(_, opts)
       require("youngxguo.codediff_perf").setup(opts)
+      require("youngxguo.codediff_wrap").setup()
     end,
   },
 
