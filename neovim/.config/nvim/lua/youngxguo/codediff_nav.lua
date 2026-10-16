@@ -39,9 +39,11 @@ local function wrap_inline_diff(tabpage)
 
   local win = session.modified_win
   if win and vim.api.nvim_win_is_valid(win) then
-    vim.wo[win].wrap = true
+    -- 'wrap' last: codediff_wrap reflows the deleted lines on every option
+    -- change, and only the final layout matters once wrapping is on.
     vim.wo[win].linebreak = true
     vim.wo[win].breakindent = true
+    vim.wo[win].wrap = true
     require("youngxguo.codediff_wrap").reflow(vim.api.nvim_win_get_buf(win))
   end
 end

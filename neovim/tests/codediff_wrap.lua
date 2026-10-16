@@ -66,4 +66,33 @@ require("youngxguo.codediff_wrap").reflow(buf)
 rows = screen()
 assert(rows[2] == "    local deleted = 'the old text that is much too long to fit'", vim.inspect(rows))
 assert(rows[3] == "    local added = 'the new text that is much too long to fit'", vim.inspect(rows))
+
+-- A reflow from a tab that does not show the buffer leaves its rows alone.
+local ns = require("codediff.ui.inline").ns_inline
+local function virt_rows()
+  local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true, type = "virt_lines" })
+  return #marks[1][4].virt_lines
+end
+vim.api.nvim_win_set_width(0, 40)
+require("youngxguo.codediff_wrap").reflow(buf)
+assert(virt_rows() == 2, virt_rows())
+vim.cmd("tabnew")
+require("youngxguo.codediff_wrap").reflow(buf)
+assert(virt_rows() == 2, virt_rows())
+vim.cmd("tabclose")
+
+-- Wiping the buffer drops its state.
+vim.cmd("enew")
+vim.api.nvim_buf_delete(buf, { force = true })
+local state
+for i = 1, 100 do
+  local name, value = debug.getupvalue(require("youngxguo.codediff_wrap").reflow, i)
+  if not name then
+    break
+  end
+  if name == "state" then
+    state = value
+  end
+end
+assert(state and next(state) == nil, vim.inspect(state))
 print("ok")

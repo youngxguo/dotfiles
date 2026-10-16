@@ -147,7 +147,12 @@ function M.reflow(buf)
     state[buf] = nil
     return
   end
-  local opts = layout(text_window(buf), buf)
+  local win = text_window(buf)
+  if not win then
+    -- Nothing shows the buffer here; its window decides when it comes back.
+    return
+  end
+  local opts = layout(win, buf)
   local key = layout_key(opts)
   if key == entry.key or (opts and opts.width < 1) then
     return
@@ -214,6 +219,12 @@ function M.setup()
     pattern = { "wrap", "linebreak", "breakindent", "tabstop" },
     callback = function()
       M.reflow(vim.api.nvim_get_current_buf())
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = group,
+    callback = function(args)
+      state[args.buf] = nil
     end,
   })
 end
