@@ -13,6 +13,15 @@ from unittest import mock
 import install
 
 
+def setUpModule():
+    # claude_config_dirs() adds CLAUDE_CONFIG_DIR, so a run from a Claude
+    # session would link test files into that real account.
+    patcher = mock.patch.dict(os.environ)
+    patcher.start()
+    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+    unittest.addModuleCleanup(patcher.stop)
+
+
 class RepoHooksInstallTest(unittest.TestCase):
     def test_installs_hooks_in_repo_not_callers_directory(self):
         with (
@@ -1129,7 +1138,11 @@ class ClaudeStatuslineTest(unittest.TestCase):
             return True
 
         for _ in range(500):
-            pids = pid_file.read_text(encoding="utf-8").split() if pid_file.exists() else []
+            pids = (
+                pid_file.read_text(encoding="utf-8").split()
+                if pid_file.exists()
+                else []
+            )
             if pids and not any(running(int(pid)) for pid in pids if int(pid) > 1):
                 return
             time.sleep(0.01)

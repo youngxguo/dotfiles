@@ -1309,6 +1309,9 @@ def verify_idempotent():
     original_home = HOME
     original_verify = VERIFY_MODE
     original_apt_updated = LINUX_APT_UPDATED
+    # claude_config_dirs() adds CLAUDE_CONFIG_DIR, which points outside the
+    # temporary HOME when this runs from a Claude session.
+    original_claude_config_dir = os.environ.pop("CLAUDE_CONFIG_DIR", None)
 
     with tempfile.TemporaryDirectory(prefix="dotfiles-idempotent-") as tmpdir:
         HOME = Path(tmpdir) / "home"
@@ -1353,6 +1356,8 @@ def verify_idempotent():
     HOME = original_home
     VERIFY_MODE = original_verify
     LINUX_APT_UPDATED = original_apt_updated
+    if original_claude_config_dir is not None:
+        os.environ["CLAUDE_CONFIG_DIR"] = original_claude_config_dir
 
 
 def parse_args():
