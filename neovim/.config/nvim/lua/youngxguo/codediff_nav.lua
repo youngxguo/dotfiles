@@ -18,8 +18,6 @@ local function apply_view_defaults()
   return layout
 end
 
-local COMPACT_POLL_INTERVAL_MS = 50
-local COMPACT_POLL_MAX_ATTEMPTS = 40
 local INLINE_WRAP_POLL_INTERVAL_MS = 50
 local INLINE_WRAP_POLL_MAX_ATTEMPTS = 40
 
@@ -73,27 +71,6 @@ local function wrap_after_inline_render(tabpage, previous_result, attempts)
   end
 end
 
--- codediff computes the diff asynchronously, so `stored_diff_result.changes` is
--- briefly nil after CodeDiffOpen fires; calling compact.enable() too early bails
--- with "No changes to compact". There's no diff-ready event, so poll for it.
-local function enable_compact(tabpage, attempts)
-  attempts = attempts or 0
-  local ok_lifecycle, lifecycle = pcall(require, "codediff.ui.lifecycle")
-  local ok_compact, compact = pcall(require, "codediff.ui.view.compact")
-  if not (ok_lifecycle and ok_compact) then
-    return
-  end
-
-  local session = lifecycle.get_session(tabpage)
-  if session and session.stored_diff_result and session.stored_diff_result.changes then
-    pcall(compact.enable, tabpage)
-  elseif attempts < COMPACT_POLL_MAX_ATTEMPTS then
-    vim.defer_fn(function()
-      enable_compact(tabpage, attempts + 1)
-    end, COMPACT_POLL_INTERVAL_MS)
-  end
-end
-
 local function find_codediff_tab()
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
   if not ok then
@@ -107,23 +84,19 @@ local function find_codediff_tab()
   return nil
 end
 
--- codediff renamed `get_explorer` to `get_panel_view`. A plain working-tree
--- session also records an `original_revision` (`:0` or HEAD), so the panel is
--- authoritative when it exists.
+-- A plain working-tree session also records an `original_revision` (`:0` or
+-- HEAD), so the panel is authoritative when it exists.
 local function session_revision(lifecycle, tabpage)
-  local get_panel = lifecycle.get_panel_view or lifecycle.get_explorer
-  if get_panel then
-    local panel = get_panel(tabpage)
-    if panel then
-      return panel.base_revision
-    end
+  local panel = lifecycle.get_panel_view(tabpage)
+  if panel then
+    return panel.data.base_revision
   end
 
   local context = lifecycle.get_git_context(tabpage)
   return context and context.original_revision or nil
 end
 
-local function activate_existing(layout, revision)
+local function activate_existing(revision)
   local current = vim.api.nvim_get_current_tabpage()
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
   if not ok then
@@ -132,7 +105,8 @@ local function activate_existing(layout, revision)
 
   if lifecycle.get_session(current) ~= nil then
     if session_revision(lifecycle, current) == revision then
-      vim.cmd("CodeDiff --" .. layout)
+      -- The same diff again toggles it closed.
+      lifecycle.close(current)
       return true
     end
     return not lifecycle.close(current)
@@ -151,12 +125,8 @@ local function activate_existing(layout, revision)
 end
 
 local function command(layout, revision)
-  if activate_existing(layout, revision) then
+  if activate_existing(revision) then
     return
-  end
-
-  if not revision then
-    require("youngxguo.codediff_perf").request_full_status()
   end
 
   local args = {}
@@ -185,7 +155,6 @@ vim.api.nvim_create_autocmd("User", {
     local tabpage = args.data and args.data.tabpage
     if tabpage then
       local session = codediff_session(tabpage)
-      enable_compact(tabpage)
       wrap_inline_diff(tabpage)
       wrap_after_inline_render(tabpage, session and session.stored_diff_result)
     end

@@ -108,6 +108,7 @@ return {
     opts = {
       diff = {
         layout = "inline",
+        compact = true,
         compute_moves = false,
       },
       explorer = {
@@ -115,6 +116,17 @@ return {
         view_mode = "tree",
         auto_refresh = true,
         auto_open_on_cursor = true,
+        formatters = {
+          -- Status before the filename, so a narrow sidebar still shows M/A/D.
+          file = function(ctx)
+            local row = require("codediff.ui.explorer.formatters").file(ctx)
+            table.remove(row.right)
+            table.insert(row.left, 2, {
+              segments = { { text = ctx.status, hl = ctx.status_hl }, { text = " ", hl = "Normal" } },
+            })
+            return row
+          end,
+        },
       },
       keymaps = {
         view = {
@@ -124,7 +136,7 @@ return {
       },
     },
     config = function(_, opts)
-      require("youngxguo.codediff_perf").setup(opts)
+      require("codediff").setup(opts)
       require("youngxguo.codediff_wrap").setup()
     end,
   },
