@@ -127,11 +127,15 @@ CLAUDE_DIR="$HOME/.claude"
 TRACKING_DIR="$CLAUDE_DIR/cost-tracking"
 mkdir -p "$TRACKING_DIR"
 
+# Claude Code cancels an in-flight statusline by killing its process group, and
+# a new update cancels the running one whenever an agent is busy. Job control
+# (set -m) gives background work a group of its own so it outlives the cancel;
+# otherwise a refresh dies after touching its cache and waits another minute.
 refresh_if_stale() {
   cache=$1; shift
   if [ ! -f "$cache" ] || [ -n "$(find "$cache" -mmin +1 2>/dev/null)" ]; then
     touch "$cache"
-    nohup "$@" </dev/null >/dev/null 2>&1 &
+    (set -m; nohup "$@" </dev/null >/dev/null 2>&1 &) 2>/dev/null
   fi
 }
 
@@ -401,8 +405,8 @@ EOF
     "$report_bin" pane report-metadata "$report_pane" \
       --source "$HERDR_SUBSCRIPTION_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
   }
-  report_herdr_metadata "$herdr_bin" "$HERDR_PANE_ID" "$@" \
-    </dev/null >/dev/null 2>&1 &
+  (set -m; report_herdr_metadata "$herdr_bin" "$HERDR_PANE_ID" "$@" \
+    </dev/null >/dev/null 2>&1 &) 2>/dev/null
 fi
 
 timer_file="$CLAUDE_DIR/prompt-timer/$session_id"
