@@ -383,7 +383,7 @@ def herdr_auto_title_config_path():
 
 def managed_links():
     links = [
-        ("zsh", REPO_ROOT / "zsh/.zshrc", HOME / ".zshrc"),
+        ("zsh", REPO_ROOT / "zsh/zshrc", HOME / ".zshrc"),
         ("zsh", REPO_ROOT / "starship/starship.toml", HOME / ".config/starship.toml"),
         ("ghostty", REPO_ROOT / "ghostty/config", HOME / ".config/ghostty/config"),
         ("herdr", REPO_ROOT / "herdr/config.toml", HOME / ".config/herdr/config.toml"),
@@ -413,11 +413,7 @@ def managed_links():
                 )
 
     links.append(
-        (
-            "btop",
-            REPO_ROOT / "btop/.config/btop/btop.conf",
-            HOME / ".config/btop/btop.conf",
-        )
+        ("btop", REPO_ROOT / "btop/btop.conf", HOME / ".config/btop/btop.conf")
     )
 
     for config_dir in claude_config_dirs():
@@ -477,7 +473,7 @@ def managed_links():
                     ("codex-pets", pet_dir, HOME / ".codex/pets" / pet_dir.name)
                 )
 
-    links.append(("neovim", REPO_ROOT / "neovim/.config/nvim", HOME / ".config/nvim"))
+    links.append(("neovim", REPO_ROOT / "neovim", HOME / ".config/nvim"))
 
     return links
 
@@ -645,7 +641,7 @@ def lazy_lock_commit(plugin_name):
     # herdr-splits ships both halves from one repo: the herdr-side actions and
     # the neovim-side plugin have to speak the same protocol, so pin herdr's copy
     # to whatever lazy already pinned instead of drifting onto the default branch.
-    lockfile = REPO_ROOT / "neovim/.config/nvim/lazy-lock.json"
+    lockfile = REPO_ROOT / "neovim/lazy-lock.json"
     try:
         pins = json.loads(lockfile.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

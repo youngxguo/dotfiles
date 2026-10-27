@@ -1,7 +1,7 @@
 -- Run from the repo root: nvim --headless --clean -l neovim/tests/codediff_base.lua
 -- (--clean, not -u NONE: the default runtimepath still loads ~/.config/nvim,
 -- which is this repo, so -u NONE would test the working tree either way).
-vim.opt.runtimepath:append(vim.fn.getcwd() .. "/neovim/.config/nvim")
+vim.opt.runtimepath:append(vim.fn.getcwd() .. "/neovim")
 local nav = require("youngxguo.codediff_nav")
 local root = vim.fn.tempname()
 vim.fn.mkdir(root, "p")

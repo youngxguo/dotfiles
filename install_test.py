@@ -1309,7 +1309,7 @@ class ClaudeShellAliasesTest(unittest.TestCase):
 
         if not shutil.which("zsh"):
             self.skipTest("zsh is not installed")
-        rc = (Path(__file__).parent / "zsh/.zshrc").read_text()
+        rc = (Path(__file__).parent / "zsh/zshrc").read_text()
         aliases = rc[
             rc.index('alias c="') : rc.index("unset _claude_dir _claude_number")
         ]
@@ -1408,7 +1408,7 @@ class NeovimPluginCommandTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="dotfiles-nvim-test-") as tmpdir:
             root = Path(tmpdir)
             repo = root / "repo"
-            config = repo / "neovim/.config/nvim"
+            config = repo / "neovim"
             config.mkdir(parents=True)
             (config / "init.lua").write_text("", encoding="utf-8")
 

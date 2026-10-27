@@ -1,6 +1,6 @@
 -- Run from the repo root: nvim --headless --clean -l neovim/tests/codediff_wrap.lua
 -- Needs codediff.nvim installed by lazy.nvim.
-vim.opt.runtimepath:append(vim.fn.getcwd() .. "/neovim/.config/nvim")
+vim.opt.runtimepath:append(vim.fn.getcwd() .. "/neovim")
 vim.opt.runtimepath:append(vim.fn.stdpath("data") .. "/lazy/codediff.nvim")
 vim.o.columns = 120
 vim.o.lines = 20
