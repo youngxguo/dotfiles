@@ -308,7 +308,7 @@ class ClaudeInstallTest(unittest.TestCase):
         repo = root / "repo"
         (repo / "claude/hooks").mkdir(parents=True)
         (repo / "agents").mkdir()
-        (repo / "agents/AGENTS.md").write_text("# rules\n", encoding="utf-8")
+        (repo / "agents/global-rules.md").write_text("# rules\n", encoding="utf-8")
         (repo / "claude/statusline-command.sh").write_text("", encoding="utf-8")
         (repo / "claude/settings.json").write_text(
             json.dumps(
@@ -360,7 +360,7 @@ class ClaudeInstallTest(unittest.TestCase):
                 for config_dir in config_dirs:
                     self.assertEqual(
                         (config_dir / "rules/dotfiles-agents.md").resolve(),
-                        (repo / "agents/AGENTS.md").resolve(),
+                        (repo / "agents/global-rules.md").resolve(),
                     )
                     skill = config_dir / "skills/herdr/SKILL.md"
                     self.assertFalse(skill.is_symlink())

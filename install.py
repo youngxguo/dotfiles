@@ -420,7 +420,7 @@ def managed_links():
         links.append(
             (
                 "claude",
-                REPO_ROOT / "agents/AGENTS.md",
+                REPO_ROOT / "agents/global-rules.md",
                 config_dir / "rules/dotfiles-agents.md",
             )
         )
@@ -441,7 +441,9 @@ def managed_links():
     )
     for script in sorted((REPO_ROOT / "claude/hooks").glob("*.sh")):
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
-    links.append(("codex", REPO_ROOT / "agents/AGENTS.md", HOME / ".codex/AGENTS.md"))
+    links.append(
+        ("codex", REPO_ROOT / "agents/global-rules.md", HOME / ".codex/AGENTS.md")
+    )
 
     pi_extensions_dir = REPO_ROOT / "pi/extensions"
     if pi_extensions_dir.is_dir():
