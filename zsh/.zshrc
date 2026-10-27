@@ -93,32 +93,6 @@ for _claude_dir in "$HOME"/.claude<->(N/); do
 done
 unset _claude_dir _claude_number
 
-if [[ -n ${TMUX_PANE:-} ]]; then
-  autoload -Uz add-zsh-hook
-  _tmux_push_branch() {
-    emulate -L zsh
-    local branch
-    branch=$(command git rev-parse --abbrev-ref HEAD 2>/dev/null)
-    [[ $branch == ${_tmux_last_branch-__unset__} ]] && return
-    _tmux_last_branch=$branch
-    if [[ -n $branch ]]; then
-      command tmux set-option -qt "$TMUX_PANE" @git_branch "$branch"
-    else
-      command tmux set-option -qut "$TMUX_PANE" @git_branch
-    fi
-    command tmux run-shell -b "~/.tmux-sidebar.sh refresh" 2>/dev/null
-  }
-  add-zsh-hook chpwd _tmux_push_branch
-  add-zsh-hook precmd _tmux_push_branch
-
-  _tmux_clear_ai_state() {
-    emulate -L zsh
-    [[ -n $(command tmux show-options -pqv -t "$TMUX_PANE" @ai_state 2>/dev/null) ]] || return
-    command ~/.tmux-ai-state.sh clear 2>/dev/null
-  }
-  add-zsh-hook precmd _tmux_clear_ai_state
-fi
-
 # --no-use skips nvm's default-version resolution, the slow (~600ms) part of
 # sourcing it.
 export NVM_DIR="$HOME/.nvm"

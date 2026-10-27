@@ -111,3 +111,11 @@ vim.keymap.set("n", "<leader>or", function()
 end, { silent = true, desc = "Open Octo review" })
 vim.keymap.set("n", "<leader>oR", "<cmd>Octo review submit<CR>", { silent = true })
 vim.keymap.set("n", "<leader>od", "<cmd>Octo pr diff<CR>", { silent = true })
+
+-- Inside Herdr, herdr-splits owns these keys so they cross pane boundaries.
+if vim.env.HERDR_ENV ~= "1" then
+  vim.keymap.set("n", "<C-h>", "<C-w>h", { desc = "Navigate left" })
+  vim.keymap.set("n", "<C-j>", "<C-w>j", { desc = "Navigate down" })
+  vim.keymap.set("n", "<C-k>", "<C-w>k", { desc = "Navigate up" })
+  vim.keymap.set("n", "<C-l>", "<C-w>l", { desc = "Navigate right" })
+end

@@ -1,10 +1,5 @@
 return {
   {
-    "christoomey/vim-tmux-navigator",
-    cond = vim.env.HERDR_ENV ~= "1",
-  },
-
-  {
     "lmilojevicc/herdr-splits.nvim",
     cond = vim.env.HERDR_ENV == "1",
     event = "VeryLazy",

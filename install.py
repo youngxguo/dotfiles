@@ -90,7 +90,6 @@ PACKAGE_BINARIES = {
     "viu": ("viu",),
     "mercurial": ("hg",),
     "zsh": ("zsh",),
-    "tmux": ("tmux",),
     "direnv": ("direnv",),
     "fzf": ("fzf",),
     "starship": ("starship",),
@@ -412,10 +411,6 @@ def managed_links():
                         HOME / ".config/ghostty/themes" / theme_file.name,
                     )
                 )
-
-    links.append(("tmux", REPO_ROOT / "tmux/.tmux.conf", HOME / ".tmux.conf"))
-    for script in sorted((REPO_ROOT / "tmux").glob(".tmux-*.sh")):
-        links.append(("tmux", script, HOME / script.name))
 
     links.append(
         (
@@ -749,13 +744,6 @@ def install_herdr():
         install_package("go")
         print("installing herdr plugins")
         install_herdr_plugins()
-
-
-def install_tmux():
-    print("installing tmux")
-    install_package("tmux")
-    print("applying tmux config")
-    apply_links(links_for("tmux"))
 
 
 def install_terminal_browser():
@@ -1264,7 +1252,6 @@ def run_install_flow():
     install_zsh_stack()
     install_ghostty()
     install_herdr()
-    install_tmux()
     install_btop()
     install_terminal_browser()
     install_vscode()

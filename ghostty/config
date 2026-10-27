@@ -8,7 +8,7 @@ custom-shader-animation = true
 clipboard-paste-protection = false
 desktop-notifications = true
 
-# ESC CR is Meta-Enter, which tmux can tell apart from Ctrl-J.
+# ESC CR is Meta-Enter, which Herdr can tell apart from Ctrl-J.
 keybind = alt+enter=text:\x1b\x0d
 
 # \x15 is Ctrl-U, which zsh, fzf, Neovim insert mode and Claude Code read as
@@ -16,7 +16,7 @@ keybind = alt+enter=text:\x1b\x0d
 keybind = super+backspace=text:\x15
 
 # Ghostty's goto_tab default binds both trigger forms per digit, super+digit_N
-# and super+N, so both are unbound to pass Cmd-N through to tmux or Herdr.
+# and super+N, so both are unbound to pass Cmd-N through to Herdr.
 keybind = super+digit_1=unbind
 keybind = super+1=unbind
 keybind = super+digit_2=unbind
