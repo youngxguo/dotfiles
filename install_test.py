@@ -35,7 +35,7 @@ class RepoHooksInstallTest(unittest.TestCase):
 
 
 class PiConfigInstallTest(unittest.TestCase):
-    def test_install_pi_links_settings_themes_and_is_idempotent(self):
+    def test_install_pi_merges_settings_and_keeps_runtime_state(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-pi-test-") as tmpdir:
             root = Path(tmpdir)
             home = root / "home"
@@ -43,13 +43,12 @@ class PiConfigInstallTest(unittest.TestCase):
             source = repo / "pi/settings.json"
             source.parent.mkdir(parents=True)
             source.write_text('{"theme": "dark"}\n', encoding="utf-8")
-            theme = repo / "pi/themes/custom.json"
-            theme.parent.mkdir()
-            theme.write_text('{"name": "custom"}\n', encoding="utf-8")
-
             target = home / ".pi/agent/settings.json"
             target.parent.mkdir(parents=True)
-            target.write_text('{"theme": "stale"}\n', encoding="utf-8")
+            target.write_text(
+                '{"theme": "stale", "lastChangelogVersion": "0.87.1"}\n',
+                encoding="utf-8",
+            )
 
             with (
                 mock.patch.object(install, "HOME", home),
@@ -59,23 +58,17 @@ class PiConfigInstallTest(unittest.TestCase):
                 mock.patch.object(install, "pi_installed", return_value=True),
             ):
                 install.install_pi()
-                self.assertTrue(target.is_symlink())
-                self.assertEqual(target.resolve(), source.resolve())
-                self.assertEqual(
-                    len(list(target.parent.glob("settings.json.bak.*"))), 1
-                )
-                self.assertEqual(
-                    (home / ".pi/agent/themes/custom.json").resolve(), theme.resolve()
-                )
+                settings = json.loads(target.read_text(encoding="utf-8"))
+                self.assertEqual(settings["theme"], "dark")
+                self.assertEqual(settings["lastChangelogVersion"], "0.87.1")
 
-                target.write_text('{"theme": "custom"}\n', encoding="utf-8")
-                self.assertEqual(source.read_text(encoding="utf-8"), target.read_text())
-
+                # Earlier installs linked the live file into the repo.
+                target.unlink()
+                target.symlink_to(source)
                 install.install_pi()
-                self.assertTrue(target.is_symlink())
-                self.assertEqual(
-                    len(list(target.parent.glob("settings.json.bak.*"))), 1
-                )
+                self.assertFalse(target.is_symlink())
+                self.assertEqual(json.loads(target.read_text()), {"theme": "dark"})
+                self.assertEqual(json.loads(source.read_text()), {"theme": "dark"})
 
     def test_latest_claude_synced_bundle_gets_a_stable_pi_path(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-pi-test-") as tmpdir:
@@ -147,7 +140,8 @@ class PiCliInstallTest(unittest.TestCase):
                 [["npm", "install", "-g", "--ignore-scripts", install.PI_NPM_PACKAGE]],
             )
             self.assertEqual(
-                (home / ".pi/agent/settings.json").resolve(), source.resolve()
+                json.loads((home / ".pi/agent/settings.json").read_text()),
+                {"theme": "dark"},
             )
 
             (prefix / "bin/pi").touch()

@@ -443,16 +443,6 @@ def managed_links():
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(("codex", REPO_ROOT / "agents/AGENTS.md", HOME / ".codex/AGENTS.md"))
 
-    links.append(
-        ("pi", REPO_ROOT / "pi/settings.json", HOME / ".pi/agent/settings.json")
-    )
-    pi_themes_dir = REPO_ROOT / "pi/themes"
-    if pi_themes_dir.is_dir():
-        for theme_file in sorted(pi_themes_dir.glob("*.json")):
-            links.append(
-                ("pi", theme_file, HOME / ".pi/agent/themes" / theme_file.name)
-            )
-
     pi_extensions_dir = REPO_ROOT / "pi/extensions"
     if pi_extensions_dir.is_dir():
         for extension in sorted(pi_extensions_dir.iterdir()):
@@ -786,26 +776,38 @@ def claude_global_config_path(config_dir):
     return config_dir / ".claude.json"
 
 
+def load_json_object(path, label):
+    """Return the JSON object in `path`, {} when it is missing, or None (after
+    explaining why) when it cannot be merged into."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"skipping {label}: {path} is not valid JSON ({exc})")
+        return None
+    if not isinstance(data, dict):
+        print(f"skipping {label}: {path} is not a JSON object")
+        return None
+    return data
+
+
+def write_json_object(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def merge_claude_global_config():
     """Apply durable UI preferences without replacing Claude's account state."""
     for config_dir in claude_config_dirs():
         target = claude_global_config_path(config_dir)
         if target.is_symlink():
             raise RuntimeError(f"refusing to overwrite symlink: {target}")
-        config = {}
-        if target.is_file():
-            try:
-                config = json.loads(target.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError):
-                print(f"skipping claude global config: {target} is not valid JSON")
-                continue
-            if not isinstance(config, dict):
-                print(f"skipping claude global config: {target} is not a JSON object")
-                continue
-
+        config = load_json_object(target, "claude global config")
+        if config is None:
+            continue
         config.update(CLAUDE_GLOBAL_CONFIG)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        write_json_object(target, config)
         print(f"merged claude global config into {target}")
 
 
@@ -838,14 +840,8 @@ def install_claude_herdr_skill():
 
 
 def merge_claude_settings():
-    source = REPO_ROOT / "claude/settings.json"
-    try:
-        template = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        print(f"skipping claude settings: unable to read {source}: {exc}")
-        return
-    if not isinstance(template, dict):
-        print(f"skipping claude settings: {source} is not a JSON object")
+    template = load_json_object(REPO_ROOT / "claude/settings.json", "claude settings")
+    if template is None:
         return
 
     merged_targets = set()
@@ -862,16 +858,9 @@ def merge_claude_settings():
 def merge_claude_settings_into(template, target, keys):
     if target.is_symlink():
         raise RuntimeError(f"refusing to overwrite symlink: {target}")
-    settings = {}
-    if target.is_file():
-        try:
-            settings = json.loads(target.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            print(f"skipping claude settings: {target} is not valid JSON")
-            return
-        if not isinstance(settings, dict):
-            print(f"skipping claude settings: {target} is not a JSON object")
-            return
+    settings = load_json_object(target, "claude settings")
+    if settings is None:
+        return
 
     for key in keys:
         if key in template:
@@ -885,8 +874,7 @@ def merge_claude_settings_into(template, target, keys):
     else:
         print(f"skipping claude hooks merge: {target} hooks is not a JSON object")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    write_json_object(target, settings)
     print(f"merged claude settings into {target}")
 
 
@@ -1059,6 +1047,28 @@ def install_pi_herdr_integration():
     install_herdr_integration("pi")
 
 
+def merge_pi_settings():
+    """Pi rewrites settings.json with runtime state such as the last seen
+    changelog version, so the repo's keys are merged into the live file
+    instead of linking it into the repo."""
+    source = REPO_ROOT / "pi/settings.json"
+    target = HOME / ".pi/agent/settings.json"
+    template = load_json_object(source, "pi settings")
+    if template is None:
+        return
+    if target.is_symlink() and target.resolve() != source.resolve():
+        raise RuntimeError(f"refusing to overwrite symlink: {target}")
+    settings = load_json_object(target, "pi settings")
+    if settings is None:
+        return
+    if target.is_symlink():
+        # Earlier installs linked the file; keep the state Pi wrote through it.
+        target.unlink()
+    settings.update(template)
+    write_json_object(target, settings)
+    print(f"merged pi settings into {target}")
+
+
 def link_pi_claude_synced_skills():
     """Expose one current Claude synced bundle to Pi without recursive collisions."""
     synced = HOME / ".claude/skills/synced"
@@ -1086,6 +1096,7 @@ def install_pi():
         install_pi_cli()
 
     print("applying pi config")
+    merge_pi_settings()
     apply_links(links_for("pi"))
     link_pi_claude_synced_skills()
     if not VERIFY_MODE:
