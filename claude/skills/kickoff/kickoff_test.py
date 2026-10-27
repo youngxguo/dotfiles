@@ -135,6 +135,20 @@ class CseatTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "no seat has headroom"):
                 kickoff.preflight_cseat(None, None)
 
+    def test_a_named_watch_only_seat_still_launches(self):
+        result = mock.Mock(
+            returncode=2,
+            stdout='{"reason": "seat claude3 is watch only"}',
+            stderr="",
+        )
+        with (
+            mock.patch.object(kickoff, "cseat_available", return_value=True),
+            mock.patch.object(kickoff, "run_in_login_shell", return_value=result),
+        ):
+            self.assertTrue(kickoff.preflight_cseat("c3", None))
+            with self.assertRaisesRegex(SystemExit, "watch only"):
+                kickoff.preflight_cseat(None, None)
+
     def test_missing_cseat_uses_the_portable_fallback(self):
         with mock.patch.object(kickoff, "cseat_available", return_value=False):
             self.assertFalse(kickoff.preflight_cseat(None, None))

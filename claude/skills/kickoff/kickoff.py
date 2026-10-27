@@ -358,6 +358,10 @@ def preflight_cseat(
         detail = json.loads(proc.stdout).get("reason", "")
     except (AttributeError, json.JSONDecodeError):
         pass
+    if to_label and "watch only" in detail:
+        # cseat pick never lands on a watch-only seat, but cseat run --seat still
+        # launches there when a person names it.
+        return True
     if not detail:
         lines = (proc.stderr or proc.stdout).strip().splitlines()
         detail = lines[-1] if lines else f"exit {proc.returncode}"
