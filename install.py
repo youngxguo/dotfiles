@@ -892,20 +892,9 @@ def merge_claude_settings_into(template, target, keys):
 
 def install_claude():
     print("applying claude config")
-    # Resolve every link before removing any: secondary accounts may link
-    # through the primary account's CLAUDE.md.
-    legacy_links = [
-        config_dir / "CLAUDE.md"
-        for config_dir in claude_config_dirs()
-        if (config_dir / "CLAUDE.md").is_symlink()
-        and (config_dir / "CLAUDE.md").resolve()
-        == (REPO_ROOT / "claude/CLAUDE.md").resolve()
-    ]
     # AGENTS.md is a project convention; global Claude instructions must live
     # under rules/ to load in every project (including older worktrees).
     apply_links(links_for("claude"))
-    for legacy in legacy_links:
-        legacy.unlink()
     merge_claude_settings()
     merge_claude_global_config()
     install_claude_herdr_skill()
