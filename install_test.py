@@ -1148,6 +1148,90 @@ class ClaudeStatuslineTest(unittest.TestCase):
             time.sleep(0.01)
         raise AssertionError("the PR cache refresh did not finish")
 
+    def test_pr_cache_rechecks_a_live_pr_sooner_than_a_finished_one(self):
+        cases = [
+            ("open PR", "open 7", True),
+            ("no PR yet", "", True),
+            ("merged PR", "merged 7", False),
+        ]
+        for name, cached, expect_refresh in cases:
+            with (
+                self.subTest(name),
+                tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir,
+            ):
+                root = Path(tmpdir)
+                workspace = root / "workspace"
+                subprocess.run(
+                    ["git", "init", "-q", "-b", "feature", str(workspace)], check=True
+                )
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(workspace),
+                        "-c",
+                        "user.name=test",
+                        "-c",
+                        "user.email=test@example.com",
+                        "commit",
+                        "-q",
+                        "--allow-empty",
+                        "-m",
+                        "initial",
+                    ],
+                    check=True,
+                )
+                repo_root = subprocess.run(
+                    ["git", "-C", str(workspace), "rev-parse", "--show-toplevel"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                cache_name = "".join(
+                    char if char.isalnum() or char in "._-" else "_"
+                    for char in f"{repo_root}/feature"
+                )
+                pr_cache = root / "home/.claude/pr-cache" / cache_name
+                pr_cache.parent.mkdir(parents=True)
+                pr_cache.write_text(cached and f"{cached}\n", encoding="utf-8")
+                half_a_minute_ago = time.time() - 30
+                os.utime(pr_cache, (half_a_minute_ago, half_a_minute_ago))
+
+                report = root / "report"
+                fake = self.fake_herdr(root)
+                refresher_pid = root / "refresher-pid"
+                fake_gh = root / "gh"
+                fake_gh.write_text(
+                    f"#!/bin/sh\necho $PPID $(ps -o ppid= -p $PPID) > '{refresher_pid}'\necho 'open 7 abc'\n",
+                    encoding="utf-8",
+                )
+                fake_gh.chmod(0o755)
+                payload = {
+                    "cost": {"total_cost_usd": 0},
+                    "context_window": {},
+                    "model": {"display_name": "Opus 5.5"},
+                    "session_id": "pr-session",
+                    "transcript_path": str(root / "missing.jsonl"),
+                    "workspace": {"current_dir": str(workspace)},
+                }
+                env = self.statusline_environment(root, fake, report)
+                env["PATH"] = f"{root}{os.pathsep}{env['PATH']}"
+                subprocess.run(
+                    ["sh", str(Path(__file__).parent / "claude/statusline-command.sh")],
+                    input=json.dumps(payload),
+                    text=True,
+                    check=True,
+                    capture_output=True,
+                    env=env,
+                )
+
+                if expect_refresh:
+                    self.wait_for_exit(refresher_pid)
+                    self.assertEqual(pr_cache.read_text(encoding="utf-8"), "open 7\n")
+                else:
+                    self.assertLess(time.time() - pr_cache.stat().st_mtime, 300 - 30)
+                    self.assertFalse(refresher_pid.exists())
+
     def test_shared_daemon_does_not_report_to_another_workspace(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             root = Path(tmpdir)

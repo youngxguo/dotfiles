@@ -130,10 +130,12 @@ mkdir -p "$TRACKING_DIR"
 # Claude Code cancels an in-flight statusline by killing its process group, and
 # a new update cancels the running one whenever an agent is busy. Job control
 # (set -m) gives background work a group of its own so it outlives the cancel;
-# otherwise a refresh dies after touching its cache and waits another minute.
+# otherwise a refresh dies after touching its cache and waits a whole TTL.
+# stat's mtime flag differs between GNU (-c %Y) and BSD (-f %m).
 refresh_if_stale() {
-  cache=$1; shift
-  if [ ! -f "$cache" ] || [ -n "$(find "$cache" -mmin +1 2>/dev/null)" ]; then
+  cache=$1; ttl=$2; shift 2
+  mtime=$(stat -c %Y "$cache" 2>/dev/null || stat -f %m "$cache" 2>/dev/null)
+  if [ -z "$mtime" ] || [ $(( $(date +%s) - mtime )) -ge "$ttl" ]; then
     touch "$cache"
     (set -m; nohup "$@" </dev/null >/dev/null 2>&1 &) 2>/dev/null
   fi
@@ -174,7 +176,7 @@ except Exception:
     print(0.0, 0.0)
 ")
 EOF
-  refresh_if_stale "$CACHE" "$CCUSAGE_REFRESH"
+  refresh_if_stale "$CACHE" 60 "$CCUSAGE_REFRESH"
 fi
 
 fmt_cost() {
@@ -256,7 +258,17 @@ if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
     mkdir -p "$PR_CACHE_DIR"
     find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
   fi
-  refresh_if_stale "$pr_cache" sh -c '
+  # The third field consumes URLs written by caches from older versions.
+  [ -f "$pr_cache" ] && read -r pr_state pr_number _pr_url < "$pr_cache"
+  # A missing, open or draft PR is the one that changes next, by being opened,
+  # merged or marked ready, so it polls often; a finished PR rarely changes.
+  # Runs come every 10s (refreshInterval), so 15s rechecks every other run, and
+  # the refresh lands on the run after.
+  case $pr_state in
+    merged | closed) pr_ttl=300 ;;
+    *) pr_ttl=15 ;;
+  esac
+  refresh_if_stale "$pr_cache" "$pr_ttl" sh -c '
     cache=$3
     cd "$1" || exit
     pr=$(gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft,headRefOid \
@@ -270,8 +282,6 @@ if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
       mv -f "$cache.tmp" "$cache" || rm -f "$cache.tmp"
   ' _ "$workspace_dir" "$git_branch" "$pr_cache"
 
-  # The third field consumes URLs written by caches from older versions.
-  [ -f "$pr_cache" ] && read -r pr_state pr_number _pr_url < "$pr_cache"
   if [ -n "$pr_number" ]; then
     pr_label="#$pr_number"
     [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
