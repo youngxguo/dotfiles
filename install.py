@@ -420,25 +420,6 @@ def managed_links():
         )
     )
 
-    if sys.platform == "darwin":
-        vscode_user_dir = HOME / "Library/Application Support/Code/User"
-    else:
-        vscode_user_dir = HOME / ".config/Code/User"
-    links.append(
-        (
-            "vscode",
-            REPO_ROOT / "vscode/settings.json",
-            vscode_user_dir / "settings.json",
-        )
-    )
-    links.append(
-        (
-            "vscode",
-            REPO_ROOT / "vscode/keybindings.json",
-            vscode_user_dir / "keybindings.json",
-        )
-    )
-
     for config_dir in claude_config_dirs():
         links.append(
             (
@@ -762,11 +743,6 @@ def install_terminal_browser():
             run(["bash", "-c", f"curl -fsSL {TERMINAL_BROWSER_INSTALL_URL} | bash"])
         except subprocess.CalledProcessError:
             print("warning: unable to install terminal-browser; continuing")
-
-
-def install_vscode():
-    print("copying vscode configs")
-    apply_links(links_for("vscode"))
 
 
 CLAUDE_SETTINGS_KEYS = (
@@ -1254,7 +1230,6 @@ def run_install_flow():
     install_herdr()
     install_btop()
     install_terminal_browser()
-    install_vscode()
     install_claude()
     install_codex()
     install_pi()
