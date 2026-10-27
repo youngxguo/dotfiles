@@ -26,75 +26,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: lint python
-        uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+      - name: set up node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          version: "0.15.20"
-          args: "check --output-format=github"
+          node-version-file: pi/extensions/package.json
+          cache: npm
+          cache-dependency-path: pi/extensions/package-lock.json
 
-      - name: check python formatting
-        run: ruff format --check .
+      - name: lint
+        run: pipx run pre-commit run --all-files --show-diff-on-failure
 
-      - name: validate installer
-        run: |
-          python3 -m py_compile install.py
-          python3 -m unittest install_test.py
-          python3 install.py --verify-idempotent
-
-      - name: validate claude skills
-        run: |
-          for script in claude/skills/*/*.py; do
-            [ -f "$script" ] || continue
-            python3 -m py_compile "$script"
-          done
-          for test in claude/skills/*/*_test.py; do
-            [ -f "$test" ] || continue
-            python3 -m unittest "$test"
-          done
-
-      - name: validate herdr plugins
-        run: |
-          for script in herdr/plugins/*/*.py; do
-            [ -f "$script" ] || continue
-            python3 -m py_compile "$script"
-          done
-          for test in herdr/plugins/*/*_test.py; do
-            [ -f "$test" ] || continue
-            python3 -m unittest "$test"
-          done
-
-      - name: validate github settings
-        run: |
-          python3 -m py_compile github/repository_settings.py
-          python3 -m unittest github/repository_settings_test.py
-
-      - name: lint shell scripts
-        run: shellcheck --severity=error claude/statusline-command.sh claude/hooks/*.sh
-
-      - name: validate skill metadata
-        run: |
-          ruby <<'RUBY'
-          require "psych"
-
-          skills = Dir.glob("skills/*/SKILL.md").sort
-          abort "no skills found" if skills.empty?
-
-          skills.each do |path|
-            contents = File.read(path)
-            frontmatter = contents.match(/\A---\n(.*?)\n---\n/m)
-            abort "missing frontmatter: #{path}" unless frontmatter
-
-            metadata = Psych.safe_load(frontmatter[1])
-            directory = File.basename(File.dirname(path))
-            abort "skill name does not match directory: #{path}" unless metadata["name"] == directory
-            abort "missing skill description: #{path}" unless metadata["description"].is_a?(String) && !metadata["description"].empty?
-
-            agent = File.join(File.dirname(path), "agents", "openai.yaml")
-            abort "missing agent metadata: #{path}" unless File.file?(agent)
-            Psych.safe_load(File.read(agent))
-            puts "validated #{path}"
-          end
-          RUBY
+      - name: test
+        run: make test-python test-pi
 
       - name: check Skills CLI discovery
         env:
