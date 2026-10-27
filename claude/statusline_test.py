@@ -46,14 +46,13 @@ class StatuslineTest(unittest.TestCase):
 
     @staticmethod
     def wait_for_report(path, expected=3):
-        for _ in range(100):
+        # The fake herdr creates each report before it finishes writing it, so
+        # an empty file is a report still in flight.
+        for _ in range(500):
             reports = sorted(path.parent.glob(f"{path.name}.*"))
-            if len(reports) == expected:
-                return [
-                    arg
-                    for report in reports
-                    for arg in report.read_text(encoding="utf-8").splitlines()
-                ]
+            contents = [report.read_text(encoding="utf-8") for report in reports]
+            if len(reports) == expected and all(contents):
+                return [arg for content in contents for arg in content.splitlines()]
             time.sleep(0.01)
         raise AssertionError("statusline did not report all Herdr metadata")
 
