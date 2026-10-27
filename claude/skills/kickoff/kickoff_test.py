@@ -76,10 +76,10 @@ class CseatTest(unittest.TestCase):
         self.assertEqual(kickoff.cseat_name("c6"), "claude6")
         self.assertEqual(kickoff.cseat_name("work"), "work")
 
-    def test_default_launch_uses_fable_medium_with_handoffs(self):
+    def test_default_launch_leaves_the_model_to_cseat(self):
         self.assertEqual(
             kickoff.cseat_args("run", None, None),
-            ["cseat", "run", "--model", "fable", "--size", "M", "--handoff"],
+            ["cseat", "run", "--size", "M", "--handoff"],
         )
 
     def test_account_model_and_size_are_forwarded(self):
@@ -88,10 +88,10 @@ class CseatTest(unittest.TestCase):
             [
                 "cseat",
                 "run",
-                "--model",
-                "opus",
                 "--size",
                 "S",
+                "--model",
+                "opus",
                 "--handoff",
                 "--seat",
                 "claude3",
@@ -111,10 +111,10 @@ class CseatTest(unittest.TestCase):
             [
                 "cseat",
                 "pick",
-                "--model",
-                "opus",
                 "--size",
                 "S",
+                "--model",
+                "opus",
                 "--json",
                 "--dry-run",
                 "--seat",
@@ -140,7 +140,7 @@ class CseatTest(unittest.TestCase):
             self.assertFalse(kickoff.preflight_cseat(None, None))
         self.assertEqual(
             kickoff.plain_claude_command(None, None),
-            "env -u CLAUDE_CONFIG_DIR ANTHROPIC_MODEL=fable claude",
+            "env -u CLAUDE_CONFIG_DIR claude",
         )
 
     def test_launch_runs_cseat_in_the_pane(self):
@@ -150,7 +150,7 @@ class CseatTest(unittest.TestCase):
             "pane",
             "run",
             "w1:p2",
-            "cseat run --model opus --size S --handoff --seat claude3",
+            "cseat run --size S --model opus --handoff --seat claude3",
         )
 
 
@@ -335,7 +335,6 @@ class StackingTest(unittest.TestCase):
             mock.patch.object(kickoff, "wait_for", return_value=True),
             mock.patch.object(kickoff, "agent_name", return_value="child"),
             mock.patch.object(kickoff, "launch_claude") as launch,
-            mock.patch.object(kickoff.rebump, "settle_agent", return_value="idle"),
             mock.patch("builtins.print"),
         ):
             launch.side_effect = lambda *a: record.assert_called_once_with(
