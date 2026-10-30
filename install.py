@@ -25,9 +25,7 @@ HERDR_INSTALL_URL = "https://herdr.dev/install.sh"
 TERMINAL_BROWSER_INSTALL_URL = "https://terminal-browser.sh/install"
 HERDR_PLUGINS = (
     ("lmilojevicc/herdr-splits.nvim", "herdr-splits"),
-    # HERDR_AUTO_TITLE_PREFER_AGENT is pending upstream:
-    # https://github.com/kryptamine/herdr-auto-title/pull/60
-    ("youngxguo/herdr-auto-title", "herdr.auto-title"),
+    ("kryptamine/herdr-auto-title", "herdr.auto-title"),
 )
 HERDR_LOCAL_PLUGINS = (
     ("herdr/plugins/agent-index", "young.agent-index"),
