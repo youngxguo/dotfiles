@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# install.py links this to ~/.local/bin/setup-audit-kickoff and schedules it at
+# 09:00 and every ten minutes (a launchd agent on macOS, a systemd user timer on
+# Linux). It kicks off one /setup-audit pass per day as a Herdr worker in the
+# dotfiles repository (the audit belongs to the machine, not to any project) on
+# whichever seat cseat picks. A tick before 09:00, after today's pass, without
+# Herdr or without network exits quietly, so a machine asleep at 09:00 runs the
+# pass at its first real wake.
+set -uo pipefail
+
+script=$(realpath "$0")
+repo=$(git -C "$(dirname "$script")" rev-parse --show-toplevel) || { echo "== $(date '+%F %T') cannot find the dotfiles repo from $script"; exit 1; }
+kickoff=$repo/claude/skills/kickoff/kickoff.py
+state=$HOME/.local/state/setup-audit
+due_hour=9
+today=$(date +%F)
+stamp=$state/runs/$today
+mkdir -p "$state/runs" "$state/reports"
+
+dry_run=0
+[[ ${1:-} == --dry-run ]] && dry_run=1
+
+((dry_run)) || {
+  [[ -e $stamp ]] && exit 0
+  ((10#$(date +%H) >= due_hour)) || exit 0
+}
+
+note_once() {
+  local marker=$state/runs/$today.$1
+  [[ -e $marker ]] && return 0
+  echo "== $(date '+%F %T') $2"
+  touch "$marker"
+}
+
+cd "$repo" || { echo "== $(date '+%F %T') cannot cd to $repo"; exit 1; }
+
+herdr workspace list >/dev/null 2>&1 || { note_once herdr "herdr is not running; waiting for it"; exit 0; }
+nc -z -w 3 github.com 443 >/dev/null 2>&1 || { note_once net "no network yet; waiting for it"; exit 0; }
+
+echo "== $(date '+%F %T') start"
+
+slug="setup-audit-$(date +%m%d)"
+brief="Daily setup audit, started by the setup-audit job on this machine (due 9am, runs at the first wake after that).
+
+Run /setup-audit: read every surface the skill lists, change nothing anywhere (no commit on this branch either), and end with the ranked report the skill describes, written to its reports directory and printed in full. Do not close this worktree; the report is read here."
+
+if ((dry_run)); then
+  echo "dry run: would kick off $slug in $repo (cseat picks the seat, opus, size M) from master"
+  exit 0
+fi
+
+# Stamped before the kickoff: a failed kickoff is logged for a hand run, never
+# retried, so one day never gets two workers.
+touch "$stamp"
+if python3 "$kickoff" --model opus --size M --base master "$slug" "$brief"; then
+  echo "== $(date '+%F %T') done"
+else
+  status=$?
+  echo "== $(date '+%F %T') kickoff failed (exit $status); rerun by hand: rm $stamp && setup-audit-kickoff"
+  exit 1
+fi

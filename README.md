@@ -20,7 +20,7 @@ plugins forward and rewrites `lazy-lock.json`.
 | `herdr/`   | herdr multiplexer   | symlink (config, auto-title env) plus `herdr plugin link` for `plugins/` |
 | `neovim/`  | neovim              | symlink of the whole directory to `~/.config/nvim`                |
 | `btop/`    | btop                | symlink                                                           |
-| `claude/`  | Claude Code         | symlinks for skills, hooks and statusline; `settings.json` keys merged into every login |
+| `claude/`  | Claude Code         | symlinks for skills, hooks and statusline; `settings.json` keys merged into every login; the daily setup-audit job as a launchd agent (macOS) or systemd user timer (Linux) |
 | `pi/`      | pi coding agent     | symlinks for extensions; `settings.json` keys merged into the live file |
 | `codex/`   | codex               | symlink for pets; `config.example.toml` copied once, then left alone |
 | `agents/`  | shared agent rules  | `global-rules.md` linked into every Claude login and `~/.codex`   |

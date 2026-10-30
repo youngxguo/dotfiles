@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import plistlib
 import shlex
 import shutil
 import subprocess
@@ -31,6 +32,8 @@ HERDR_LOCAL_PLUGINS = (
     ("herdr/plugins/agent-index", "young.agent-index"),
     ("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),
 )
+SETUP_AUDIT_JOB = "setup-audit-kickoff"
+SETUP_AUDIT_LAUNCHD_LABEL = f"com.young.{SETUP_AUDIT_JOB}"
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
 # pi's package.json engines field.
 PI_MIN_NODE_VERSION = (22, 19, 0)
@@ -441,6 +444,13 @@ def managed_links():
         links.append(("claude", script, HOME / ".claude/hooks" / script.name))
     links.append(
         ("codex", REPO_ROOT / "agents/global-rules.md", HOME / ".codex/AGENTS.md")
+    )
+    links.append(
+        (
+            "setup-audit",
+            REPO_ROOT / "claude/skills/setup-audit" / SETUP_AUDIT_JOB,
+            HOME / ".local/bin" / SETUP_AUDIT_JOB,
+        )
     )
 
     pi_extensions_dir = REPO_ROOT / "pi/extensions"
@@ -890,6 +900,141 @@ def install_claude():
         install_claude_herdr_integrations()
 
 
+def write_if_changed(path, content):
+    """Write `content` (bytes) to `path` and report whether it changed."""
+    if path.is_file() and path.read_bytes() == content:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return True
+
+
+def setup_audit_job_path():
+    """launchd and systemd start jobs with none of the shell setup."""
+    entries = [str(HOME / ".local/bin")]
+    prefix = brew_prefix()
+    if prefix:
+        entries += [f"{prefix}/bin", f"{prefix}/sbin"]
+    entries += ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    return ":".join(dict.fromkeys(entries))
+
+
+def setup_audit_launchd_plist(script):
+    log = str(HOME / ".local/state/setup-audit/launchd.log")
+    return {
+        "Label": SETUP_AUDIT_LAUNCHD_LABEL,
+        # macOS grants ~/Documents, where the repo lives, per binary and denies
+        # it to a launchd-run shell, so the job starts through python, which
+        # holds that grant (Settings > Privacy > Files and Folders).
+        "ProgramArguments": [
+            sys.executable,
+            "-c",
+            "import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:]).returncode)",
+            str(script),
+        ],
+        # The 09:00 slot runs at the first wake when the Mac sleeps through it;
+        # the ten-minute ticks retry until Herdr and the network are up.
+        "StartCalendarInterval": {"Hour": 9, "Minute": 0},
+        "StartInterval": 600,
+        "RunAtLoad": True,
+        "EnvironmentVariables": {"PATH": setup_audit_job_path()},
+        "StandardOutPath": log,
+        "StandardErrorPath": log,
+    }
+
+
+def install_setup_audit_launchd(script):
+    plist = HOME / f"Library/LaunchAgents/{SETUP_AUDIT_LAUNCHD_LABEL}.plist"
+    changed = write_if_changed(plist, plistlib.dumps(setup_audit_launchd_plist(script)))
+    if VERIFY_MODE:
+        print("verify mode: skipping launchctl")
+        return
+    domain = f"gui/{os.getuid()}"
+    service = f"{domain}/{SETUP_AUDIT_LAUNCHD_LABEL}"
+    loaded = (
+        subprocess.run(
+            ["launchctl", "print", service],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+    if loaded and not changed:
+        print(f"launchd job {SETUP_AUDIT_LAUNCHD_LABEL} already loaded")
+        return
+    if loaded:
+        subprocess.run(["launchctl", "bootout", service], stderr=subprocess.DEVNULL)
+    try:
+        run(["launchctl", "bootstrap", domain, str(plist)])
+    except subprocess.CalledProcessError:
+        print(f"warning: launchctl would not load {plist}; it loads at the next login")
+
+
+def setup_audit_systemd_units(script):
+    service = f"""[Unit]
+Description=Kick off the daily setup audit
+
+[Service]
+Type=oneshot
+Environment="PATH={setup_audit_job_path()}"
+ExecStart={script}
+"""
+    # Persistent runs a tick missed while the machine was off or asleep at the
+    # next start; the ten-minute ticks retry until Herdr and the network are up.
+    timer = """[Unit]
+Description=Tick the setup audit kickoff every ten minutes
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+    return {
+        f"{SETUP_AUDIT_JOB}.service": service,
+        f"{SETUP_AUDIT_JOB}.timer": timer,
+    }
+
+
+def install_setup_audit_systemd(script):
+    unit_dir = HOME / ".config/systemd/user"
+    changed = False
+    for name, content in setup_audit_systemd_units(script).items():
+        changed |= write_if_changed(unit_dir / name, content.encode())
+    if VERIFY_MODE:
+        print("verify mode: skipping systemctl")
+        return
+    if not command_exists("systemctl"):
+        print(
+            "skipping setup-audit schedule: systemctl is not available "
+            f"(run {SETUP_AUDIT_JOB} by hand)"
+        )
+        return
+    try:
+        if changed:
+            run(["systemctl", "--user", "daemon-reload"])
+        run(["systemctl", "--user", "enable", "--now", f"{SETUP_AUDIT_JOB}.timer"])
+    except subprocess.CalledProcessError:
+        print(
+            "skipping setup-audit schedule: no systemd user session "
+            f"(run {SETUP_AUDIT_JOB} by hand)"
+        )
+
+
+def install_setup_audit_job():
+    print("installing setup-audit job")
+    apply_links(links_for("setup-audit"))
+    script = HOME / ".local/bin" / SETUP_AUDIT_JOB
+    (HOME / ".local/state/setup-audit").mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        install_setup_audit_launchd(script)
+    elif sys.platform.startswith("linux"):
+        install_setup_audit_systemd(script)
+    else:
+        print(f"skipping setup-audit schedule: no scheduler for {sys.platform}")
+
+
 def node_version():
     if not command_exists("node"):
         return None
@@ -1227,6 +1372,7 @@ def run_install_flow():
     install_btop()
     install_terminal_browser()
     install_claude()
+    install_setup_audit_job()
     install_codex()
     install_pi()
     install_neovim()

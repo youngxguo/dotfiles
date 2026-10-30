@@ -1,5 +1,6 @@
 import json
 import os
+import plistlib
 import sys
 import tempfile
 import unittest
@@ -648,6 +649,99 @@ class ClaudeSkillLinksTest(unittest.TestCase):
                 self.assertEqual(link.resolve(), skill.resolve())
                 self.assertTrue((link / "rebump.py").is_file())
                 self.assertFalse((home / config_dir / "skills/notes").exists())
+
+
+class SetupAuditJobInstallTest(unittest.TestCase):
+    def install_job(self, home, platform, **patches):
+        with (
+            mock.patch.object(install, "HOME", home),
+            mock.patch.object(install, "VERIFY_MODE", False),
+            mock.patch.object(install.sys, "platform", platform),
+            mock.patch.object(install, "brew_prefix", return_value="/opt/brew"),
+            mock.patch.object(install, "run") as run_mock,
+            ExitStack() as stack,
+        ):
+            for name, value in patches.items():
+                stack.enter_context(mock.patch.object(install, name, value))
+            install.install_setup_audit_job()
+        return [call.args[0] for call in run_mock.mock_calls]
+
+    def test_macos_loads_a_launchd_agent_once(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-audit-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            script = home / ".local/bin/setup-audit-kickoff"
+            plist = home / "Library/LaunchAgents/com.young.setup-audit-kickoff.plist"
+            launchctl_print = mock.Mock(return_value=mock.Mock(returncode=113))
+            with mock.patch.object(install.subprocess, "run", launchctl_print):
+                commands = self.install_job(home, "darwin")
+
+            self.assertEqual(
+                script.resolve(),
+                install.REPO_ROOT / "claude/skills/setup-audit/setup-audit-kickoff",
+            )
+            self.assertTrue(os.access(script, os.X_OK))
+            job = plistlib.loads(plist.read_bytes())
+            self.assertEqual(job["ProgramArguments"][0], sys.executable)
+            self.assertEqual(job["ProgramArguments"][-1], str(script))
+            self.assertEqual(job["StartCalendarInterval"], {"Hour": 9, "Minute": 0})
+            self.assertEqual(job["StartInterval"], 600)
+            self.assertTrue(job["RunAtLoad"])
+            self.assertTrue(
+                job["EnvironmentVariables"]["PATH"].startswith(
+                    f"{home}/.local/bin:/opt/brew/bin:"
+                )
+            )
+            self.assertTrue(job["StandardOutPath"].startswith(str(home)))
+            self.assertTrue((home / ".local/state/setup-audit").is_dir())
+            self.assertEqual(
+                commands,
+                [["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)]],
+            )
+
+            loaded = mock.Mock(return_value=mock.Mock(returncode=0))
+            with mock.patch.object(install.subprocess, "run", loaded):
+                self.assertEqual(self.install_job(home, "darwin"), [])
+
+    def test_linux_enables_a_persistent_systemd_timer(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-audit-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            units = home / ".config/systemd/user"
+            commands = self.install_job(
+                home, "linux", command_exists=mock.Mock(return_value=True)
+            )
+
+            service = (units / "setup-audit-kickoff.service").read_text()
+            timer = (units / "setup-audit-kickoff.timer").read_text()
+            self.assertIn(f"ExecStart={home}/.local/bin/setup-audit-kickoff\n", service)
+            self.assertIn(f'Environment="PATH={home}/.local/bin:', service)
+            self.assertIn("OnCalendar=*:0/10\n", timer)
+            self.assertIn("Persistent=true\n", timer)
+            enable = [
+                "systemctl",
+                "--user",
+                "enable",
+                "--now",
+                "setup-audit-kickoff.timer",
+            ]
+            self.assertEqual(
+                commands, [["systemctl", "--user", "daemon-reload"], enable]
+            )
+
+            commands = self.install_job(
+                home, "linux", command_exists=mock.Mock(return_value=True)
+            )
+            self.assertEqual(commands, [enable])
+
+    def test_linux_without_systemd_writes_units_and_skips(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-audit-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            commands = self.install_job(
+                home, "linux", command_exists=mock.Mock(return_value=False)
+            )
+            self.assertEqual(commands, [])
+            self.assertTrue(
+                (home / ".config/systemd/user/setup-audit-kickoff.timer").is_file()
+            )
 
 
 class NeovimPluginCommandTest(unittest.TestCase):
