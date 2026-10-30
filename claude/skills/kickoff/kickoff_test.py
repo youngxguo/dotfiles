@@ -349,6 +349,7 @@ class StackingTest(unittest.TestCase):
             mock.patch.object(kickoff, "wait_for", return_value=True),
             mock.patch.object(kickoff, "agent_name", return_value="child"),
             mock.patch.object(kickoff, "launch_claude") as launch,
+            mock.patch.object(kickoff, "settle_agent", return_value="idle"),
             mock.patch("builtins.print"),
         ):
             launch.side_effect = lambda *a: record.assert_called_once_with(
