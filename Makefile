@@ -1,10 +1,15 @@
-# `make check` is what CI runs, minus the neovim tests (they need a current
-# neovim with the lazy-installed plugins).
-.PHONY: check lint test test-python test-pi test-neovim
+# `make hooks` runs every pre-commit hook (lint, then the python and pi tests)
+# over the whole repo, which is what CI runs. `make check` adds the neovim tests
+# (they need a current neovim with the lazy-installed plugins).
+.PHONY: check hooks test test-python test-pi test-neovim
 
-check: lint test
+# git sets these for the hook it runs; left in place, they point the tests'
+# own git calls in temp repos at this repo's index.
+unexport GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE
 
-lint:
+check: hooks test-neovim
+
+hooks:
 	pre-commit run --all-files
 
 test: test-python test-pi test-neovim

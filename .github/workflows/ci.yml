@@ -33,11 +33,8 @@ jobs:
           cache: npm
           cache-dependency-path: pi/extensions/package-lock.json
 
-      - name: lint
+      - name: lint and test
         run: pipx run pre-commit run --all-files --show-diff-on-failure
-
-      - name: test
-        run: make test-python test-pi
 
       - name: check Skills CLI discovery
         env:

@@ -18,3 +18,19 @@ repos:
     hooks:
       - id: shellcheck
         args: [--severity=error]
+  # The tests run on every commit, the same as CI: master takes direct commits,
+  # so this hook is the only gate before a push.
+  - repo: local
+    hooks:
+      - id: test-python
+        name: python tests
+        entry: make test-python
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: test-pi
+        name: pi extension tests
+        entry: make test-pi
+        language: system
+        pass_filenames: false
+        files: ^pi/extensions/

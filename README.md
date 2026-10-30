@@ -48,12 +48,14 @@ across accounts; the label remains the account's identity.
 ## Checks
 
 ```sh
-make check        # lint + test, what CI runs
-make lint         # pre-commit: ruff, shellcheck, json/toml/yaml
+make check        # hooks + neovim tests
+make hooks        # every pre-commit hook over the repo, what CI runs
 make test-python  # every *_test.py, then install.py --verify-idempotent
 make test-pi      # tsc + node tests for pi/extensions
 make test-neovim  # headless neovim tests (local only; needs the plugins)
 ```
 
 Tests live next to the file they cover (`claude/statusline_test.py` tests
-`claude/statusline-command.sh`). `install.py` installs the pre-commit hook.
+`claude/statusline-command.sh`). `install.py` installs the pre-commit hook, which lints the staged files and
+runs the python tests (plus the pi tests when `pi/extensions` changes), so a
+failing commit never reaches master.
