@@ -134,4 +134,4 @@ rows = [
 kitty_graphics = true
 
 [update]
-channel = "preview"
+channel = "stable"
