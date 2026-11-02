@@ -1,13 +1,23 @@
 id = "young.agent-index"
 name = "Agent Index"
-version = "0.1.0"
-min_herdr_version = "0.8.2"
-description = "Keep Agent sidebar numbers aligned with cmd+1 through cmd+9"
+version = "0.2.0"
+min_herdr_version = "0.9.5"
+description = "Keep worktree groups and Agent sidebar numbers aligned with cmd+1 through cmd+9"
 platforms = ["linux", "macos"]
 
 [[startup]]
 command = ["python3", "index.py"]
 
+# Worktrees land at the end of the raw order; regroup them as they open.
+[[events]]
+on = "workspace.created"
+command = ["python3", "index.py"]
+
+[[events]]
+on = "worktree.opened"
+command = ["python3", "index.py"]
+
+# Fires when an agent starts and, with released = true, when it leaves a pane.
 [[events]]
 on = "pane.agent_detected"
 command = ["python3", "index.py"]
