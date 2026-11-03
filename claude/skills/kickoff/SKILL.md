@@ -8,12 +8,38 @@ allowed-tools: Read Glob Grep Write Bash(python3 ${CLAUDE_SKILL_DIR}/kickoff.py 
 
 ## Settle the shape first
 
-Before writing a brief, settle with the user what the change is. Ask what a
-reviewer would need answered: what changes and what stays, the design choice it
-turns on, what done looks like, and how it relates to work already in flight
-(an open PR, another worker in the same area). Ask everything in one message,
-each question with the answer you'd recommend, so the user can reply in a line.
-Read only enough to make the questions concrete.
+Before writing a brief, grill the user until you share an understanding of the
+change. Map it as a design tree: each decision branches into the decisions that
+hang off it. Cover what a reviewer would need settled: what changes and what
+stays, the design choice it turns on, what done looks like, and how it relates
+to work already in flight (an open PR, another worker in the same area). Leave
+choices the worker can make while implementing to the worker.
+
+Work the tree in rounds. The frontier is every decision whose prerequisites are
+already settled. Ask the whole frontier in one round, then wait for the user's
+answers. A question that depends on another one still open belongs to a later
+round. Each round of answers pushes the frontier outward; recompute it and ask
+the next round. Number each question, give the answer you'd recommend, and word
+it so "yes" accepts that answer:
+
+```
+❓ **Q1** - **<title>**: <question, with the options if there are several>
+
+➡️ <recommended answer>
+
+---
+
+❓ **Q2** - ...
+```
+
+Facts are yours to find; decisions are the user's. Look up whatever the repo, a
+PR or a tool can answer instead of asking. For anything broader than a few
+reads, dispatch a subagent and ask the rest of the frontier while it runs; only
+the questions that depend on its answer wait.
+
+The grilling is done when the frontier is empty: every branch visited, nothing
+silently assumed. Then state the agreed shape in a few lines and ask the user to
+confirm it. Their confirmation is the go-ahead to launch.
 
 Skip the questions only when the request already pins the shape: a named PR to
 rebase or merge, a one-line fix, or a brief the user wrote out themselves.
