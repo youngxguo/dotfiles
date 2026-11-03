@@ -427,4 +427,22 @@ function M.open_base_diff()
   command(apply_view_defaults(), base_oid)
 end
 
+-- The <leader>gD view for any PR of the repo in cwd, without a checkout.
+-- gh-dash's `d` key opens this with quit_on_close, so closing the diff (`q`)
+-- exits Neovim straight back to the dashboard.
+function M.open_pr(number, opts)
+  if opts and opts.quit_on_close then
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "CodeDiffClose",
+      once = true,
+      callback = function()
+        vim.schedule(function()
+          vim.cmd("qall")
+        end)
+      end,
+    })
+  end
+  vim.api.nvim_cmd({ cmd = "CodeDiff", args = { "pr", tostring(number), "--" .. apply_view_defaults() } }, {})
+end
+
 return M

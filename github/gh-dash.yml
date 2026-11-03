@@ -3,5 +3,16 @@ prSections:
     filters: is:open author:@me sort:updated-desc
   - title: Review requested
     filters: is:open review-requested:@me sort:updated-desc
+  - title: Closed
+    filters: is:closed author:@me sort:updated-desc
+repoPaths:
+  ":owner/:repo": ~/Documents/code/:repo
+keybindings:
+  prs:
+    - key: d
+      name: diff in neovim
+      command: cd {{.RepoPath}} && nvim -c "lua require('youngxguo.codediff_nav').open_pr({{.PrNumber}}, { quit_on_close = true })"
+    - key: D
+      builtin: diff
 defaults:
   refetchIntervalMinutes: 2
