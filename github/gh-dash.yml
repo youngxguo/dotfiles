@@ -1,8 +1,6 @@
 prSections:
   - title: Mine
     filters: is:open author:@me sort:updated-desc
-  - title: Review requested
-    filters: is:open review-requested:@me sort:updated-desc
   - title: Closed
     filters: is:closed author:@me sort:updated-desc
 repoPaths:
