@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import json
 import os
-import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -11,8 +9,6 @@ from pathlib import Path
 
 # herdr's worktrees.directory default; herdr/config.toml does not override it.
 WORKTREES_DIR = Path("~/.herdr/worktrees").expanduser()
-# Claude Code keys a project's transcripts by its path with / and . as -.
-TRANSCRIPTS_DIR = Path("~/.claude/projects").expanduser()
 # Dev stacks started inside a worktree (Temporal workers, servers, bundlers)
 # outlive the herdr panes, so give them a moment to shut down cleanly first.
 TERM_GRACE_SECONDS = 5.0
@@ -157,10 +153,6 @@ def stop_processes(checkout):
     return pids_inside(checkout, process_cwds(), protected)
 
 
-def transcript_dir(checkout):
-    return TRANSCRIPTS_DIR / re.sub(r"[/.]", "-", str(checkout))
-
-
 def checkout_branch(checkout):
     result = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "HEAD"],
@@ -215,13 +207,9 @@ def pr_finished(branch, repo_root):
     return remote.returncode == 0
 
 
-def forget(checkout, repo_root, branch):
-    """What a removed worktree leaves behind: its transcripts, and its branch
-    once the pull request is done."""
-    transcripts = transcript_dir(checkout)
-    if transcripts.is_dir():
-        shutil.rmtree(transcripts, ignore_errors=True)
-        log(f"removed transcripts {transcripts}")
+def forget(repo_root, branch):
+    """Delete a removed worktree's branch once its pull request is done. Its
+    Claude transcripts stay: they are the record of the work."""
     if branch and pr_finished(branch, repo_root):
         result = subprocess.run(
             ["git", "-C", str(repo_root), "branch", "-D", branch],
@@ -275,7 +263,7 @@ def main():
     )
     if result.returncode == 0:
         log(f"removed {checkout}")
-        forget(checkout, repo_root, branch)
+        forget(repo_root, branch)
         notify("Worktree removed", str(checkout))
         return 0
     reason = (result.stderr or result.stdout).strip().splitlines()

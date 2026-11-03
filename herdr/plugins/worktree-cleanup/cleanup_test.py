@@ -57,15 +57,6 @@ def event_for(checkout, repo_root, linked=True):
     )
 
 
-class TranscriptDirTest(unittest.TestCase):
-    def test_encodes_slashes_and_dots_as_dashes(self):
-        with mock.patch.object(cleanup, "TRANSCRIPTS_DIR", Path("/p")):
-            self.assertEqual(
-                cleanup.transcript_dir(Path("/Users/y/.herdr/worktrees/hsys/young-x")),
-                Path("/p/-Users-y--herdr-worktrees-hsys-young-x"),
-            )
-
-
 class PidsInsideTest(unittest.TestCase):
     def test_matches_checkout_and_descendants_only(self):
         entries = [
@@ -188,16 +179,10 @@ class MainTest(unittest.TestCase):
         finally:
             reap(inside, sibling)
 
-    def test_removal_forgets_transcripts_and_finished_branch(self):
-        transcripts = self.root / "projects"
+    def test_removal_deletes_a_finished_branch(self):
         git("checkout", "-q", "-b", "young/thing", cwd=self.checkout)
-        with (
-            mock.patch.object(cleanup, "TRANSCRIPTS_DIR", transcripts),
-            mock.patch.object(cleanup, "pr_finished", return_value=True) as finished,
-        ):
-            cleanup.transcript_dir(self.checkout).mkdir(parents=True)
+        with mock.patch.object(cleanup, "pr_finished", return_value=True) as finished:
             self.assertEqual(cleanup.main(), 0)
-        self.assertFalse(transcripts.exists() and any(transcripts.iterdir()))
         finished.assert_called_once_with("young/thing", self.repo)
         branches = subprocess.check_output(
             ["git", "branch", "--list", "young/thing"], cwd=self.repo, text=True
