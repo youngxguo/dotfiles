@@ -35,6 +35,11 @@ HERDR_LOCAL_PLUGINS = (
 SETUP_AUDIT_JOB = "setup-audit-kickoff"
 SETUP_AUDIT_LAUNCHD_LABEL = f"com.young.{SETUP_AUDIT_JOB}"
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
+# Third-party Claude skills, installed with the skills CLI (vercel-labs/skills)
+# into ~/.claude and linked into every other account. `npx skills update -g`
+# updates them in place.
+SKILLS_CLI = "skills@1.7.6"
+CLAUDE_EXTERNAL_SKILLS = {"mattpocock/skills": ("grilling", "grill-me")}
 # pi's package.json engines field.
 PI_MIN_NODE_VERSION = (22, 19, 0)
 BTOP_LINUX_RELEASES = {
@@ -356,10 +361,12 @@ def link_file(source_path, target_path):
     target = Path(target_path).expanduser()
     target.parent.mkdir(parents=True, exist_ok=True)
 
+    # Also true when a symlinked parent makes the target the source itself
+    # (account skills dirs that point at ~/.claude/skills).
+    if target.resolve() == source:
+        print(f"link already configured: {target}")
+        return
     if target.is_symlink():
-        if target.resolve() == source:
-            print(f"link already configured: {target}")
-            return
         target.unlink()
     elif target.exists():
         backup = target.with_name(
@@ -901,7 +908,35 @@ def install_claude():
     merge_claude_global_config()
     install_claude_herdr_skill()
     if not VERIFY_MODE:
+        install_claude_external_skills()
         install_claude_herdr_integrations()
+
+
+def install_claude_external_skills():
+    skills_dir = HOME / ".claude/skills"
+    for source, names in CLAUDE_EXTERNAL_SKILLS.items():
+        missing = [name for name in names if not (skills_dir / name).is_dir()]
+        if missing:
+            if not ensure_npm():
+                print(f"skipping {source} skills: npm is not available")
+                continue
+            # Unset CLAUDE_CONFIG_DIR so the CLI writes to ~/.claude, not to
+            # whichever account runs this.
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+            env["DO_NOT_TRACK"] = "1"
+            skill_args = [arg for name in missing for arg in ("-s", name)]
+            cmd = ["npx", "-y", SKILLS_CLI, "add", source, "-g", "-a", "claude-code"]
+            try:
+                run([*cmd, *skill_args, "-y"], env=env)
+            except subprocess.CalledProcessError:
+                print(f"warning: unable to install {source} skills; continuing")
+                continue
+        for config_dir in claude_config_dirs():
+            if config_dir == HOME / ".claude":
+                continue
+            for name in names:
+                if (skills_dir / name).is_dir():
+                    link_file(skills_dir / name, config_dir / "skills" / name)
 
 
 def write_if_changed(path, content):
@@ -1068,13 +1103,17 @@ def pi_installed():
     return prefix is not None and (prefix / "bin/pi").exists()
 
 
-def install_pi_cli():
+def ensure_npm():
     if not command_exists("npm"):
         install_package("node")
         # debian and friends ship npm separately from the nodejs package.
         if not command_exists("npm") and sys.platform.startswith("linux"):
             install_package("npm")
-    if not command_exists("npm"):
+    return command_exists("npm")
+
+
+def install_pi_cli():
+    if not ensure_npm():
         print("skipping pi: npm is not available")
         return
 
