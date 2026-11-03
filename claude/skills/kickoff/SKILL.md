@@ -26,9 +26,12 @@ needs to work independently:
 
 Scale this to the task: a clear, small request may need only a sentence or two;
 most handoffs should be a few short paragraphs or bullets, not a design doc.
-Don't invent requirements or fill every category mechanically. Ask a question
-only if ambiguity would materially change the task and cannot safely be left
-for the worker to resolve.
+Don't invent requirements or fill every category mechanically.
+
+Ask the user before launching when you can't say what the change should be, or
+they signal they're unsure what to do. An exploratory brief sends the worker,
+or several, in a direction nobody chose. Leave smaller open questions to the
+worker.
 
 Prefer existing context. If one missing fact would materially improve the
 handoff, make a few targeted, read-only searches or file reads. Don't conduct a
@@ -38,8 +41,8 @@ where to start, and how to recognize success. If more research is needed to
 choose a solution, make that part of the delegated task instead.
 
 Pass the resulting brief to `kickoff.py`; don't merely describe it to the user
-and then send the raw request. No approval round is needed unless clarification
-is genuinely blocking.
+and then send the raw request. Once the change is clear, no approval round is
+needed.
 
 ## Launch
 
