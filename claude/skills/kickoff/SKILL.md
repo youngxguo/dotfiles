@@ -1,10 +1,28 @@
 ---
 name: kickoff
-description: "Briefly scope the user's task into a useful handoff, create a new Herdr worktree, start an agent there, and return. Use when asked to kick off, spin up, delegate, farm out, or put an agent on work in parallel."
+description: "Settle the shape of the user's task with them, write it into a useful handoff, create a new Herdr worktree, start an agent there, and return. Use when asked to kick off, spin up, delegate, farm out, or put an agent on work in parallel."
 allowed-tools: Read Glob Grep Write Bash(python3 ${CLAUDE_SKILL_DIR}/kickoff.py *)
 ---
 
 # Kickoff
+
+## Settle the shape first
+
+Before writing a brief, settle with the user what the change is. Ask what a
+reviewer would need answered: what changes and what stays, the design choice it
+turns on, what done looks like, and how it relates to work already in flight
+(an open PR, another worker in the same area). Ask everything in one message,
+each question with the answer you'd recommend, so the user can reply in a line.
+Read only enough to make the questions concrete.
+
+Skip the questions only when the request already pins the shape: a named PR to
+rebase or merge, a one-line fix, or a brief the user wrote out themselves.
+
+When the user asks for several kickoffs at once, check whether any of them
+touch the same code or turn on the same open question. If they do, say so and
+propose one worker, or a design pass that settles the question first; launch
+them separately only once the user chooses. Parallel workers on an unsettled
+design each find the question on their own, and their work gets thrown away.
 
 ## Prepare the handoff
 
@@ -28,11 +46,6 @@ Scale this to the task: a clear, small request may need only a sentence or two;
 most handoffs should be a few short paragraphs or bullets, not a design doc.
 Don't invent requirements or fill every category mechanically.
 
-Ask the user before launching when you can't say what the change should be, or
-they signal they're unsure what to do. An exploratory brief sends the worker,
-or several, in a direction nobody chose. Leave smaller open questions to the
-worker.
-
 Prefer existing context. If one missing fact would materially improve the
 handoff, make a few targeted, read-only searches or file reads. Don't conduct a
 broad codebase tour, trace the full root cause, compare architectures in depth,
@@ -41,8 +54,8 @@ where to start, and how to recognize success. If more research is needed to
 choose a solution, make that part of the delegated task instead.
 
 Pass the resulting brief to `kickoff.py`; don't merely describe it to the user
-and then send the raw request. Once the change is clear, no approval round is
-needed.
+and then send the raw request. Once the shape is agreed, launch without another
+approval round.
 
 ## Launch
 
