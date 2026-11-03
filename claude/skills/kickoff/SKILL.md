@@ -1,48 +1,23 @@
 ---
 name: kickoff
-description: "Settle the shape of the user's task with them, write it into a useful handoff, create a new Herdr worktree, start an agent there, and return. Use when asked to kick off, spin up, delegate, farm out, or put an agent on work in parallel."
+description: "Create a new Herdr worktree, start an agent there with a seed brief, and return; the agent settles the task's shape with the user itself before building. Use when asked to kick off, spin up, delegate, farm out, or put an agent on work in parallel."
 allowed-tools: Read Glob Grep Write Bash(python3 ${CLAUDE_SKILL_DIR}/kickoff.py *)
 ---
 
 # Kickoff
 
-## Settle the shape first
+Launch fast and let the worker settle the shape. By default the new agent
+grills the user with the `grilling` skill in its own pane before building, so
+the questions, the answers and the reasons behind them stay in the context of
+the session that does the work, instead of being compressed into a brief.
 
-Before writing a brief, grill the user until you share an understanding of the
-change. Map it as a design tree: each decision branches into the decisions that
-hang off it. Cover what a reviewer would need settled: what changes and what
-stays, the design choice it turns on, what done looks like, and how it relates
-to work already in flight (an open PR, another worker in the same area). Leave
-choices the worker can make while implementing to the worker.
+## Decide whether the worker grills
 
-Work the tree in rounds. The frontier is every decision whose prerequisites are
-already settled. Ask the whole frontier in one round, then wait for the user's
-answers. A question that depends on another one still open belongs to a later
-round. Each round of answers pushes the frontier outward; recompute it and ask
-the next round. Number each question, give the answer you'd recommend, and word
-it so "yes" accepts that answer:
-
-```
-❓ **Q1** - **<title>**: <question, with the options if there are several>
-
-➡️ <recommended answer>
-
----
-
-❓ **Q2** - ...
-```
-
-Facts are yours to find; decisions are the user's. Look up whatever the repo, a
-PR or a tool can answer instead of asking. For anything broader than a few
-reads, dispatch a subagent and ask the rest of the frontier while it runs; only
-the questions that depend on its answer wait.
-
-The grilling is done when the frontier is empty: every branch visited, nothing
-silently assumed. Then state the agreed shape in a few lines and ask the user to
-confirm it. Their confirmation is the go-ahead to launch.
-
-Skip the questions only when the request already pins the shape: a named PR to
-rebase or merge, a one-line fix, or a brief the user wrote out themselves.
+The worker grills by default. Pass `--no-grill` only when the request already
+pins the shape: a named PR to rebase or merge, a one-line fix, a brief the user
+wrote out themselves, or a shape already settled in this conversation. With
+`--no-grill` the workspace opens in the background; otherwise it opens focused,
+so the user lands in the worker's pane to answer.
 
 When the user asks for several kickoffs at once, check whether any of them
 touch the same code or turn on the same open question. If they do, say so and
@@ -50,49 +25,34 @@ propose one worker, or a design pass that settles the question first; launch
 them separately only once the user chooses. Parallel workers on an unsettled
 design each find the question on their own, and their work gets thrown away.
 
-## Prepare the handoff
+## Write the seed brief
 
-Do a brief scoping pass before launching. The originating session may have
-stronger reasoning and richer context than the worker; use that advantage to
-frame the right task, not to solve it before delegating.
+The brief carries what only this session knows; the worker will find facts and
+ask the questions itself. Start from the user's request and keep their intent,
+explicit constraints and useful wording. Add context from this conversation the
+worker cannot rebuild: why the task exists, decisions or preferences the user
+already stated, related work in flight, and starting points you already know.
+Pass this as raw context, not a finished spec, and don't research the task to
+fill it out: no codebase tour, no root-cause tracing, no design comparison.
 
-Start from the user's request and existing conversation. Preserve their intent,
-explicit constraints, and useful wording. Add only context the new session
-needs to work independently:
+With `--no-grill` the brief must stand on its own: add the scope, non-goals and
+what done looks like, labelling hypotheses as hypotheses.
 
-- The goal and why it matters, if known.
-- Scope boundaries and non-goals, especially where the request could balloon.
-- Relevant prior decisions, known facts, and starting points (paths or symbols
-  when already known or cheaply verified).
-- Observable completion criteria and appropriate validation expectations.
-- Important uncertainties or pitfalls; label hypotheses as hypotheses and
-  leave investigation and implementation choices to the worker.
-
-Scale this to the task: a clear, small request may need only a sentence or two;
-most handoffs should be a few short paragraphs or bullets, not a design doc.
-Don't invent requirements or fill every category mechanically.
-
-Prefer existing context. If one missing fact would materially improve the
-handoff, make a few targeted, read-only searches or file reads. Don't conduct a
-broad codebase tour, trace the full root cause, compare architectures in depth,
-edit project files, or run tests. Stop once the worker can understand the goal,
-where to start, and how to recognize success. If more research is needed to
-choose a solution, make that part of the delegated task instead.
-
-Pass the resulting brief to `kickoff.py`; don't merely describe it to the user
-and then send the raw request. Once the shape is agreed, launch without another
+Scale it to the task: a sentence or two for a clear request, a few short
+paragraphs when the conversation carried real context. Launch without an
 approval round.
 
 ## Launch
 
-Run `kickoff.py` after preparing the brief:
+Run `kickoff.py` with the seed brief:
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/kickoff.py --size M signup-rate-limit "the scoped task brief"
 ```
 
-The slug names the new branch, workspace, and agent. Use `--brief-file` for a
-long task. Use `--repo <name>` when the work belongs to another open repository.
+The slug names the new branch, workspace, and agent. Add `--no-grill` when the
+shape is pinned. Use `--brief-file` for a long task. Use `--repo <name>` when
+the work belongs to another open repository.
 
 Always pass `--size`; use `M` unless the user names a task size. Pass
 `--model` only when the user names a model: otherwise cseat's own policy picks
@@ -110,7 +70,8 @@ the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
 preflight and launched session, leaves the model to cseat's policy when
 `--model` is omitted, honors `--to` by translating short aliases such as `c3` to cseat's `claude3` seat,
-sends the task, and returns. The brief it sends tells the worker that links in
+sends the task (prefixed with the grilling instruction unless `--no-grill`),
+and returns. The brief it sends tells the worker that links in
 the task (Slack threads, issues, PRs) are context to read, never to reply to,
 so leave that out of your brief. On a machine without cseat it falls back to a
 directly launched, explicitly pinned Claude session.
@@ -137,4 +98,4 @@ rebasing the parent, retarget/rebase the child as appropriate. An existing PR's
 base takes precedence in `<leader>gD`.
 
 When it prints the final line, report that line and stop. Do not inspect the
-agent in the same turn.
+agent in the same turn; when it grills, the user answers it in its own pane.

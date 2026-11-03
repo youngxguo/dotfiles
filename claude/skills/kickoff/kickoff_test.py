@@ -409,7 +409,8 @@ class StackingTest(unittest.TestCase):
             )
             other.assert_called_once_with("other")
 
-    def test_launch_passes_pinned_base_and_records_parent_before_agent(self):
+    def launch(self, *argv):
+        """Run main() against a faked Herdr; return its herdr mock."""
         opened = {
             "result": {
                 "workspace": {"workspace_id": "w1"},
@@ -435,7 +436,10 @@ class StackingTest(unittest.TestCase):
             launch.side_effect = lambda *a: record.assert_called_once_with(
                 "/new-worktree", "test/child", "parent"
             )
-            self.assertEqual(kickoff.main(["child", "do work"]), 0)
+            self.assertEqual(kickoff.main(["child", "do work", *argv]), 0)
+        return herdr
+
+    def created_with(self, herdr, focus):
         herdr.assert_any_call(
             "worktree",
             "create",
@@ -445,8 +449,27 @@ class StackingTest(unittest.TestCase):
             "test/child",
             "--base",
             self.parent_oid,
-            "--no-focus",
+            focus,
         )
+
+    def sent_brief(self, herdr):
+        (call,) = [c for c in herdr.call_args_list if c.args[:2] == ("agent", "prompt")]
+        return call.args[3]
+
+    def test_launch_passes_pinned_base_and_records_parent_before_agent(self):
+        self.launch()
+
+    def test_by_default_the_agent_grills_in_a_focused_workspace(self):
+        herdr = self.launch()
+        self.created_with(herdr, "--focus")
+        brief = self.sent_brief(herdr)
+        self.assertIn("grilling skill", brief)
+        self.assertTrue(brief.endswith("do work"))
+
+    def test_a_pinned_shape_launches_unfocused_without_grilling(self):
+        herdr = self.launch("--no-grill")
+        self.created_with(herdr, "--no-focus")
+        self.assertNotIn("grilling", self.sent_brief(herdr))
 
 
 class ShellReadyTest(unittest.TestCase):

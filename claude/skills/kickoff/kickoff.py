@@ -15,6 +15,15 @@ from pathlib import Path
 
 DEFAULT_CONFIG_DIR = Path.home() / ".claude"
 MODEL_ENV = "ANTHROPIC_MODEL"
+GRILL = (
+    "Before building, settle the shape of this task with the user: invoke the "
+    "grilling skill. Cover what a reviewer would need settled: what changes and "
+    "what stays, the design choice it turns on, what done looks like, and how it "
+    "relates to work already in flight (an open PR, another worker in the same "
+    "area). Leave choices you can make while implementing to yourself. Once the "
+    "user confirms the shape, build it, and carry the agreed shape into the PR "
+    "description."
+)
 
 
 def herdr(*args: str, check: bool = True, timeout: int = 60) -> dict:
@@ -479,6 +488,13 @@ def main(argv: list[str] | None = None) -> int:
         default="M",
         help="task size passed to cseat (default: M)",
     )
+    parser.add_argument(
+        "--grill",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="have the agent settle the task's shape with the user first, "
+        "in a focused workspace (default: on; --no-grill when the shape is pinned)",
+    )
 
     args = parser.parse_args(argv)
     brief = (
@@ -508,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         branch,
         "--base",
         base_oid,
-        "--no-focus",
+        "--focus" if args.grill else "--no-focus",
     )["result"]
 
     workspace_id = opened["workspace"]["workspace_id"]
@@ -518,7 +534,8 @@ def main(argv: list[str] | None = None) -> int:
     brief = (
         f"This branch starts from {parent} ({base_oid}). Use {parent} as the PR base unless the task requires otherwise. "
         "Links in this task (Slack threads, issues, PRs) are context: read them, never reply to them.\n\n"
-        f"{brief}"
+        + (f"{GRILL}\n\n" if args.grill else "")
+        + brief
     )
     log(f"  workspace {workspace_id} pane {pane_id} at {path}")
 
