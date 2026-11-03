@@ -56,10 +56,10 @@ float determineStartVertexFactor(vec2 a, vec2 b) {
 vec2 getRectangleCenter(vec4 rectangle) {
  return vec2(rectangle.x + (rectangle.z / 2.), rectangle.y - (rectangle.w / 2.));
 }
-const float DURATION_SECONDS = 0.20;
+const float DURATION_SECONDS = 0.35;
 const float EASE_POWER = 2.0;
-const float GLOW_RADIUS = 0.03;
-const float GLOW_STRENGTH = 0.30;
+const float GLOW_RADIUS = 0.05;
+const float GLOW_STRENGTH = 0.40;
 
 vec3 screenBlend(vec3 base, vec3 light) {
  return 1.0 - (1.0 - base) * (1.0 - light);
