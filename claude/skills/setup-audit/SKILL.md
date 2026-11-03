@@ -31,54 +31,52 @@ seat, and say so in the report.
 
 - Read `~/.local/state/setup-audit/declined.md`: one line per suggestion the
   person turned down. Never raise one of those again.
-- Read the last seven files in `~/.local/state/setup-audit/reports/`. A finding
+- Read the last seven reports in `~/.local/state/setup-audit/reports/` dated
+  before today, so a second run on the same day reads fresh. A finding
   that is still true carries its first date (`since 10-24`). One that has stood
   unacted for seven days moves to the Standing list at the end, one line each,
   and never leads the report.
 
 ## 2. Read the work
 
-The window runs from the last report's run to now (24h when there is none).
-Quote the person's own words as the evidence. Paraphrase loses what they meant.
+The window runs from the previous run (the newest stamp in
+`~/.local/state/setup-audit/runs/` dated before today) to now, or the last 24
+hours when there is none. Quote the person's own words as the evidence.
+Paraphrase loses what they meant.
 
-**Sessions.** cseat records every session it sees in
-`~/.local/state/cseat/history.sqlite3`:
-- `session_info` holds `session_id`, `name`, `cwd`, `first_seen`, `last_seen`,
-  `last_seat` and `transcript`, the path of the `.jsonl` file.
-- `session_tokens` holds the per-model `output`, `cache_read` and `replies`.
-- `session_seen` shows how many sessions ran at once.
+**Sessions.** Run `python3 ${CLAUDE_SKILL_DIR}/sessions.py`. It reads cseat's
+history and every session's transcript, leaves out the sessions tools start,
+and prints the window's numbers (sessions, peak concurrency, output by model,
+compactions, transcripts that are gone), then each session: its seats, topics,
+PRs, output, the models the person switched to, and every prompt marked
+`typed`, `kickoff`, `handoff` or `command`. Read all of it, not a sample.
 
-Leave out the sub-sessions that tools start: a `cwd` under `/T/`, a
-`scratchpad`, `eval-judge`, `test_output`, `runlogs` or `batches`.
-
-In each transcript:
-- **The person's prompts** are `type: user` records whose `message.content` is
-  a string, with no `isMeta`, and not starting with `<`. Slash commands appear
-  as `<command-name>`. A long pasted brief opening with "This branch starts
-  from" is a kickoff, not something they typed in the pane.
-- **Compaction:** a prompt starting "This session is being continued" marks
-  one.
-- **Other records:** `pr-link` lists the PRs a session opened, and `ai-title`
-  names the topic.
-
-Read every prompt the person typed in the window, not a sample.
+Not every `typed` prompt is the person's. A dispatcher session or devbot typing
+into a pane through Herdr leaves the same record; those read like a brief about
+the person ("Young says go…", "Reply with the single word…"), so count them
+apart. Name the sessions whose transcript is gone.
 
 **What it produced.** Use `gh search prs --author=@me --created=">=<window
 start>"` across every org, not only the repos Herdr has open, and note each
 PR's state. For every PR closed unmerged, find the prompt that closed it and
 the ones before it. Also read `git log --author` since the window start in
-every repository under `~/Documents/code`, the Linear issues the person moved
-or created, and the Slack messages they sent (`from:me`).
+every repository under `~/Documents/code` (once per repository: sibling
+checkouts share one history), the Linear issues the person moved or created,
+and the Slack messages they sent (`from:me`, leaving out this audit's own DMs).
+When the person files work by tagging themselves in Slack, check each of those
+asks against what shipped.
 
 **How they drove Herdr.** Look at how many workers ran at once and what each
 was for, how the person addressed workers ("herdr 2"), handoffs between
 workers, kickoffs from dispatcher sessions, and workers torn down with no PR.
+The script's kickoff and handoff records and a session's topic changes show
+these; Herdr keeps no history of what was typed into its panes.
 
 **What the guidance already says.** Before calling a correction unwritten,
 grep the places it could live: the skills and rules in dotfiles
-(`agents/global-rules.md`, `claude/skills/*`), the repository's `AGENTS.md`,
-`.claude/skills` and `.claude/rules`, and the seat's memories. Name the place
-that comes closest.
+(`agents/global-rules.md`, `claude/skills/*`), the repository's `AGENTS.md`
+files (a monorepo has several), its skills and the docs they include, and the
+seat's memories. Name the place that comes closest.
 
 ## 3. Read the setup
 
@@ -89,7 +87,8 @@ Every command here is read-only. Quote the line that is the evidence.
 seats as a whole run out before their resets; a seat with most of its week
 unspent while another is near its cap; a seat whose login or `doctor` warns; a
 `cseat run` alive for days with no work; the model policy against what the
-sessions actually did; `claude --version` against the newest release.
+sessions actually did (the script's model switches, and the `model` in each
+seat's `settings.json`); `claude --version` against the newest release.
 
 **Memory** (`~/.claude/projects/*/memory/`): a `MEMORY.md` over the size a
 session loads (the session prints the warning); memories naming files, flags,
@@ -173,8 +172,9 @@ one that clears today's instance.
 
 ## 5. Report
 
-Write the report to `~/.local/state/setup-audit/reports/<YYYY-MM-DD>.md`, then
-print it in full as the last message, in this order:
+Write the report to `~/.local/state/setup-audit/reports/<YYYY-MM-DD>.md`
+(`<YYYY-MM-DD>-2.md` when today's exists), then print it in full as the last
+message, in this order:
 
 1. **Verdict.** One line on how the work and the setup went, and the one thing
    to do today. It comes from whichever half costs more.
