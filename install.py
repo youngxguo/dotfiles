@@ -416,6 +416,9 @@ def managed_links():
     links.append(
         ("btop", REPO_ROOT / "btop/btop.conf", HOME / ".config/btop/btop.conf")
     )
+    links.append(
+        ("gh", REPO_ROOT / "github/gh-dash.yml", HOME / ".config/gh-dash/config.yml")
+    )
 
     for config_dir in claude_config_dirs():
         links.append(
@@ -531,6 +534,7 @@ def install_homebrew():
 
 def install_github_cli():
     print("installing github cli")
+    apply_links(links_for("gh"))
     if VERIFY_MODE:
         print("verify mode: skipping github cli package/extension bootstrap")
         return
