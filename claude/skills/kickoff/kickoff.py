@@ -120,6 +120,40 @@ def settle_agent(pane_id: str, log) -> str:
     return status or result.get("status") or "unknown"
 
 
+def submit_brief(pane_id: str, brief: str, log) -> None:
+    """A claude that is still starting up can take the pasted brief but drop
+    the Enter after it, leaving the brief unsent in its input box. herdr then
+    reports the prompt stalled, and one more Enter sends it."""
+    sent = herdr(
+        "agent",
+        "prompt",
+        pane_id,
+        brief,
+        "--wait",
+        "--until",
+        "working",
+        "--until",
+        "blocked",
+        "--timeout",
+        "15000",
+        check=False,
+    )
+    if "error" not in sent:
+        log("  brief sent")
+        return
+    herdr("pane", "send-keys", pane_id, "enter", check=False)
+    if wait_for(lambda: pane_status(pane_id) in ("working", "blocked"), 10):
+        log("  brief sent (resubmitted with Enter)")
+        return
+    message = (sent.get("error") or {}).get("message", "")
+    raise SystemExit(f"the brief never started a turn in {pane_id}: {message}")
+
+
+def pane_status(pane_id: str) -> str | None:
+    got = herdr("agent", "get", pane_id, check=False).get("result") or {}
+    return (got.get("agent") or {}).get("agent_status")
+
+
 def normalize_config_dir(raw: str | None) -> str:
     if not raw:
         return str(DEFAULT_CONFIG_DIR.resolve())
@@ -557,8 +591,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if status == "blocked":
         raise SystemExit(f"agent {name} is blocked; task not sent")
-    herdr("agent", "prompt", pane_id, brief, check=False)
-    log("  brief sent")
+    submit_brief(pane_id, brief, log)
 
     print(f"\n{name}  {branch}  {workspace_id}  {path}")
     return 0
