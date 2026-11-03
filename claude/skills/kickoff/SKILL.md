@@ -71,7 +71,9 @@ the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
 preflight and launched session, leaves the model to cseat's policy when
 `--model` is omitted, honors `--to` by translating short aliases such as `c3` to cseat's `claude3` seat,
-sends the task, and returns. On a machine without cseat it falls back to a
+sends the task, and returns. The brief it sends tells the worker that links in
+the task (Slack threads, issues, PRs) are context to read, never to reply to,
+so leave that out of your brief. On a machine without cseat it falls back to a
 directly launched, explicitly pinned Claude session.
 
 Run it from the checkout whose work the new task should build on. From a linked

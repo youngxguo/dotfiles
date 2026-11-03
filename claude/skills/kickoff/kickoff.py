@@ -461,7 +461,11 @@ def main(argv: list[str] | None = None) -> int:
     pane_id = opened["root_pane"]["pane_id"]
     path = opened["worktree"]["path"]
     record_parent(path, branch, parent)
-    brief = f"This branch starts from {parent} ({base_oid}). Use {parent} as the PR base unless the task requires otherwise.\n\n{brief}"
+    brief = (
+        f"This branch starts from {parent} ({base_oid}). Use {parent} as the PR base unless the task requires otherwise. "
+        "Links in this task (Slack threads, issues, PRs) are context: read them, never reply to them.\n\n"
+        f"{brief}"
+    )
     log(f"  workspace {workspace_id} pane {pane_id} at {path}")
 
     if not wait_for(lambda: shell_ready(pane_id), 20):
