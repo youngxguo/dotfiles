@@ -209,6 +209,59 @@ def source_checkout(repo: str | None) -> tuple[list[str], str]:
     )
 
 
+def catch_up(path: str, base: str) -> None:
+    """Fast-forward the parent branch to its upstream, so a new worktree never
+    starts behind what has already merged. Offline, diverged, or blocked by
+    local edits, the local tip stands and the reason goes to stderr."""
+
+    def git(*args: str, cwd: str = path) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", cwd, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+
+    def note(message: str) -> None:
+        print(f"Note: {message}; starting from the local {base}.", file=sys.stderr)
+
+    remote = git("config", f"branch.{base}.remote").stdout.strip()
+    merge = git("config", f"branch.{base}.merge").stdout.strip()
+    if not remote or not merge:
+        return
+    try:
+        fetched = git("fetch", "--quiet", remote, merge).returncode == 0
+    except subprocess.TimeoutExpired:
+        fetched = False
+    if not fetched:
+        return note(f"could not fetch {base} from {remote}")
+    upstream = git("rev-parse", "FETCH_HEAD").stdout.strip()
+    local = git("rev-parse", f"refs/heads/{base}").stdout.strip()
+    if git("merge-base", "--is-ancestor", upstream, local).returncode == 0:
+        return  # already current, or ahead with unpushed commits
+    if git("merge-base", "--is-ancestor", local, upstream).returncode:
+        return note(f"{base} has diverged from {remote}")
+    listing = git("worktree", "list", "--porcelain").stdout.split("\n\n")
+    checkout = next(
+        (
+            block.split("\n", 1)[0].removeprefix("worktree ")
+            for block in listing
+            if f"\nbranch refs/heads/{base}\n" in f"{block}\n"
+        ),
+        None,
+    )
+    if checkout:
+        # The branch is checked out: move its working tree too, which git
+        # refuses when local edits touch the incoming files.
+        moved = git("merge", "--ff-only", "--quiet", upstream, cwd=checkout)
+    else:
+        moved = git("update-ref", f"refs/heads/{base}", upstream, local)
+    if moved.returncode:
+        return note(f"could not fast-forward {base} in {checkout or path}")
+    print(f"Fast-forwarded {base} to {upstream[:12]} from {remote}.", file=sys.stderr)
+
+
 def starting_point(path: str, base: str | None) -> tuple[str, str]:
     """Resolve a local parent branch and pin its commit before creating anything."""
     if not base:
@@ -221,6 +274,7 @@ def starting_point(path: str, base: str | None) -> tuple[str, str]:
         if result.returncode:
             raise SystemExit("detached HEAD: pass --base with a local parent branch")
         base = result.stdout.strip()
+    catch_up(path, base)
     result = subprocess.run(
         ["git", "-C", path, "rev-parse", "--verify", f"refs/heads/{base}^{{commit}}"],
         capture_output=True,

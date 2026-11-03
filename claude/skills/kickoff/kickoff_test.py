@@ -228,6 +228,86 @@ class MainCheckoutTest(unittest.TestCase):
             )
 
 
+class CatchUpTest(unittest.TestCase):
+    """A parent branch with an upstream catches up before the worktree is cut."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.origin = Path(self.tmp.name) / "origin"
+        self.origin.mkdir()
+        self.git("init", "-b", "main", path=self.origin)
+        self.commit("first", path=self.origin)
+        self.clone = Path(self.tmp.name) / "clone"
+        self.git(
+            "clone", "--quiet", str(self.origin), str(self.clone), path=self.tmp.name
+        )
+        self.ahead = self.commit("merged elsewhere", path=self.origin)
+
+    def git(self, *args, path):
+        return subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-C",
+                str(path),
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def commit(self, name, path):
+        (path / "file").write_text(name)
+        self.git("add", "file", path=path)
+        self.git("commit", "--quiet", "-m", name, path=path)
+        return self.git("rev-parse", "HEAD", path=path)
+
+    def start(self, base=None):
+        with mock.patch("sys.stderr") as stderr:
+            result = kickoff.starting_point(str(self.clone), base)
+        return result, "".join(c.args[0] for c in stderr.write.call_args_list)
+
+    def test_a_checked_out_parent_fast_forwards_with_its_files(self):
+        (result, _) = self.start()
+        self.assertEqual(result, ("main", self.ahead))
+        self.assertEqual((self.clone / "file").read_text(), "merged elsewhere")
+
+    def test_a_parent_checked_out_nowhere_moves_its_ref(self):
+        self.git("checkout", "--quiet", "-b", "side", path=self.clone)
+        self.assertEqual(self.start("main")[0], ("main", self.ahead))
+        self.assertEqual(self.git("branch", "--show-current", path=self.clone), "side")
+
+    def test_conflicting_edits_keep_the_local_tip(self):
+        local = self.git("rev-parse", "HEAD", path=self.clone)
+        (self.clone / "file").write_text("mine")
+        (result, err) = self.start()
+        self.assertEqual(result, ("main", local))
+        self.assertIn("could not fast-forward", err)
+        self.assertEqual((self.clone / "file").read_text(), "mine")
+
+    def test_unpushed_and_diverged_work_is_never_dropped(self):
+        mine = self.commit("unpushed", path=self.clone)
+        (result, err) = self.start()
+        self.assertEqual(result, ("main", mine))
+        self.assertIn("diverged", err)
+
+    def test_an_unreachable_remote_keeps_the_local_tip(self):
+        local = self.git("rev-parse", "HEAD", path=self.clone)
+        self.git(
+            "remote", "set-url", "origin", str(self.origin) + "-gone", path=self.clone
+        )
+        (result, err) = self.start()
+        self.assertEqual(result, ("main", local))
+        self.assertIn("could not fetch", err)
+
+
 class StackingTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

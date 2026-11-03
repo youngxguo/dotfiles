@@ -115,6 +115,12 @@ the task (Slack threads, issues, PRs) are context to read, never to reply to,
 so leave that out of your brief. On a machine without cseat it falls back to a
 directly launched, explicitly pinned Claude session.
 
+Before pinning that commit it fetches the parent branch's upstream and
+fast-forwards the branch (and its checkout, when one has it open), so a new
+worktree never starts behind what has already merged. When it is offline, the
+branch has diverged, or local edits block the move, it keeps the local tip and
+prints why.
+
 Run it from the checkout whose work the new task should build on. From a linked
 worktree, this stacks the new branch on that worktree's current branch—not main.
 Uncommitted changes stay in the source checkout; commit needed changes first
