@@ -1,22 +1,31 @@
 ---
 name: setup-audit
-description: "Daily read-only audit of the whole work setup (Claude seats, Herdr, GitHub, Slack, Linear, cloud routines, launchd jobs, dotfiles, the laptop) that ends in a ranked list of improvements. Triggers: 'audit my setup', 'what is wrong with my setup', '/setup-audit'."
+description: "Daily read-only audit of the person's actual work (their prompts across every session, the PRs and commits it produced, how they drove Herdr) and of the setup it runs through (Claude seats, Herdr, GitHub, Slack, Linear, cloud routines, launchd jobs, dotfiles, the laptop), ending in a ranked list of improvements. Triggers: 'audit my setup', 'what is wrong with my setup', '/setup-audit'."
 ---
 
 # Setup Audit
 
-Everything the work runs through (the Claude seats, Herdr workers, GitHub,
-Slack, Linear, the cloud routines, launchd jobs, dotfiles, this machine) drifts
-a little every day: a seat sits idle while another runs dry, a worker outlives
-its PR, a job fails quietly, a branch waits on nobody. This skill reads all of
-it once a day and ends in suggestions ranked by what each costs. It changes
-nothing: no fix, no kill, no cleanup, no PR, no commit. A fix is a line the
-person runs or a kickoff they order. It belongs to no project: it reads every
-repository on the machine the same way and never applies one repository's
-rules to the rest.
+The audit has two halves, and the work comes first.
 
-Budget: about 30 minutes. Every read below is cheap; skip one only when its
-tool is missing from this seat, and say so in the report.
+**The work** is what the person did since the last report: what they asked
+for in every session, what shipped, what was thrown away, and where they had
+to steer by hand. That's where most of the cost is: a fan-out that overlaps
+itself, a correction typed for the fifth time, a PR closed after an evening of
+work.
+
+**The setup** is everything the work runs through: the Claude seats, Herdr
+workers, GitHub, Slack, Linear, the cloud routines, launchd jobs, dotfiles and
+this machine. It drifts a little every day. A seat sits idle while another runs
+dry, a worker outlives its PR, a job fails quietly, a branch waits on nobody.
+
+The skill reads both once a day and ends in suggestions ranked by what each
+costs. It changes nothing: no fix, no kill, no cleanup, no PR, no commit. A fix
+is a line the person runs or a kickoff they order. It belongs to no project:
+it reads every repository on the machine the same way and never applies one
+repository's rules to the rest.
+
+Budget: about 45 minutes. Skip a read only when its tool is missing from this
+seat, and say so in the report.
 
 ## 1. What came before
 
@@ -27,7 +36,51 @@ tool is missing from this seat, and say so in the report.
   unacted for seven days moves to the Standing list at the end, one line each,
   and never leads the report.
 
-## 2. Read every surface
+## 2. Read the work
+
+The window runs from the last report's run to now (24h when there is none).
+Quote the person's own words as the evidence. Paraphrase loses what they meant.
+
+**Sessions.** cseat records every session it sees in
+`~/.local/state/cseat/history.sqlite3`:
+- `session_info` holds `session_id`, `name`, `cwd`, `first_seen`, `last_seen`,
+  `last_seat` and `transcript`, the path of the `.jsonl` file.
+- `session_tokens` holds the per-model `output`, `cache_read` and `replies`.
+- `session_seen` shows how many sessions ran at once.
+
+Leave out the sub-sessions that tools start: a `cwd` under `/T/`, a
+`scratchpad`, `eval-judge`, `test_output`, `runlogs` or `batches`.
+
+In each transcript:
+- **The person's prompts** are `type: user` records whose `message.content` is
+  a string, with no `isMeta`, and not starting with `<`. Slash commands appear
+  as `<command-name>`. A long pasted brief opening with "This branch starts
+  from" is a kickoff, not something they typed in the pane.
+- **Compaction:** a prompt starting "This session is being continued" marks
+  one.
+- **Other records:** `pr-link` lists the PRs a session opened, and `ai-title`
+  names the topic.
+
+Read every prompt the person typed in the window, not a sample.
+
+**What it produced.** Use `gh search prs --author=@me --created=">=<window
+start>"` across every org, not only the repos Herdr has open, and note each
+PR's state. For every PR closed unmerged, find the prompt that closed it and
+the ones before it. Also read `git log --author` since the window start in
+every repository under `~/Documents/code`, the Linear issues the person moved
+or created, and the Slack messages they sent (`from:me`).
+
+**How they drove Herdr.** Look at how many workers ran at once and what each
+was for, how the person addressed workers ("herdr 2"), handoffs between
+workers, kickoffs from dispatcher sessions, and workers torn down with no PR.
+
+**What the guidance already says.** Before calling a correction unwritten,
+grep the places it could live: the skills and rules in dotfiles
+(`agents/global-rules.md`, `claude/skills/*`), the repository's `AGENTS.md`,
+`.claude/skills` and `.claude/rules`, and the seat's memories. Name the place
+that comes closest.
+
+## 3. Read the setup
 
 Every command here is read-only. Quote the line that is the evidence.
 
@@ -90,25 +143,49 @@ containers, `pgrep -fl claude`, `brew outdated`): disk going, databases named
 for branches or worktrees that are gone, dev servers and ports held by finished
 work, Claude processes nobody owns, tools behind.
 
-## 3. Judge
+## 4. Judge
 
 A finding is something that costs time, money, attention or risk every day it
 stays: a seat paid for and unused, an hour a worker loses to a failing job, a PR
 rotting, a disk filling. Rank by that cost. A tidy that costs nothing is not a
 finding. One cause behind several symptoms is one finding.
 
+In the work, look for patterns across sessions, not single events:
+- **A repeated correction:** the person types the same correction in several
+  sessions ("deeper cut", "too much machinery", "did we qa?") and no skill,
+  rule or memory holds it.
+- **Thrown-away work:** a closed PR, or a worker torn down with no PR. Note
+  what came before it: an unsettled design, workers overlapping, the person
+  losing track.
+- **Smooth against rough:** how a well-specified ask went, set against an
+  exploratory one.
+- **Waiting on the person:** a decision only they can make, or an ask of
+  theirs that never landed.
+
+The cost is their attention (prompts and hours spent steering), tokens spent,
+and work discarded. Put what went well in two or three lines, so the findings
+read against it.
+
 Each finding carries its evidence (the quoted line), what it costs, since when,
 and one fix: a command the person runs, a decision they make, or what a kickoff
 would do. Prefer the fix that removes the cause (a job, a rule, a default) over
 one that clears today's instance.
 
-## 4. Report
+## 5. Report
 
 Write the report to `~/.local/state/setup-audit/reports/<YYYY-MM-DD>.md`, then
-print it in full as the last message. Verdict first (one line: how healthy, the
-one thing to do today). Then a table, one row per finding, ranked: finding,
-evidence, cost, fix, since. Then a short paragraph per finding only where the
-table row cannot carry it. Then Standing, then the surfaces skipped and why.
+print it in full as the last message, in this order:
+
+1. **Verdict.** One line on how the work and the setup went, and the one thing
+   to do today. It comes from whichever half costs more.
+2. **The work.** The window's numbers: prompts, sessions, peak concurrency,
+   PRs opened, merged and closed unmerged, and compactions. Then what landed,
+   in a few lines, then a ranked table of work findings (`W1`, `W2`, …):
+   finding, evidence, cost, fix, since.
+3. **The setup.** The same table for the setup.
+4. **Notes.** A short paragraph per finding, only where the table row can't
+   carry it.
+5. **Standing**, then the surfaces skipped and why.
 When the Slack tools are loaded, DM the person the verdict, the top three rows
 and the report's path.
 
