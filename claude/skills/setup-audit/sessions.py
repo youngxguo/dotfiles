@@ -21,6 +21,8 @@ SUBSESSION = re.compile(
     r"^/(private/)?(tmp|var/folders)/|scratchpad|eval-judge|-judge-|test_output|runlogs|batches"
 )
 MODEL_SWITCH = re.compile(r"Set model to\W*([\w .-]+?)\W* and saved")
+# A transcript quiet for longer than this counts as idle until its next record.
+IDLE_GAP = 30 * 60
 
 
 def window_start(since):
@@ -70,7 +72,14 @@ def classify(text):
 
 
 def read_transcript(path, since):
-    out = {"prompts": [], "prs": set(), "titles": [], "models": [], "compactions": 0}
+    out = {
+        "prompts": [],
+        "prs": set(),
+        "titles": [],
+        "models": [],
+        "compactions": 0,
+        "stamps": [],
+    }
     for line in path.open(errors="replace"):
         try:
             record = json.loads(line)
@@ -82,7 +91,10 @@ def read_transcript(path, since):
         if kind == "pr-link" and record.get("prUrl"):
             out["prs"].add(record["prUrl"])
         stamp = record.get("timestamp")
-        if kind != "user" or record.get("isMeta") or not stamp or epoch(stamp) < since:
+        if not stamp or epoch(stamp) < since:
+            continue
+        out["stamps"].append(epoch(stamp))
+        if kind != "user" or record.get("isMeta"):
             continue
         content = (record.get("message") or {}).get("content")
         if not isinstance(content, str):
@@ -96,6 +108,28 @@ def read_transcript(path, since):
         elif what:
             out["prompts"].append((epoch(stamp), what, text))
     return out
+
+
+def active_spans(stamps):
+    """(start, end) stretches of a transcript's records, split at idle gaps."""
+    spans = []
+    for stamp in sorted(stamps):
+        if spans and stamp - spans[-1][1] <= IDLE_GAP:
+            spans[-1][1] = stamp
+        else:
+            spans.append([stamp, stamp])
+    return spans
+
+
+def peak_concurrency(spans):
+    """(when, how many) at the moment the most transcripts were active at once."""
+    events = sorted([(a, 1) for a, _ in spans] + [(b, -1) for _, b in spans])
+    live, best = 0, (None, 0)
+    for when, step in events:
+        live += step
+        if live > best[1]:
+            best = (when, live)
+    return best
 
 
 def main():
@@ -124,11 +158,6 @@ def main():
         "select model, sum(output) from session_tokens where at >= ? group by model",
         (since,),
     ).fetchall()
-    peak = db.execute(
-        "select at, count(distinct session_id) n from session_seen where at >= ? "
-        "group by at order by n desc limit 1",
-        (since,),
-    ).fetchone()
 
     # One transcript can back several session rows (a handoff between seats).
     sessions = defaultdict(list)
@@ -144,8 +173,10 @@ def main():
 
     totals = Counter()
     blocks = []
+    spans = []
     for transcript, group in sessions.items():
         read = read_transcript(Path(transcript), since)
+        spans += active_spans(read["stamps"])
         kinds = Counter(kind for _, kind, _ in read["prompts"])
         totals.update(kinds)
         totals["compaction"] += read["compactions"]
@@ -172,9 +203,11 @@ def main():
         f"{totals['handoff']} handoffs, {totals['command']} slash commands, "
         f"{totals['compaction']} compactions"
     )
-    if peak:
+    when, most = peak_concurrency(spans)
+    if most:
         print(
-            f"peak concurrency: {peak[1]} sessions at {local(peak[0])} (sampled when cseat polls)"
+            f"peak concurrency: {most} sessions at {local(when)} "
+            f"(transcripts with a record in the same stretch, idle after {IDLE_GAP // 60} min)"
         )
     print("output tokens: " + ", ".join(f"{m} {o:,}" for m, o in by_model))
     for line in missing:
