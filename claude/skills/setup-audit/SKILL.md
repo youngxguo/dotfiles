@@ -91,8 +91,10 @@ sessions actually did (the script's model switches, and the `model` in each
 seat's `settings.json`); `claude --version` against the newest release.
 
 **Memory** (`~/.claude/projects/*/memory/`): a `MEMORY.md` over the size a
-session loads (the session prints the warning); memories naming files, flags,
-routines or branches that no longer exist.
+session loads (the session prints the warning); a memory that sends a session
+to a file, flag, routine or branch that no longer exists (a `How to apply`
+line, or a fact stated as current). Dated history that names something since
+deleted ("PR 4745 rewrote `test-perf-cleanup.md`") is still true: leave it.
 
 **Herdr** (`herdr workspace list`, `~/.herdr/worktrees/`): a workspace whose
 branch has a merged or closed PR (`gh pr list --head <branch> --state all` in
