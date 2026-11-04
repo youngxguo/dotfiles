@@ -23,8 +23,10 @@ GRILL = (
     "area). Leave choices you can make while implementing to yourself. Word each "
     "question for someone who hasn't read the code: name things by what the "
     "product does, not by file, line or internal name, and explain a term the "
-    "first time it appears. Once the user confirms the shape, build it, and "
-    "carry the agreed shape into the PR description."
+    "first time it appears. Hold each recommended answer to the bar for a change "
+    "in your rules: recommend the change that removes the cause with the least "
+    "machinery, and say what you are choosing not to add. Once the user confirms "
+    "the shape, build it, and carry the agreed shape into the PR description."
 )
 
 
