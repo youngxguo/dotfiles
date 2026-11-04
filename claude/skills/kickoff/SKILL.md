@@ -69,8 +69,9 @@ worktree (via the repo's parent Herdr workspace, which Herdr requires) based on
 the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
 preflight and launched session, leaves the model to cseat's policy when
-`--model` is omitted, honors `--to` as a cseat seat name (`cseat list` shows them),
-sends the task (prefixed with the grilling instruction unless `--no-grill`),
+`--model` is omitted, honors `--to` as a cseat seat name exactly as
+`cseat list` shows it (no aliases, so an unknown name fails before anything
+changes), sends the task (prefixed with the grilling instruction unless `--no-grill`),
 and returns. The brief it sends tells the worker that links in
 the task (Slack threads, issues, PRs) are context to read, never to reply to,
 so leave that out of your brief. On a machine without cseat it falls back to a

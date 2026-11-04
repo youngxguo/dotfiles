@@ -13,7 +13,6 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_CONFIG_DIR = Path.home() / ".claude"
 MODEL_ENV = "ANTHROPIC_MODEL"
 GRILL = (
     "Before building, settle the shape of this task with the user: invoke the "
@@ -156,27 +155,6 @@ def submit_brief(pane_id: str, brief: str, log) -> None:
 def pane_status(pane_id: str) -> str | None:
     got = herdr("agent", "get", pane_id, check=False).get("result") or {}
     return (got.get("agent") or {}).get("agent_status")
-
-
-def normalize_config_dir(raw: str | None) -> str:
-    if not raw:
-        return str(DEFAULT_CONFIG_DIR.resolve())
-    return str(Path(os.path.expandvars(os.path.expanduser(raw))).resolve())
-
-
-def launch_prefix(config_dir: str, model: str | None = None) -> str:
-    """The environment a claude session starts under. The default account is
-    only reachable with CLAUDE_CONFIG_DIR unset: setting it, even to ~/.claude,
-    gives claude its own .claude.json inside the dir and its own `Claude
-    Code-credentials-<hash>` keychain entry, so the session lands on a login
-    prompt instead of the subscription."""
-    default = not config_dir or config_dir == normalize_config_dir(None)
-    unset = ["CLAUDE_CONFIG_DIR"] if default else []
-    assign = [] if unset else [f"CLAUDE_CONFIG_DIR={shlex.quote(config_dir)}"]
-    if model:
-        assign.append(f"{MODEL_ENV}={shlex.quote(model)}")
-    parts = ["env " + " ".join(f"-u {name}" for name in unset)] if unset else []
-    return " ".join([*parts, *assign])
 
 
 NAME_RE = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
@@ -388,14 +366,6 @@ def pane_agent(pane_id: str) -> str | None:
     return (got.get("agent") or {}).get("agent")
 
 
-def cseat_name(label: str) -> str:
-    """Translate the short account aliases the skill has historically accepted."""
-    if label in {"c1", "claude1", "default"}:
-        return "claude"
-    match = re.fullmatch(r"c(\d+)", label)
-    return f"claude{match.group(1)}" if match else label
-
-
 def cseat_args(
     subcommand: str,
     to_label: str | None,
@@ -410,7 +380,7 @@ def cseat_args(
     else:
         args.extend(["--json", "--dry-run"])
     if to_label:
-        args.extend(["--seat", cseat_name(to_label)])
+        args.extend(["--seat", to_label])
     return args
 
 
@@ -443,10 +413,9 @@ def preflight_cseat(
 ) -> bool:
     """Check cseat before changing the repo; false uses the portable fallback."""
     if not cseat_available():
-        seat = cseat_name(to_label) if to_label else "claude"
-        if seat != "claude" and not re.fullmatch(r"claude\d+", seat):
+        if to_label:
             raise SystemExit(
-                f"account {to_label!r} needs cseat, but cseat is unavailable"
+                f"--to {to_label!r} names a cseat seat, but cseat is unavailable"
             )
         return False
 
@@ -469,18 +438,16 @@ def preflight_cseat(
     raise SystemExit(f"cseat cannot start the agent: {detail}")
 
 
-def plain_claude_command(to_label: str | None, requested_model: str | None) -> str:
-    """Portable single-account fallback for machines without cseat."""
-    seat = cseat_name(to_label) if to_label else "claude"
-    if seat == "claude":
-        config_dir = normalize_config_dir(None)
-    else:
-        number = re.fullmatch(r"claude(\d+)", seat)
-        if not number:
-            raise SystemExit(f"account {to_label!r} needs cseat")
-        config_dir = normalize_config_dir(f"~/.claude{number.group(1)}")
-    prefix = launch_prefix(config_dir, requested_model)
-    return " ".join([prefix, "claude"])
+def plain_claude_command(requested_model: str | None) -> str:
+    """Portable fallback for machines without cseat: the default account. Its
+    login is only reachable with CLAUDE_CONFIG_DIR unset: setting it, even to
+    ~/.claude, gives claude its own .claude.json inside the dir and its own
+    `Claude Code-credentials-<hash>` keychain entry, so the session lands on a
+    login prompt instead of the subscription."""
+    parts = ["env", "-u", "CLAUDE_CONFIG_DIR"]
+    if requested_model:
+        parts.append(f"{MODEL_ENV}={shlex.quote(requested_model)}")
+    return " ".join([*parts, "claude"])
 
 
 def launch_claude(
@@ -495,7 +462,7 @@ def launch_claude(
     command = (
         shlex.join(cseat_args("run", to_label, requested_model, task_size))
         if use_cseat
-        else plain_claude_command(to_label, requested_model)
+        else plain_claude_command(requested_model)
     )
     herdr("pane", "run", pane_id, command)
     log(f"  ran: {command}")
@@ -512,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--to",
-        help="Claude account to use, by cusage label or alias such as c3",
+        help="cseat seat to launch on, by the name `cseat list` shows",
     )
     parser.add_argument(
         "--model",

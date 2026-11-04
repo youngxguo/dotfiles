@@ -71,11 +71,6 @@ class MainTest(unittest.TestCase):
 
 
 class CseatTest(unittest.TestCase):
-    def test_short_account_aliases_become_cseat_names(self):
-        self.assertEqual(kickoff.cseat_name("c1"), "claude")
-        self.assertEqual(kickoff.cseat_name("c6"), "claude6")
-        self.assertEqual(kickoff.cseat_name("work"), "work")
-
     def test_default_launch_leaves_the_model_to_cseat(self):
         self.assertEqual(
             kickoff.cseat_args("run", None, None),
@@ -84,7 +79,7 @@ class CseatTest(unittest.TestCase):
 
     def test_account_model_and_size_are_forwarded(self):
         self.assertEqual(
-            kickoff.cseat_args("run", "c3", "opus", "S"),
+            kickoff.cseat_args("run", "yc3", "opus", "S"),
             [
                 "cseat",
                 "run",
@@ -94,7 +89,7 @@ class CseatTest(unittest.TestCase):
                 "opus",
                 "--handoff",
                 "--seat",
-                "claude3",
+                "yc3",
             ],
         )
 
@@ -106,7 +101,7 @@ class CseatTest(unittest.TestCase):
                 kickoff, "run_in_login_shell", return_value=result
             ) as run,
         ):
-            self.assertTrue(kickoff.preflight_cseat("c3", "opus", "S"))
+            self.assertTrue(kickoff.preflight_cseat("yc3", "opus", "S"))
         run.assert_called_once_with(
             [
                 "cseat",
@@ -118,7 +113,7 @@ class CseatTest(unittest.TestCase):
                 "--json",
                 "--dry-run",
                 "--seat",
-                "claude3",
+                "yc3",
             ]
         )
 
@@ -138,14 +133,14 @@ class CseatTest(unittest.TestCase):
     def test_a_named_watch_only_seat_still_launches(self):
         result = mock.Mock(
             returncode=2,
-            stdout='{"reason": "seat claude3 is watch only"}',
+            stdout='{"reason": "seat yc3 is watch only"}',
             stderr="",
         )
         with (
             mock.patch.object(kickoff, "cseat_available", return_value=True),
             mock.patch.object(kickoff, "run_in_login_shell", return_value=result),
         ):
-            self.assertTrue(kickoff.preflight_cseat("c3", None))
+            self.assertTrue(kickoff.preflight_cseat("yc3", None))
             with self.assertRaisesRegex(SystemExit, "watch only"):
                 kickoff.preflight_cseat(None, None)
 
@@ -153,18 +148,23 @@ class CseatTest(unittest.TestCase):
         with mock.patch.object(kickoff, "cseat_available", return_value=False):
             self.assertFalse(kickoff.preflight_cseat(None, None))
         self.assertEqual(
-            kickoff.plain_claude_command(None, None),
+            kickoff.plain_claude_command(None),
             "env -u CLAUDE_CONFIG_DIR claude",
         )
 
+    def test_a_named_seat_needs_cseat(self):
+        with mock.patch.object(kickoff, "cseat_available", return_value=False):
+            with self.assertRaisesRegex(SystemExit, "cseat is unavailable"):
+                kickoff.preflight_cseat("yc3", None)
+
     def test_launch_runs_cseat_in_the_pane(self):
         with mock.patch.object(kickoff, "herdr") as herdr:
-            kickoff.launch_claude("w1:p2", lambda _: None, "c3", "opus", True, "S")
+            kickoff.launch_claude("w1:p2", lambda _: None, "yc3", "opus", True, "S")
         herdr.assert_called_once_with(
             "pane",
             "run",
             "w1:p2",
-            "cseat run --size S --model opus --handoff --seat claude3",
+            "cseat run --size S --model opus --handoff --seat yc3",
         )
 
 
