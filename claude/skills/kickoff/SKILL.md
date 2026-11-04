@@ -61,7 +61,7 @@ sessions a person drives. When the user names a Claude account, pass `--to`
 instead of leaving the selection only in the brief:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/kickoff.py --to c3 --model opus --size S comment-cleanup "the user's task"
+python3 ${CLAUDE_SKILL_DIR}/kickoff.py --to yc1 --model opus --size S comment-cleanup "the user's task"
 ```
 
 The script checks `cseat` before changing the repository, creates a new
@@ -69,7 +69,7 @@ worktree (via the repo's parent Herdr workspace, which Herdr requires) based on
 the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
 preflight and launched session, leaves the model to cseat's policy when
-`--model` is omitted, honors `--to` by translating short aliases such as `c3` to cseat's `claude3` seat,
+`--model` is omitted, honors `--to` as a cseat seat name (`cseat list` shows them),
 sends the task (prefixed with the grilling instruction unless `--no-grill`),
 and returns. The brief it sends tells the worker that links in
 the task (Slack threads, issues, PRs) are context to read, never to reply to,
