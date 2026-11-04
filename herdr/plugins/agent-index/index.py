@@ -128,8 +128,27 @@ def wanted_numbers(agents, panes):
     }
 
 
+def released_pane():
+    """The pane an agent just left, when this run was triggered by its release.
+
+    Herdr fires the release event a few hundred milliseconds before agent list
+    stops listing the agent, and nothing fires once it does, so the event, not
+    the listing, says the pane is free.
+    """
+    try:
+        data = json.loads(os.environ.get("HERDR_PLUGIN_EVENT_JSON") or "{}")["data"]
+    except (KeyError, TypeError, ValueError):
+        return None
+    return data.get("pane_id") if data.get("released") else None
+
+
 def renumber():
-    agents = herdr_json("agent", "list")["agents"]
+    released = released_pane()
+    agents = [
+        agent
+        for agent in herdr_json("agent", "list")["agents"]
+        if agent.get("pane_id") != released
+    ]
     panes = herdr_json("pane", "list")["panes"]
     seq = str(time.time_ns())
     for pane_id, number in wanted_numbers(agents, panes).items():

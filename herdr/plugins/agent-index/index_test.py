@@ -1,6 +1,9 @@
+import json
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -101,6 +104,32 @@ class WantedNumbersTest(unittest.TestCase):
     def test_agents_past_nine_have_no_number(self):
         agents = [agent(f"p{i}", str(i) if i <= 9 else "9") for i in range(1, 11)]
         self.assertEqual(index.wanted_numbers(agents, agents), {"p10": None})
+
+
+class ReleasedPaneTest(unittest.TestCase):
+    def released(self, payload):
+        with mock.patch.dict(os.environ, {"HERDR_PLUGIN_EVENT_JSON": payload}):
+            return index.released_pane()
+
+    def test_release_event_names_its_pane(self):
+        payload = {
+            "event": "pane.agent_detected",
+            "data": {
+                "type": "pane_agent_detected",
+                "pane_id": "w1:p2",
+                "released": True,
+            },
+        }
+        self.assertEqual(self.released(json.dumps(payload)), "w1:p2")
+
+    def test_detection_frees_nothing(self):
+        payload = {"data": {"pane_id": "w1:p2", "agent": "claude"}}
+        self.assertIsNone(self.released(json.dumps(payload)))
+
+    def test_startup_without_payload_frees_nothing(self):
+        with mock.patch.dict(os.environ, clear=True):
+            self.assertIsNone(index.released_pane())
+        self.assertIsNone(self.released("not json"))
 
 
 if __name__ == "__main__":
