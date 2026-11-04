@@ -181,6 +181,43 @@ class StatuslineTest(unittest.TestCase):
                     if other != token:
                         self.assertEqual(args[args.index(other) - 1], "--clear-token")
 
+    def test_sidebar_label_is_the_cseat_seat_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            report = root / "report"
+            fake = self.fake_herdr(root)
+            config_dir = root / ".claude-work"
+            config_dir.mkdir()
+            cseat_config = root / "xdg" / "cseat" / "config.toml"
+            cseat_config.parent.mkdir(parents=True)
+            cseat_config.write_text(
+                f'[seats.yc1]\ndir = "{config_dir}"\n', encoding="utf-8"
+            )
+            env = self.statusline_environment(root, fake, report)
+            env["XDG_CONFIG_HOME"] = str(root / "xdg")
+            payload = {
+                "model": {"display_name": "Fable 5.1"},
+                "transcript_path": str(config_dir / "projects" / "test.jsonl"),
+                "workspace": {"current_dir": str(root)},
+            }
+            subprocess.run(
+                ["sh", str(SCRIPT)],
+                input=json.dumps(payload),
+                text=True,
+                check=True,
+                capture_output=True,
+                env=env,
+            )
+            args = self.wait_for_report(report)
+            self.assertIn(
+                "yc1",
+                [
+                    arg.split("=", 1)[1]
+                    for arg in args
+                    if arg.startswith("subscription_color_") and "=" in arg
+                ],
+            )
+
     def test_pane_shows_account_email_but_sidebar_keeps_label(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             root = Path(tmpdir)

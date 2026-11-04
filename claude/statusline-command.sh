@@ -110,9 +110,21 @@ transcript = os.environ['TRANSCRIPT']
 config_dir = transcript.split('/projects/')[0] if '/projects/' in transcript else ''
 config_dir = config_dir or os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR') or '~/.claude')
 config_dir = os.path.realpath(config_dir)
+def cseat_seat_name():
+    try:
+        import tomllib
+        base = os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+        with open(os.path.join(base, 'cseat', 'config.toml'), 'rb') as f:
+            seats = tomllib.load(f).get('seats') or {}
+    except (ImportError, OSError, ValueError):
+        return ''
+    for seat, cfg in seats.items():
+        if isinstance(cfg, dict) and cfg.get('dir') and os.path.realpath(os.path.expanduser(cfg['dir'])) == config_dir:
+            return seat
+    return ''
 name = os.path.basename(config_dir.rstrip('/'))
 match = re.fullmatch(r'\.?claude(\d*)', name)
-print('c' + (match.group(1) or '1') if match else name)
+print(cseat_seat_name() or ('c' + (match.group(1) or '1') if match else name))
 default_dir = os.path.realpath(os.path.expanduser('~/.claude'))
 state = os.path.expanduser('~/.claude.json') if config_dir == default_dir else os.path.join(config_dir, '.claude.json')
 try:
