@@ -20,9 +20,11 @@ GRILL = (
     "grilling skill. Cover what a reviewer would need settled: what changes and "
     "what stays, the design choice it turns on, what done looks like, and how it "
     "relates to work already in flight (an open PR, another worker in the same "
-    "area). Leave choices you can make while implementing to yourself. Once the "
-    "user confirms the shape, build it, and carry the agreed shape into the PR "
-    "description."
+    "area). Leave choices you can make while implementing to yourself. Word each "
+    "question for someone who hasn't read the code: name things by what the "
+    "product does, not by file, line or internal name, and explain a term the "
+    "first time it appears. Once the user confirms the shape, build it, and "
+    "carry the agreed shape into the PR description."
 )
 
 
