@@ -24,6 +24,9 @@ touch the same code or turn on the same open question. If they do, say so and
 propose one worker, or a design pass that settles the question first; launch
 them separately only once the user chooses. Parallel workers on an unsettled
 design each find the question on their own, and their work gets thrown away.
+When the kickoffs come from a list of tickets, also leave out any ticket that
+is assigned to someone else or sits in an area a memory routes to someone
+else, and name what you left out in the reply.
 
 ## Write the seed brief
 
