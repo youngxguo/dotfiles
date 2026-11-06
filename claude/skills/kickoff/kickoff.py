@@ -126,33 +126,57 @@ def settle_agent(pane_id: str, log) -> str:
     return status or result.get("status") or "unknown"
 
 
-def submit_brief(pane_id: str, brief: str, log) -> None:
-    """A claude that is still starting up can take the pasted brief but drop
-    the Enter after it, leaving the brief unsent in its input box. herdr then
-    reports the prompt stalled, and one more Enter sends it."""
-    sent = herdr(
-        "agent",
-        "prompt",
-        pane_id,
-        brief,
-        "--wait",
-        "--until",
-        "working",
-        "--until",
-        "blocked",
-        "--timeout",
-        "15000",
-        check=False,
-    )
-    if "error" not in sent:
-        log("  brief sent")
-        return
-    herdr("pane", "send-keys", pane_id, "enter", check=False)
-    if wait_for(lambda: pane_status(pane_id) in ("working", "blocked"), 10):
-        log("  brief sent (resubmitted with Enter)")
-        return
-    message = (sent.get("error") or {}).get("message", "")
+def submit_brief(pane_id: str, brief: str, log, tries: int = 3) -> None:
+    """herdr can call a claude that is still starting up idle, and that claude
+    can lose the brief three ways: it starts the turn later than herdr's
+    5-second stall window, it keeps the pasted brief but drops the Enter, or it
+    drops the paste altogether. So after a stall, wait for a late start, then
+    send Enter if the brief is sitting in the input box, and otherwise send the
+    whole brief again."""
+
+    def started() -> bool:
+        return wait_for(lambda: pane_status(pane_id) in ("working", "blocked"), 10)
+
+    message = ""
+    for attempt in range(1, tries + 1):
+        sent = herdr(
+            "agent",
+            "prompt",
+            pane_id,
+            brief,
+            "--wait",
+            "--until",
+            "working",
+            "--until",
+            "blocked",
+            "--timeout",
+            "15000",
+            check=False,
+        )
+        retry = f" (try {attempt})" if attempt > 1 else ""
+        if "error" not in sent:
+            log(f"  brief sent{retry}")
+            return
+        message = (sent.get("error") or {}).get("message", "")
+        if started():
+            log(f"  brief sent{retry}, started late")
+            return
+        if brief_in_input(pane_id, brief):
+            herdr("pane", "send-keys", pane_id, "enter", check=False)
+            if started():
+                log(f"  brief sent{retry}, resubmitted with Enter")
+                return
+            break
+        log(f"  the brief didn't land on try {attempt}")
     raise SystemExit(f"the brief never started a turn in {pane_id}: {message}")
+
+
+def brief_in_input(pane_id: str, brief: str) -> bool:
+    """claude shows a long paste as `[Pasted text #1 +N lines]` and a short
+    one as itself."""
+    screen = pane_screen(pane_id)
+    tail = brief.strip().splitlines()[-1][-40:]
+    return "[Pasted text" in screen or tail in screen
 
 
 def pane_status(pane_id: str) -> str | None:
