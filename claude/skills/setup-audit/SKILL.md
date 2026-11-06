@@ -188,6 +188,11 @@ message, in this order:
 4. **Notes.** A short paragraph per finding, only where the table row can't
    carry it.
 5. **Standing**, then the surfaces skipped and why.
+6. **What to do.** The findings synthesized into a short numbered list of
+   actions, one line each, naming the rows it settles; one action that covers
+   several rows is one line. Order: decisions only the person can make, then
+   changes this pane or a kickoff can make on their word, then quick ones they
+   do themselves. End by asking which to start.
 When the Slack tools are loaded, DM the person the verdict, the top three rows
 and the report's path.
 
