@@ -36,6 +36,12 @@ setopt HIST_REDUCE_BLANKS
 setopt HIST_VERIFY
 setopt SHARE_HISTORY
 setopt EXTENDED_HISTORY
+# After a restart herdr types every agent's resume command (`... --resume <id>`)
+# into a fresh shell; a session id is never worth recalling, and a restore of
+# thirty panes would bury real commands in Ctrl-R.
+zshaddhistory() {
+  [[ $1 != *--resume[=\ ]????????-????-????-????-????????????* ]]
+}
 
 if [[ -z ${_dotfiles_fzf_rc-} && -o zle ]] && (( ${+commands[fzf]} )); then
   () {
