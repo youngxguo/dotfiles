@@ -166,7 +166,8 @@ class CseatTest(unittest.TestCase):
             "pane",
             "run",
             "w1:p2",
-            "cseat run --size S --model opus --handoff --seat yc3 'it'\"'\"'s\nthe task'",
+            # The leading space keeps the launch out of shell history.
+            " cseat run --size S --model opus --handoff --seat yc3 'it'\"'\"'s\nthe task'",
         )
 
 

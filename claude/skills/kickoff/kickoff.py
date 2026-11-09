@@ -432,13 +432,15 @@ def launch_claude(
 ) -> None:
     """Start Claude on the brief with cseat handoffs, or directly when cseat is
     absent. The brief goes on the command line, never typed in after: a claude
-    still starting up can drop typed text."""
+    still starting up can drop typed text. The leading space keeps that line
+    out of shell history (zsh's HIST_IGNORE_SPACE), where it would bury real
+    commands in Ctrl-R."""
     launcher = (
         shlex.join(cseat_args("run", to_label, requested_model, task_size))
         if use_cseat
         else plain_claude_command(requested_model)
     )
-    herdr("pane", "run", pane_id, f"{launcher} {shlex.quote(brief)}")
+    herdr("pane", "run", pane_id, f" {launcher} {shlex.quote(brief)}")
     log(f"  ran: {launcher} with the brief")
 
 
