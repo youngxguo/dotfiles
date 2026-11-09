@@ -15,9 +15,9 @@ the session that does the work, instead of being compressed into a brief.
 
 The worker grills by default. Pass `--no-grill` only when the request already
 pins the shape: a named PR to rebase or merge, a one-line fix, a brief the user
-wrote out themselves, or a shape already settled in this conversation. With
-`--no-grill` the workspace opens in the background; otherwise it opens focused,
-so the user lands in the worker's pane to answer.
+wrote out themselves, or a shape already settled in this conversation. Either
+way the workspace opens in the background and focus stays where the user is;
+they switch to the worker's pane to answer when they're ready.
 
 When the user asks for several kickoffs at once, check whether any of them
 touch the same code or turn on the same open question. If they do, say so and

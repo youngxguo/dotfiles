@@ -472,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="have the agent settle the task's shape with the user first, "
-        "in a focused workspace (default: on; --no-grill when the shape is pinned)",
+        "(default: on; --no-grill when the shape is pinned)",
     )
 
     args = parser.parse_args(argv)
@@ -503,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
         branch,
         "--base",
         base_oid,
-        "--focus" if args.grill else "--no-focus",
+        "--no-focus",
     )["result"]
 
     workspace_id = opened["workspace"]["workspace_id"]

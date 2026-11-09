@@ -444,7 +444,7 @@ class StackingTest(unittest.TestCase):
         )
         return herdr, launch.call_args.args[2]
 
-    def created_with(self, herdr, focus):
+    def created_in_background(self, herdr):
         herdr.assert_any_call(
             "worktree",
             "create",
@@ -454,21 +454,21 @@ class StackingTest(unittest.TestCase):
             "test/child",
             "--base",
             self.parent_oid,
-            focus,
+            "--no-focus",
         )
 
     def test_launch_passes_pinned_base_and_records_parent_before_agent(self):
         self.launch()
 
-    def test_by_default_the_agent_grills_in_a_focused_workspace(self):
+    def test_by_default_the_agent_grills_in_a_background_workspace(self):
         herdr, brief = self.launch()
-        self.created_with(herdr, "--focus")
+        self.created_in_background(herdr)
         self.assertIn("grilling skill", brief)
         self.assertTrue(brief.endswith("do work"))
 
-    def test_a_pinned_shape_launches_unfocused_without_grilling(self):
+    def test_a_pinned_shape_launches_in_the_background_without_grilling(self):
         herdr, brief = self.launch("--no-grill")
-        self.created_with(herdr, "--no-focus")
+        self.created_in_background(herdr)
         self.assertNotIn("grilling", brief)
 
 
