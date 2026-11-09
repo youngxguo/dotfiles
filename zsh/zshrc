@@ -93,11 +93,6 @@ for _claude_dir in "$HOME"/.claude<->(N/); do
 done
 unset _claude_dir _claude_number
 
-# cseat picks the seat with headroom; --handoff moves the session at a limit.
-# cseat's config runs every task on Opus, so cf pins Fable.
-alias cr="cseat run --handoff"
-alias cf="cseat run --handoff --model fable"
-
 # --no-use skips nvm's default-version resolution, the slow (~600ms) part of
 # sourcing it.
 export NVM_DIR="$HOME/.nvm"
@@ -109,3 +104,11 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
 fi
 
 [ -r "$HOME/.personal-plugins/.shell_config" ] && source "$HOME/.personal-plugins/.shell_config"
+
+# cseat comes from the machine-local config above, where it is installed. It
+# picks the seat with headroom; --handoff moves the session at a limit. cf pins
+# Fable where cseat's own policy would pick another model.
+if (( $+functions[cseat] || $+commands[cseat] )); then
+  alias cr="cseat run --handoff"
+  alias cf="cseat run --handoff --model fable"
+fi

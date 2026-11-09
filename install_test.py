@@ -534,6 +534,39 @@ class ClaudeInstallTest(unittest.TestCase):
                     run_call.kwargs["env"]["CLAUDE_CONFIG_DIR"], str(config_dir)
                 )
 
+    def test_install_claude_herdr_integrations_once_per_shared_settings(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            shared = home / ".claude/settings.json"
+            shared.parent.mkdir(parents=True)
+            hook = f"bash '{home}/.claude/hooks/herdr-agent-state.sh' session"
+            registered = {
+                "hooks": {
+                    "SessionStart": [{"hooks": [{"type": "command", "command": hook}]}]
+                }
+            }
+            shared.write_text(json.dumps(registered), encoding="utf-8")
+            (home / ".claude/hooks").mkdir()
+            (home / ".claude/hooks/herdr-agent-state.sh").touch()
+            seat = home / ".claude-seat"
+            seat.mkdir()
+            (seat / ".claude.json").write_text("{}", encoding="utf-8")
+            (seat / "settings.json").symlink_to(shared)
+            (seat / "hooks").symlink_to(home / ".claude/hooks")
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "herdr_command", return_value="herdr"),
+                mock.patch.object(
+                    install.subprocess,
+                    "check_output",
+                    return_value="claude: current (v11) (hooks/herdr-agent-state.sh)\n",
+                ) as status_mock,
+            ):
+                install.install_claude_herdr_integrations()
+
+            self.assertEqual(status_mock.call_count, 1)
+            self.assertEqual(json.loads(shared.read_text(encoding="utf-8")), registered)
+
     def test_remove_cross_account_claude_herdr_hooks(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-claude-test-") as tmpdir:
             home = Path(tmpdir) / "home"
@@ -618,6 +651,49 @@ class ClaudeInstallTest(unittest.TestCase):
             ):
                 install.install_claude_herdr_skill()
             self.assertFalse((home / ".claude/skills").exists())
+
+
+class CseatSettingsTemplateTest(unittest.TestCase):
+    def point(self, home, text=None):
+        config = home / ".config/cseat/config.toml"
+        if text is not None:
+            config.parent.mkdir(parents=True)
+            config.write_text(text, encoding="utf-8")
+        with (
+            mock.patch.object(install, "HOME", home),
+            mock.patch.object(install, "REPO_ROOT", home / "dotfiles"),
+            mock.patch.dict(os.environ),
+        ):
+            os.environ.pop("CSEAT_CONFIG", None)
+            os.environ.pop("XDG_CONFIG_HOME", None)
+            install.point_cseat_at_claude_settings()
+        return config.read_text(encoding="utf-8")
+
+    def test_leaves_a_machine_without_cseat_config_alone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            with self.assertRaises(FileNotFoundError):
+                self.point(home)
+            self.assertFalse((home / ".config").exists())
+
+    def test_puts_the_key_before_the_first_table(self):
+        seats = '[seats.yc1]\ndir = "~/.claude-yc1"\nsettings_template = "x"\n'
+        with tempfile.TemporaryDirectory() as tmpdir:
+            text = self.point(Path(tmpdir), seats)
+        self.assertEqual(
+            text,
+            f'settings_template = "~/dotfiles/claude/settings.json"\n\n{seats}',
+        )
+
+    def test_replaces_an_old_value_and_is_idempotent(self):
+        old = 'settings_template = "~/old.json"\n\n[models]\npr = "opus"\n'
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            first = self.point(home, old)
+            second = self.point(home)
+        expected = old.replace("~/old.json", "~/dotfiles/claude/settings.json")
+        self.assertEqual(first, expected)
+        self.assertEqual(second, expected)
 
 
 class ClaudeSkillLinksTest(unittest.TestCase):

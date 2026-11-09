@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import plistlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -900,12 +901,53 @@ def merge_claude_settings_into(template, target, keys):
     print(f"merged claude settings into {target}")
 
 
+def cseat_config_path():
+    explicit = os.environ.get("CSEAT_CONFIG")
+    if explicit:
+        return Path(explicit).expanduser()
+    base = os.environ.get("XDG_CONFIG_HOME") or HOME / ".config"
+    return Path(base) / "cseat/config.toml"
+
+
+def point_cseat_at_claude_settings():
+    """Claude Code rewrites a seat's settings.json at runtime (/model, the
+    auto-mode prompt), so the merged keys drift until the next install. cseat
+    passes its settings_template to every launch as --settings, which outranks
+    the seat's file and which claude never writes, so the repo's file wins."""
+    target = cseat_config_path()
+    if not target.is_file():
+        print("skipping cseat settings template: cseat has no config here")
+        return
+    source = REPO_ROOT / "claude/settings.json"
+    value = (
+        f"~/{source.relative_to(HOME)}" if source.is_relative_to(HOME) else str(source)
+    )
+    line = f"settings_template = {json.dumps(value)}"
+    text = target.read_text(encoding="utf-8")
+    # Top-level keys must precede the first [table]; one under a table is
+    # another key's setting.
+    match = re.search(r"^\s*\[", text, re.MULTILINE)
+    split = match.start() if match else len(text)
+    preamble, tables = text[:split], text[split:]
+    existing = re.compile(r"^settings_template\s*=.*$", re.MULTILINE)
+    if existing.search(preamble):
+        updated = existing.sub(lambda _: line, preamble, count=1) + tables
+    else:
+        updated = f"{line}\n\n{text}"
+    if updated == text:
+        print(f"cseat already launches with {value}")
+        return
+    target.write_text(updated, encoding="utf-8")
+    print(f"pointed cseat's settings_template at {value} in {target}")
+
+
 def install_claude():
     print("applying claude config")
     # AGENTS.md is a project convention; global Claude instructions must live
     # under rules/ to load in every project (including older worktrees).
     apply_links(links_for("claude"))
     merge_claude_settings()
+    point_cseat_at_claude_settings()
     merge_claude_global_config()
     install_claude_herdr_skill()
     if not VERIFY_MODE:
@@ -1220,7 +1262,17 @@ def remove_cross_account_claude_herdr_hooks(config_dir):
 
 
 def install_claude_herdr_integrations():
+    # Herdr registers its hook in settings.json under the login's own path.
+    # Logins that share one settings.json (cseat links each seat's to
+    # ~/.claude) keep the first login's registration: installing or cleaning
+    # up for a second one would strip it from all of them.
+    registered = set()
     for config_dir in claude_config_dirs():
+        settings_path = (config_dir / "settings.json").resolve()
+        if settings_path in registered:
+            print(f"claude herdr integration already shared through {config_dir}")
+            continue
+        registered.add(settings_path)
         env = os.environ.copy()
         env["CLAUDE_CONFIG_DIR"] = str(config_dir)
         install_herdr_integration("claude", env=env)
