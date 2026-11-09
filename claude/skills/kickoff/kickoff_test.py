@@ -159,12 +159,14 @@ class CseatTest(unittest.TestCase):
 
     def test_launch_runs_cseat_in_the_pane(self):
         with mock.patch.object(kickoff, "herdr") as herdr:
-            kickoff.launch_claude("w1:p2", lambda _: None, "yc3", "opus", True, "S")
+            kickoff.launch_claude(
+                "w1:p2", lambda _: None, "it's\nthe task", "yc3", "opus", True, "S"
+            )
         herdr.assert_called_once_with(
             "pane",
             "run",
             "w1:p2",
-            "cseat run --size S --model opus --handoff --seat yc3",
+            "cseat run --size S --model opus --handoff --seat yc3 'it'\"'\"'s\nthe task'",
         )
 
 
@@ -437,7 +439,10 @@ class StackingTest(unittest.TestCase):
                 "/new-worktree", "test/child", "parent"
             )
             self.assertEqual(kickoff.main(["child", "do work", *argv]), 0)
-        return herdr
+        self.assertFalse(
+            [c for c in herdr.call_args_list if c.args[:2] == ("agent", "prompt")]
+        )
+        return herdr, launch.call_args.args[2]
 
     def created_with(self, herdr, focus):
         herdr.assert_any_call(
@@ -452,24 +457,19 @@ class StackingTest(unittest.TestCase):
             focus,
         )
 
-    def sent_brief(self, herdr):
-        (call,) = [c for c in herdr.call_args_list if c.args[:2] == ("agent", "prompt")]
-        return call.args[3]
-
     def test_launch_passes_pinned_base_and_records_parent_before_agent(self):
         self.launch()
 
     def test_by_default_the_agent_grills_in_a_focused_workspace(self):
-        herdr = self.launch()
+        herdr, brief = self.launch()
         self.created_with(herdr, "--focus")
-        brief = self.sent_brief(herdr)
         self.assertIn("grilling skill", brief)
         self.assertTrue(brief.endswith("do work"))
 
     def test_a_pinned_shape_launches_unfocused_without_grilling(self):
-        herdr = self.launch("--no-grill")
+        herdr, brief = self.launch("--no-grill")
         self.created_with(herdr, "--no-focus")
-        self.assertNotIn("grilling", self.sent_brief(herdr))
+        self.assertNotIn("grilling", brief)
 
 
 class ShellReadyTest(unittest.TestCase):
@@ -511,59 +511,6 @@ class BranchPrefixTest(unittest.TestCase):
             kickoff.subprocess, "run", return_value=mock.Mock(stdout="\n")
         ):
             self.assertEqual(kickoff.branch_prefix("/repos/widget"), "")
-
-
-class SubmitBriefTest(unittest.TestCase):
-    """After herdr reports a stalled prompt, the brief is resubmitted only in
-    the way that can't send it twice."""
-
-    STALLED = {"error": {"message": "agent_prompt_stalled"}}
-
-    def submit(self, prompts, statuses, screens):
-        """`prompts` answer each `agent prompt`, `statuses` each status read,
-        `screens` each screen read. Returns the herdr mock."""
-        prompts, statuses, screens = iter(prompts), iter(statuses), iter(screens)
-
-        def call(*args, **kwargs):
-            return next(prompts) if args[:2] == ("agent", "prompt") else {}
-
-        with (
-            mock.patch.object(kickoff, "herdr", side_effect=call) as herdr,
-            mock.patch.object(
-                kickoff, "pane_status", side_effect=lambda _: next(statuses)
-            ),
-            mock.patch.object(
-                kickoff, "pane_screen", side_effect=lambda _: next(screens)
-            ),
-            mock.patch.object(kickoff, "wait_for", side_effect=lambda p, _t: p()),
-        ):
-            kickoff.submit_brief("w1:p1", "line one\nthe task", lambda _m: None)
-        return herdr
-
-    def calls(self, herdr, *head):
-        return [c for c in herdr.call_args_list if c.args[: len(head)] == head]
-
-    def test_a_dropped_paste_is_sent_again_whole(self):
-        herdr = self.submit([self.STALLED, {}], ["idle"], ["❯ "])
-        self.assertEqual(len(self.calls(herdr, "agent", "prompt")), 2)
-        self.assertEqual(self.calls(herdr, "pane", "send-keys"), [])
-
-    def test_a_brief_left_in_the_input_box_gets_only_an_enter(self):
-        herdr = self.submit(
-            [self.STALLED], ["idle", "working"], ["❯ [Pasted text #1 +2 lines]"]
-        )
-        self.assertEqual(len(self.calls(herdr, "agent", "prompt")), 1)
-        self.assertEqual(
-            len(self.calls(herdr, "pane", "send-keys", "w1:p1", "enter")), 1
-        )
-
-    def test_a_late_start_is_not_sent_again(self):
-        herdr = self.submit([self.STALLED], ["working"], [])
-        self.assertEqual(len(self.calls(herdr, "agent", "prompt")), 1)
-
-    def test_it_gives_up_after_three_tries(self):
-        with self.assertRaisesRegex(SystemExit, "never started a turn in w1:p1"):
-            self.submit([self.STALLED] * 3, ["idle"] * 3, ["❯ "] * 3)
 
 
 if __name__ == "__main__":

@@ -97,11 +97,11 @@ def dismiss_startup_dialogs(pane_id: str, log) -> bool:
 
 
 def settle_agent(pane_id: str, log) -> str:
-    """Wait for a freshly launched agent to come to rest, answering the
-    first-run dialogs a config dir shows for a folder it has never opened.
-    Only idle and blocked count: herdr keeps the record of the claude that
-    just quit, marked `done`, until it detects the new one, and a plain wait
-    would return that at once."""
+    """Wait for a freshly launched agent to come up, answering the first-run
+    dialogs a config dir shows for a folder it has never opened; claude holds
+    its prompt until they are answered. `done` never counts: herdr keeps the
+    record of the claude that just quit, marked `done`, until it detects the
+    new one, and a plain wait would return that at once."""
 
     def wait() -> dict:
         return herdr(
@@ -112,6 +112,8 @@ def settle_agent(pane_id: str, log) -> str:
             "idle",
             "--until",
             "blocked",
+            "--until",
+            "working",
             "--timeout",
             "90000",
             check=False,
@@ -124,64 +126,6 @@ def settle_agent(pane_id: str, log) -> str:
     result = settled.get("result") or {}
     status = (result.get("agent") or {}).get("agent_status")
     return status or result.get("status") or "unknown"
-
-
-def submit_brief(pane_id: str, brief: str, log, tries: int = 3) -> None:
-    """herdr can call a claude that is still starting up idle, and that claude
-    can lose the brief three ways: it starts the turn later than herdr's
-    5-second stall window, it keeps the pasted brief but drops the Enter, or it
-    drops the paste altogether. So after a stall, wait for a late start, then
-    send Enter if the brief is sitting in the input box, and otherwise send the
-    whole brief again."""
-
-    def started() -> bool:
-        return wait_for(lambda: pane_status(pane_id) in ("working", "blocked"), 10)
-
-    message = ""
-    for attempt in range(1, tries + 1):
-        sent = herdr(
-            "agent",
-            "prompt",
-            pane_id,
-            brief,
-            "--wait",
-            "--until",
-            "working",
-            "--until",
-            "blocked",
-            "--timeout",
-            "15000",
-            check=False,
-        )
-        retry = f" (try {attempt})" if attempt > 1 else ""
-        if "error" not in sent:
-            log(f"  brief sent{retry}")
-            return
-        message = (sent.get("error") or {}).get("message", "")
-        if started():
-            log(f"  brief sent{retry}, started late")
-            return
-        if brief_in_input(pane_id, brief):
-            herdr("pane", "send-keys", pane_id, "enter", check=False)
-            if started():
-                log(f"  brief sent{retry}, resubmitted with Enter")
-                return
-            break
-        log(f"  the brief didn't land on try {attempt}")
-    raise SystemExit(f"the brief never started a turn in {pane_id}: {message}")
-
-
-def brief_in_input(pane_id: str, brief: str) -> bool:
-    """claude shows a long paste as `[Pasted text #1 +N lines]` and a short
-    one as itself."""
-    screen = pane_screen(pane_id)
-    tail = brief.strip().splitlines()[-1][-40:]
-    return "[Pasted text" in screen or tail in screen
-
-
-def pane_status(pane_id: str) -> str | None:
-    got = herdr("agent", "get", pane_id, check=False).get("result") or {}
-    return (got.get("agent") or {}).get("agent_status")
 
 
 NAME_RE = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
@@ -480,19 +424,22 @@ def plain_claude_command(requested_model: str | None) -> str:
 def launch_claude(
     pane_id: str,
     log,
+    brief: str,
     to_label: str | None = None,
     requested_model: str | None = None,
     use_cseat: bool = True,
     task_size: str = "M",
 ) -> None:
-    """Start Claude with cseat handoffs, or directly when cseat is absent."""
-    command = (
+    """Start Claude on the brief with cseat handoffs, or directly when cseat is
+    absent. The brief goes on the command line, never typed in after: a claude
+    still starting up can drop typed text."""
+    launcher = (
         shlex.join(cseat_args("run", to_label, requested_model, task_size))
         if use_cseat
         else plain_claude_command(requested_model)
     )
-    herdr("pane", "run", pane_id, command)
-    log(f"  ran: {command}")
+    herdr("pane", "run", pane_id, f"{launcher} {shlex.quote(brief)}")
+    log(f"  ran: {launcher} with the brief")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -577,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     name = agent_name(slug)
-    launch_claude(pane_id, log, args.to, args.model, use_cseat, args.size)
+    launch_claude(pane_id, log, brief, args.to, args.model, use_cseat, args.size)
     if not wait_for(lambda: pane_agent(pane_id) == "claude", 60):
         raise SystemExit(
             f"herdr never detected claude in {pane_id}; {workspace_id} is open at {path}"
@@ -588,8 +535,9 @@ def main(argv: list[str] | None = None) -> int:
     log(f"  agent {name} is {status}")
 
     if status == "blocked":
-        raise SystemExit(f"agent {name} is blocked; task not sent")
-    submit_brief(pane_id, brief, log)
+        raise SystemExit(
+            f"agent {name} is blocked in {pane_id}; its brief starts once that is answered"
+        )
 
     print(f"\n{name}  {branch}  {workspace_id}  {path}")
     return 0
