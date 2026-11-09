@@ -757,6 +757,7 @@ CLAUDE_SETTINGS_KEYS = (
     "statusLine",
     "model",
     "skipDangerousModePermissionPrompt",
+    "skipAutoPermissionPrompt",
 )
 CLAUDE_GLOBAL_CONFIG = {
     "lspRecommendationDisabled": True,

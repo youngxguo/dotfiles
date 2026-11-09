@@ -15,6 +15,7 @@
     "defaultMode": "bypassPermissions"
   },
   "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true,
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/statusline-command.sh",
