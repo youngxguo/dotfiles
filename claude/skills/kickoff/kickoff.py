@@ -14,12 +14,16 @@ import time
 from pathlib import Path
 
 MODEL_ENV = "ANTHROPIC_MODEL"
+# A worker that grills shapes the task with the user, and the shape is where
+# the deeper cut comes from, so it runs on Fable unless the user names a model.
+SHAPING_MODEL = "fable"
 GRILL = (
     "Before building, settle the shape of this task with the user: invoke the "
     "grilling skill. Cover what a reviewer would need settled: what changes and "
     "what stays, the design choice it turns on, what done looks like, and how it "
     "relates to work already in flight (an open PR, another worker in the same "
-    "area). If the area is one the user hasn't worked in, open with a short "
+    "area). When it touches another person's work in flight, name the conflict "
+    "to the user and keep going. If the area is one the user hasn't worked in, open with a short "
     "explainer of how it works today, built from the real code and UI, before "
     "the first question. Leave choices you can make while implementing to "
     "yourself. Word each "
@@ -337,6 +341,11 @@ def pane_agent(pane_id: str) -> str | None:
     return (got.get("agent") or {}).get("agent")
 
 
+def launch_model(requested_model: str | None, grill: bool) -> str | None:
+    """The user's model, else Fable for a grilling worker, else cseat's policy."""
+    return requested_model or (SHAPING_MODEL if grill else None)
+
+
 def cseat_args(
     subcommand: str,
     to_label: str | None,
@@ -487,7 +496,8 @@ def main(argv: list[str] | None = None) -> int:
     if not brief.strip():
         raise SystemExit("kickoff needs a task")
 
-    use_cseat = preflight_cseat(args.to, args.model, args.size)
+    model = launch_model(args.model, args.grill)
+    use_cseat = preflight_cseat(args.to, model, args.size)
     target, root = source_checkout(args.repo)
     parent, base_oid = starting_point(root, args.base)
     prefix = branch_prefix(root)
@@ -526,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     name = agent_name(slug)
-    launch_claude(pane_id, log, brief, args.to, args.model, use_cseat, args.size)
+    launch_claude(pane_id, log, brief, args.to, model, use_cseat, args.size)
     if not wait_for(lambda: pane_agent(pane_id) == "claude", 60):
         raise SystemExit(
             f"herdr never detected claude in {pane_id}; {workspace_id} is open at {path}"

@@ -71,6 +71,11 @@ class MainTest(unittest.TestCase):
 
 
 class CseatTest(unittest.TestCase):
+    def test_a_grilling_worker_shapes_on_fable_unless_a_model_is_named(self):
+        self.assertEqual(kickoff.launch_model(None, grill=True), "fable")
+        self.assertEqual(kickoff.launch_model("opus", grill=True), "opus")
+        self.assertIsNone(kickoff.launch_model(None, grill=False))
+
     def test_default_launch_leaves_the_model_to_cseat(self):
         self.assertEqual(
             kickoff.cseat_args("run", None, None),

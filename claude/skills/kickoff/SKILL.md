@@ -58,9 +58,9 @@ shape is pinned. Use `--brief-file` for a long task. Use `--repo <name>` when
 the work belongs to another open repository.
 
 Always pass `--size`; use `M` unless the user names a task size. Pass
-`--model` only when the user names a model: otherwise cseat's own policy picks
-it (Opus for every task kind on this machine), which keeps Fable for the
-sessions a person drives. When the user names a Claude account, pass `--to`
+`--model` only when the user names a model. Otherwise a grilling worker runs on
+Fable, because the shape is where the deeper cut comes from, and a `--no-grill`
+worker gets cseat's own policy. When the user names a Claude account, pass `--to`
 instead of leaving the selection only in the brief:
 
 ```bash
@@ -71,8 +71,8 @@ The script checks `cseat` before changing the repository, creates a new
 worktree (via the repo's parent Herdr workspace, which Herdr requires) based on
 the current checkout's committed HEAD, and launches Claude with cseat's
 native seat picker and automatic handoffs. It passes the same task size to the
-preflight and launched session, leaves the model to cseat's policy when
-`--model` is omitted, honors `--to` as a cseat seat name exactly as
+preflight and launched session, launches a grilling worker on Fable and a
+`--no-grill` one on cseat's policy when `--model` is omitted, honors `--to` as a cseat seat name exactly as
 `cseat list` shows it (no aliases, so an unknown name fails before anything
 changes), sends the task (prefixed with the grilling instruction unless `--no-grill`),
 and returns. The brief it sends tells the worker that links in
