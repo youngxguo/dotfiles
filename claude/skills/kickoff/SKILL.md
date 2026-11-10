@@ -101,5 +101,12 @@ The recorded parent is intent, not a stack manager: after merging/deleting or
 rebasing the parent, retarget/rebase the child as appropriate. An existing PR's
 base takes precedence in `<leader>gD`.
 
+When the task is a ticket (Linear or another tracker the session can write),
+start it in the same turn as the launch: assign it to the person you work for
+and move it to In Progress, in one write. A grilling worker can sit for hours
+before it touches the ticket, and the board should show the work as started
+from the moment an agent owns it. Tell the worker in the brief that this is
+done, so it does not repeat it.
+
 When it prints the final line, report that line and stop. Do not inspect the
 agent in the same turn; when it grills, the user answers it in its own pane.
