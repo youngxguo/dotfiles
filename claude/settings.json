@@ -1,6 +1,10 @@
 {
   "model": "fable",
-  "effortLevel": "high",
+  "modelSettings": {
+    "fable": {
+      "effortLevel": "high"
+    }
+  },
   "permissions": {
     "allow": [
       "Bash",
