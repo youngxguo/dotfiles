@@ -80,7 +80,6 @@ fi
 
 input=$(cat)
 
-session_cost=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('cost', {}).get('total_cost_usd', 0) or 0)")
 used_pct=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); v=d.get('context_window',{}).get('used_percentage'); print(v if v is not None else '')")
 model=$(echo "$input" | python3 -c "
 import sys, json
@@ -91,6 +90,15 @@ if isinstance(m, dict):
 else:
     display = str(m)
 print(display)
+")
+# effort.level is present only on models that take an effort setting.
+thinking=$(echo "$input" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if (d.get('thinking') or {}).get('enabled') is False:
+    print('no thinking')
+else:
+    print((d.get('effort') or {}).get('level') or '')
 ")
 
 # Which subscription the session is on. Every account runs this one statusline
@@ -136,8 +144,6 @@ print(email)
 EOF
 
 CLAUDE_DIR="$HOME/.claude"
-TRACKING_DIR="$CLAUDE_DIR/cost-tracking"
-mkdir -p "$TRACKING_DIR"
 
 # Claude Code cancels an in-flight statusline by killing its process group, and
 # a new update cancels the running one whenever an agent is busy. Job control
@@ -153,49 +159,7 @@ refresh_if_stale() {
   fi
 }
 
-# Claude Code's cost.total_cost_usd is per CLI process, not per conversation: it
-# does not reset on /clear or /new; only session_id rotates.
 session_id=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))")
-if [ -n "$session_id" ]; then
-  BASELINE_DIR="$TRACKING_DIR/session-baselines"
-  mkdir -p "$BASELINE_DIR"
-  baseline_file="$BASELINE_DIR/$session_id"
-  if [ ! -f "$baseline_file" ]; then
-    printf '%s' "$session_cost" > "$baseline_file"
-    find "$BASELINE_DIR" -type f -mtime +7 -delete 2>/dev/null
-  fi
-  baseline=$(cat "$baseline_file" 2>/dev/null)
-  session_cost=$(python3 -c "print(max(0.0, float('$session_cost') - float('$baseline' or 0)))")
-fi
-
-CCUSAGE_REFRESH="$CLAUDE_DIR/ccusage-refresh.sh"
-if [ -x "$CCUSAGE_REFRESH" ]; then
-  MONTHLY_BUDGET=1500
-  if [ -f "$CLAUDE_DIR/monthly-budget" ]; then
-    MONTHLY_BUDGET=$(cat "$CLAUDE_DIR/monthly-budget" | tr -d '[:space:]')
-  fi
-
-  DAILY_BUDGET=$(python3 -c "import calendar,datetime; d=datetime.date.today(); print(round($MONTHLY_BUDGET / calendar.monthrange(d.year, d.month)[1], 2))" 2>/dev/null || echo 50)
-
-  CACHE="$TRACKING_DIR/ccusage-cache.json"
-  read daily_cost monthly_cost <<EOF
-$(python3 -c "
-import json
-try:
-    d = json.load(open('$CACHE'))
-    print(d.get('daily', 0.0), d.get('monthly', 0.0))
-except Exception:
-    print(0.0, 0.0)
-")
-EOF
-  refresh_if_stale "$CACHE" 60 "$CCUSAGE_REFRESH"
-fi
-
-fmt_cost() {
-  python3 -c "print('%.2f' % float('${1}'))"
-}
-
-session_cost_fmt=$(fmt_cost "$session_cost")
 
 build_bar() {
   pct=$1
@@ -243,6 +207,7 @@ printf "\033[01;%sm%s\033[00m" "$account_color" "$account"
 [ -n "$account_email" ] && printf " \033[02m%s\033[00m" "$account_email"
 printf " | "
 printf "\033[01;35m%s\033[00m" "$model"
+[ -n "$thinking" ] && printf " \033[35m%s\033[00m" "$thinking"
 
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
 if [ -n "$workspace_dir" ] && [ -d "$workspace_dir" ]; then
@@ -447,22 +412,6 @@ if s >= 0:
   if [ -n "$elapsed_fmt" ]; then
     printf " | \033[01;33m⏱ %s\033[00m" "$elapsed_fmt"
   fi
-fi
-
-printf " | \033[01;36msession:\$%s\033[00m" "$session_cost_fmt"
-
-if [ -x "$CCUSAGE_REFRESH" ]; then
-  daily_cost_fmt=$(fmt_cost "$daily_cost")
-  monthly_cost_fmt=$(fmt_cost "$monthly_cost")
-
-  daily_budget_int=$(python3 -c "print(int(float('$DAILY_BUDGET')))")
-  daily_pct=$(python3 -c "print(float('$daily_cost') / float('$DAILY_BUDGET') * 100)")
-  daily_bar=$(build_bar "$daily_pct")
-  printf " | \$%s/\$%s today %s" "$daily_cost_fmt" "$daily_budget_int" "$daily_bar"
-
-  monthly_pct=$(python3 -c "print(float('$monthly_cost') / float('$MONTHLY_BUDGET') * 100)")
-  monthly_bar=$(build_bar "$monthly_pct")
-  printf " | \$%s/\$%s mo %s" "$monthly_cost_fmt" "$MONTHLY_BUDGET" "$monthly_bar"
 fi
 
 if [ -n "$used_pct" ]; then
