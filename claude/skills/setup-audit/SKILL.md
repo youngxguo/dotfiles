@@ -114,7 +114,7 @@ failing (the launchd logs show it).
 so list them through a headless session on that login):
 
 ```bash
-env -u CLAUDE_CONFIG_DIR claude -p --dangerously-skip-permissions --model claude-opus-5-5 \
+env -u CLAUDE_CONFIG_DIR claude -p --dangerously-skip-permissions --model fable \
   'Load the RemoteTrigger tool and list every routine: name, enabled, cron, environment, last run time and how it ended. Reply with a table only.'
 ```
 

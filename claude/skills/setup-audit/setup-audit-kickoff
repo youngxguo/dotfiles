@@ -45,14 +45,14 @@ brief="Daily setup audit, started by the setup-audit job on this machine (due 9a
 Run /setup-audit: read every surface the skill lists, change nothing anywhere (no commit on this branch either), and end with the ranked report the skill describes, written to its reports directory and printed in full. Do not close this worktree; the report is read here."
 
 if ((dry_run)); then
-  echo "dry run: would kick off $slug in $repo (cseat picks the seat, opus, size M) from master"
+  echo "dry run: would kick off $slug in $repo (cseat picks the seat, fable, size M) from master"
   exit 0
 fi
 
 # Stamped before the kickoff: a failed kickoff is logged for a hand run, never
 # retried, so one day never gets two workers.
 touch "$stamp"
-if python3 "$kickoff" --no-grill --model opus --size M --base master "$slug" "$brief"; then
+if python3 "$kickoff" --no-grill --model fable --size M --base master "$slug" "$brief"; then
   echo "== $(date '+%F %T') done"
 else
   status=$?
