@@ -757,6 +757,7 @@ CLAUDE_SETTINGS_KEYS = (
     "permissions",
     "statusLine",
     "model",
+    "effortLevel",
     "skipDangerousModePermissionPrompt",
     "skipAutoPermissionPrompt",
 )
