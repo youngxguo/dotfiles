@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -441,15 +442,21 @@ def launch_claude(
 ) -> None:
     """Start Claude on the brief with cseat handoffs, or directly when cseat is
     absent. The brief goes on the command line, never typed in after: a claude
-    still starting up can drop typed text. The leading space keeps that line
-    out of shell history (zsh's HIST_IGNORE_SPACE), where it would bury real
-    commands in Ctrl-R."""
+    still starting up can drop typed text. The shell reads it from a file the
+    same line deletes, because a terminal refuses a typed line over its input
+    limit (1,024 bytes on macOS) and a brief's paragraph can be longer. The
+    leading space keeps that line out of shell history (zsh's
+    HIST_IGNORE_SPACE), where it would bury real commands in Ctrl-R."""
     launcher = (
         shlex.join(cseat_args("run", to_label, requested_model, task_size))
         if use_cseat
         else plain_claude_command(requested_model)
     )
-    herdr("pane", "run", pane_id, f" {launcher} {shlex.quote(brief)}")
+    handle, path = tempfile.mkstemp(prefix="kickoff-brief-", suffix=".md")
+    with os.fdopen(handle, "w") as brief_file:
+        brief_file.write(brief)
+    path = shlex.quote(path)
+    herdr("pane", "run", pane_id, f' {launcher} "$(cat {path} && rm {path})"')
     log(f"  ran: {launcher} with the brief")
 
 

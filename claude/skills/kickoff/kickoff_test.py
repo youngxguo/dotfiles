@@ -1,3 +1,5 @@
+import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -163,17 +165,30 @@ class CseatTest(unittest.TestCase):
                 kickoff.preflight_cseat("yc3", None)
 
     def test_launch_runs_cseat_in_the_pane(self):
+        # A paragraph longer than a terminal's typed-line limit, as the
+        # grilling instruction is.
+        brief = "it's\nthe task\n" + "long " * 400 + "end"
         with mock.patch.object(kickoff, "herdr") as herdr:
             kickoff.launch_claude(
-                "w1:p2", lambda _: None, "it's\nthe task", "yc3", "opus", True, "S"
+                "w1:p2", lambda _: None, brief, "yc3", "opus", True, "S"
             )
-        herdr.assert_called_once_with(
-            "pane",
-            "run",
-            "w1:p2",
-            # The leading space keeps the launch out of shell history.
-            " cseat run --size S --model opus --handoff --seat yc3 'it'\"'\"'s\nthe task'",
-        )
+        herdr.assert_called_once()
+        self.assertEqual(herdr.call_args.args[:3], ("pane", "run", "w1:p2"))
+        command = herdr.call_args.args[3]
+        # The leading space keeps the launch out of shell history.
+        launcher = " cseat run --size S --model opus --handoff --seat yc3 "
+        self.assertTrue(command.startswith(launcher), command)
+        self.assertNotIn("\n", command)
+        self.assertNotIn("long", command)
+        argument = command[len(launcher) :]
+        brief_file = re.search(r"cat (\S+)", argument).group(1)
+        self.assertTrue(os.path.exists(brief_file))
+        # What the pane's shell hands cseat as the prompt.
+        prompt = subprocess.run(
+            ["sh", "-c", f"printf %s {argument}"], capture_output=True, text=True
+        ).stdout
+        self.assertEqual(prompt, brief)
+        self.assertFalse(os.path.exists(brief_file))
 
 
 class AgentNameTest(unittest.TestCase):
