@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -505,6 +506,42 @@ def apply_links(links):
     return applied
 
 
+def install_state_dir():
+    return HOME / ".local/state/dotfiles"
+
+
+def reconcile_repo_links():
+    state_path = install_state_dir() / "links.json"
+    previous = load_json_object(state_path, "dotfiles link state")
+    if previous is None:
+        return
+
+    home = HOME.resolve()
+    desired = set()
+    current = {}
+    for _, source, path in managed_links():
+        target = path.parent.resolve() / path.name
+        if not target.is_relative_to(home):
+            continue
+        source = str(source.resolve())
+        desired.add(str(target))
+        if target.is_symlink() and os.readlink(target) == source:
+            current[str(target)] = source
+
+    for path in sorted(previous.keys() - desired):
+        target = Path(path)
+        if (
+            target.is_relative_to(home)
+            and target.parent.resolve() / target.name == target
+            and target.is_symlink()
+            and os.readlink(target) == previous[path]
+        ):
+            target.unlink()
+            print(f"removed retired dotfiles link: {target}")
+
+    write_json_object(state_path, current)
+
+
 def install_homebrew():
     print("installing homebrew")
     if VERIFY_MODE:
@@ -817,8 +854,68 @@ def load_json_object(path, label):
 
 
 def write_json_object(path, data):
+    content = (json.dumps(data, indent=2) + "\n").encode("utf-8")
+    if not path.is_symlink() and path.is_file():
+        if path.read_bytes() == content:
+            return
+        mode = path.stat().st_mode & 0o777
+    else:
+        mode = 0o600
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    fd, name = tempfile.mkstemp(dir=path.parent)
+    pending = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as tmp:
+            os.fchmod(tmp.fileno(), mode)
+            tmp.write(content)
+        pending.replace(path)
+    finally:
+        pending.unlink(missing_ok=True)
+
+
+def config_digest(value):
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def reconcile_json_settings(target, values, *, children=None):
+    settings = load_json_object(target, "dotfiles settings")
+    if settings is None:
+        return
+    target_path = target.parent.resolve() / target.name
+    state_path = (
+        install_state_dir() / "json" / f"{config_digest(str(target_path))}.json"
+    )
+    previous = load_json_object(state_path, "dotfiles settings state")
+
+    sections = {"": values, **(children or {})}
+    current = {}
+    changed = target.is_symlink()
+    for name, desired in sections.items():
+        old = (previous or {}).get(name, {})
+        live = settings if not name else settings.get(name, {})
+        if not isinstance(live, dict):
+            print(f"skipping {target} {name}: expected a JSON object")
+            current[name] = old
+            continue
+        if isinstance(old, dict):
+            for key in old.keys() - desired.keys():
+                if key in live and config_digest(live[key]) == old[key]:
+                    del live[key]
+                    changed = True
+        for key, value in desired.items():
+            if key not in live or config_digest(live[key]) != config_digest(value):
+                live[key] = value
+                changed = True
+        if name and live:
+            settings[name] = live
+        current[name] = {key: config_digest(value) for key, value in desired.items()}
+
+    if changed:
+        write_json_object(target, settings)
+        print(f"reconciled dotfiles settings in {target}")
+    if previous is not None:
+        write_json_object(state_path, current)
 
 
 def merge_claude_global_config():
@@ -827,12 +924,7 @@ def merge_claude_global_config():
         target = claude_global_config_path(config_dir)
         if target.is_symlink():
             raise RuntimeError(f"refusing to overwrite symlink: {target}")
-        config = load_json_object(target, "claude global config")
-        if config is None:
-            continue
-        config.update(CLAUDE_GLOBAL_CONFIG)
-        write_json_object(target, config)
-        print(f"merged claude global config into {target}")
+        reconcile_json_settings(target, CLAUDE_GLOBAL_CONFIG)
 
 
 def install_claude_herdr_skill():
@@ -882,24 +974,15 @@ def merge_claude_settings():
 def merge_claude_settings_into(template, target, keys):
     if target.is_symlink():
         raise RuntimeError(f"refusing to overwrite symlink: {target}")
-    settings = load_json_object(target, "claude settings")
-    if settings is None:
+    hooks = template.get("hooks", {})
+    if not isinstance(hooks, dict):
+        print("skipping Claude settings merge: repo hooks must be a JSON object")
         return
-
-    for key in keys:
-        if key in template:
-            settings[key] = template[key]
-
-    hooks = settings.setdefault("hooks", {})
-    if isinstance(hooks, dict):
-        template_hooks = template.get("hooks", {})
-        for event, groups in template_hooks.items():
-            hooks[event] = groups
-    else:
-        print(f"skipping claude hooks merge: {target} hooks is not a JSON object")
-
-    write_json_object(target, settings)
-    print(f"merged claude settings into {target}")
+    reconcile_json_settings(
+        target,
+        {key: template[key] for key in keys if key in template},
+        children={"hooks": hooks},
+    )
 
 
 def cseat_config_path():
@@ -1300,15 +1383,7 @@ def merge_pi_settings():
         return
     if target.is_symlink() and target.resolve() != source.resolve():
         raise RuntimeError(f"refusing to overwrite symlink: {target}")
-    settings = load_json_object(target, "pi settings")
-    if settings is None:
-        return
-    if target.is_symlink():
-        # Earlier installs linked the file; keep the state Pi wrote through it.
-        target.unlink()
-    settings.update(template)
-    write_json_object(target, settings)
-    print(f"merged pi settings into {target}")
+    reconcile_json_settings(target, template)
 
 
 def link_pi_claude_synced_skills():
@@ -1474,6 +1549,7 @@ def run_install_flow():
     install_pi()
     install_neovim()
     install_repo_hooks()
+    reconcile_repo_links()
     print("Done")
 
 
@@ -1587,7 +1663,11 @@ def main():
         verify_idempotent()
         return
     UPDATE_PLUGINS = args.update_plugins
-    run_install_flow()
+    lock = install_state_dir() / "install.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a") as install_lock:
+        fcntl.flock(install_lock.fileno(), fcntl.LOCK_EX)
+        run_install_flow()
 
 
 if __name__ == "__main__":

@@ -9,3 +9,5 @@ everything should be agnostic to macos and linux
 everything should also try to be agnostic to the work environment. this is for personal but also professional work. no professional work configs should leak into this repo for example.
 
 we should aim to be as native as possible across implementations. custom implementations are more to maintain and we should be wary of them.
+
+prefer native config layers and keep repo-owned settings declarative. retire config by removing its declaration and letting the installer reconcile what it owns. keep machine-local ownership records out of the repo.
