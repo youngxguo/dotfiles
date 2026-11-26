@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # install.py links this to ~/.local/bin/setup-audit-kickoff and schedules it at
 # 09:00 and every ten minutes (a launchd agent on macOS, a systemd user timer on
-# Linux). It kicks off one /setup-audit pass per day as a Herdr worker in the
-# dotfiles repository (the audit belongs to the machine, not to any project) on
-# whichever seat cseat picks. A tick before 09:00, after today's pass, without
-# Herdr or without network exits quietly, so a machine asleep at 09:00 runs the
+# Linux). It kicks off one /setup-audit pass per day in an Orca worktree of the
+# dotfiles repository (the audit belongs to the machine, not to any project).
+# Orca's Claude command picks the login and the model, and Orca's own setting
+# picks chat or terminal. A tick before 09:00, after today's pass, without
+# Orca or without network exits quietly, so a machine asleep at 09:00 runs the
 # pass at its first real wake.
 set -uo pipefail
 
 script=$(realpath "$0")
 repo=$(git -C "$(dirname "$script")" rev-parse --show-toplevel) || { echo "== $(date '+%F %T') cannot find the dotfiles repo from $script"; exit 1; }
-kickoff=$repo/claude/skills/kickoff/kickoff.py
+orca=$(command -v orca || echo /Applications/Orca.app/Contents/Resources/bin/orca)
 state=$HOME/.local/state/setup-audit
 due_hour=9
 today=$(date +%F)
@@ -34,7 +35,7 @@ note_once() {
 
 cd "$repo" || { echo "== $(date '+%F %T') cannot cd to $repo"; exit 1; }
 
-herdr workspace list >/dev/null 2>&1 || { note_once herdr "herdr is not running; waiting for it"; exit 0; }
+"$orca" status --json 2>/dev/null | python3 -c 'import json, sys; sys.exit(not json.load(sys.stdin)["result"]["runtime"]["reachable"])' 2>/dev/null || { note_once orca "Orca is not running; waiting for it"; exit 0; }
 nc -z -w 3 github.com 443 >/dev/null 2>&1 || { note_once net "no network yet; waiting for it"; exit 0; }
 
 echo "== $(date '+%F %T') start"
@@ -45,14 +46,25 @@ brief="Daily setup audit, started by the setup-audit job on this machine (due 9a
 Run /setup-audit: read every surface the skill lists, change nothing anywhere (no commit on this branch either), and end with the ranked report the skill describes, written to its reports directory and printed in full. Do not close this worktree; the report is read here."
 
 if ((dry_run)); then
-  echo "dry run: would kick off $slug in $repo (cseat picks the seat, fable, size M) from master"
+  echo "dry run: would kick off $slug in Orca, in $repo from master"
   exit 0
 fi
 
 # Stamped before the kickoff: a failed kickoff is logged for a hand run, never
 # retried, so one day never gets two workers.
 touch "$stamp"
-if python3 "$kickoff" --no-grill --model fable --size M --base master "$slug" "$brief"; then
+if "$orca" worktree create --repo "path:$repo" --name "$slug" --no-parent --base-branch master --agent claude --prompt "$brief" --json | python3 -c '
+import json, sys
+
+answer = json.load(sys.stdin)
+result = answer.get("result") or {}
+started = ((result.get("launch") or {}).get("outcome") or {}).get("kind")
+if not (answer.get("ok") and started):
+    error = answer.get("error") or "Claude did not start"
+    sys.exit(f"orca: {error}")
+path = (result.get("worktree") or {}).get("path")
+print(f"{started} session at {path}")
+'; then
   echo "== $(date '+%F %T') done"
 else
   status=$?
