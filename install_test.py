@@ -100,6 +100,57 @@ class ConfigOwnershipTest(unittest.TestCase):
                 },
             )
 
+    def test_orca_settings_apply_once_and_retire_only_unchanged_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            repo = root / "repo"
+            source = repo / "orca/settings.json"
+            desired = {"defaultTuiAgent": "claude", "nativeChatQueueFollowUps": False}
+            install.write_json_object(source, desired)
+            live = {
+                "defaultTuiAgent": "codex",
+                "nativeChatQueueFollowUps": True,
+                "agentCmdOverrides": {"claude": "local-claude"},
+            }
+            runtime = object()
+
+            def update_runtime(_runtime, _method, updates):
+                live.update(updates)
+                return live
+
+            with (
+                mock.patch.object(install, "HOME", home),
+                mock.patch.object(install, "REPO_ROOT", repo),
+                mock.patch.object(install, "orca_data_dir", return_value=home / "orca"),
+                mock.patch.object(
+                    install, "read_or_start_orca_settings", return_value=(runtime, live)
+                ),
+                mock.patch.object(
+                    install, "orca_settings_request", side_effect=update_runtime
+                ) as request,
+            ):
+                install.merge_orca_settings()
+                install.merge_orca_settings()
+                request.assert_called_once_with(runtime, "settings.update", desired)
+
+                live["defaultTuiAgent"] = "pi"
+                source.unlink()
+                install.merge_orca_settings()
+                install.merge_orca_settings()
+
+            self.assertEqual(
+                request.call_args_list,
+                [
+                    mock.call(runtime, "settings.update", desired),
+                    mock.call(
+                        runtime, "settings.update", {"nativeChatQueueFollowUps": True}
+                    ),
+                ],
+            )
+            self.assertEqual(live["defaultTuiAgent"], "pi")
+            self.assertEqual(live["agentCmdOverrides"], {"claude": "local-claude"})
+
 
 class PiConfigInstallTest(unittest.TestCase):
     def test_install_pi_merges_settings_and_keeps_runtime_state(self):
