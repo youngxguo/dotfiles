@@ -35,6 +35,72 @@ class RepoHooksInstallTest(unittest.TestCase):
         )
 
 
+class ConfigOwnershipTest(unittest.TestCase):
+    def test_retired_links_prune_only_unchanged_repo_links(self):
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch.object(install, "managed_links") as managed,
+        ):
+            root = Path(tmpdir)
+            home = root / "home"
+            source = root / "repo-config"
+            source.touch()
+            retired, replaced, active = (
+                home / name for name in ("old", "local", "new")
+            )
+            managed.return_value = [
+                ("config", source, target) for target in (retired, replaced, active)
+            ]
+
+            with mock.patch.object(install, "HOME", home):
+                install.apply_links(install.links_for("config"))
+                install.reconcile_repo_links()
+                replaced.unlink()
+                replaced.write_text("local")
+                removed_source = root / "removed-config"
+                source.rename(removed_source)
+                managed.return_value = [("config", removed_source, active)]
+                install.apply_links(install.links_for("config"))
+                install.reconcile_repo_links()
+                install.reconcile_repo_links()
+
+            self.assertFalse(retired.is_symlink())
+            self.assertEqual(replaced.read_text(), "local")
+            self.assertEqual(active.resolve(), removed_source.resolve())
+
+    def test_retired_settings_keep_local_changes_and_unmanaged_hook_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            target = home / ".claude/settings.json"
+            target.parent.mkdir()
+            target.write_text('{"theme":"local","hooks":{"SessionStart":[]}}')
+            original = {
+                "model": "example",
+                "statusLine": {"type": "command"},
+                "hooks": {"Stop": []},
+            }
+            keys = ("model", "statusLine")
+
+            with mock.patch.object(install, "HOME", home):
+                install.merge_claude_settings_into(original, target, keys)
+                settings = json.loads(target.read_text())
+                settings["model"] = "locally changed"
+                target.write_text(json.dumps(settings))
+                install.merge_claude_settings_into({}, target, keys)
+                after = target.read_bytes()
+                install.merge_claude_settings_into({}, target, keys)
+
+            self.assertEqual(target.read_bytes(), after)
+            self.assertEqual(
+                json.loads(after),
+                {
+                    "theme": "local",
+                    "model": "locally changed",
+                    "hooks": {"SessionStart": []},
+                },
+            )
+
+
 class PiConfigInstallTest(unittest.TestCase):
     def test_install_pi_merges_settings_and_keeps_runtime_state(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-pi-test-") as tmpdir:
