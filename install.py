@@ -1386,6 +1386,29 @@ def merge_pi_settings():
     reconcile_json_settings(target, template)
 
 
+def merge_orca_keybindings():
+    source = REPO_ROOT / "orca/keybindings.json"
+    target = HOME / ".orca/keybindings.json"
+    template = load_json_object(source, "Orca keybindings")
+    if template is None:
+        return
+    if target.is_symlink():
+        raise RuntimeError(f"refusing to overwrite symlink: {target}")
+    bindings = template.get("keybindings", {})
+    if not isinstance(bindings, dict):
+        print("skipping Orca keybindings merge: repo keybindings must be a JSON object")
+        return
+
+    # Orca also accepts flat files and ignores root bindings once a section exists.
+    live = load_json_object(target, "Orca keybindings")
+    if live is None:
+        return
+    if live and "keybindings" not in live:
+        reconcile_json_settings(target, bindings, children={"keybindings": {}})
+    else:
+        reconcile_json_settings(target, {}, children={"keybindings": bindings})
+
+
 def link_pi_claude_synced_skills():
     """Expose one current Claude synced bundle to Pi without recursive collisions."""
     synced = HOME / ".claude/skills/synced"
@@ -1547,6 +1570,7 @@ def run_install_flow():
     install_setup_audit_job()
     install_codex()
     install_pi()
+    merge_orca_keybindings()
     install_neovim()
     install_repo_hooks()
     reconcile_repo_links()
