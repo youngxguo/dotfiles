@@ -10,12 +10,15 @@ import plistlib
 import re
 import shlex
 import shutil
+import socket
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
@@ -1409,6 +1412,178 @@ def merge_orca_keybindings():
         reconcile_json_settings(target, {}, children={"keybindings": bindings})
 
 
+ORCA_SETTING_DEFAULTS = {
+    "defaultTuiAgent": None,
+    "nativeChatQueueFollowUps": True,
+}
+
+
+def orca_data_dir():
+    if configured := os.environ.get("ORCA_USER_DATA_PATH"):
+        return Path(configured).expanduser()
+    if sys.platform == "darwin":
+        return HOME / "Library/Application Support/orca"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "orca"
+
+
+def orca_runtime_endpoint(data_dir):
+    metadata_path = data_dir / "orca-runtime.json"
+    metadata_stat = metadata_path.lstat()
+    uid = os.getuid()
+    if (
+        not stat.S_ISREG(metadata_stat.st_mode)
+        or metadata_stat.st_uid != uid
+        or metadata_stat.st_mode & 0o077
+    ):
+        raise RuntimeError("Orca runtime metadata is not private to this user")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    endpoint = next(
+        (item["endpoint"] for item in metadata["transports"] if item["kind"] == "unix"),
+        None,
+    )
+    if not endpoint or not Path(endpoint).is_absolute():
+        raise RuntimeError("Orca did not publish a local Unix socket")
+    endpoint = Path(endpoint)
+    directory = endpoint.parent.lstat()
+    listener = endpoint.lstat()
+    if (
+        not stat.S_ISDIR(directory.st_mode)
+        or directory.st_uid != uid
+        or directory.st_mode & 0o022
+        or not stat.S_ISSOCK(listener.st_mode)
+        or listener.st_uid != uid
+    ):
+        raise RuntimeError(
+            "Orca runtime socket is not owned by this user in a trusted directory"
+        )
+    return endpoint, metadata["authToken"]
+
+
+def orca_settings_request(runtime, method, params=None):
+    # Use Orca's local JSONL RPC so the running app owns the profile write.
+    endpoint, token = runtime
+    request = {
+        "id": str(uuid4()),
+        "authToken": token,
+        "method": method,
+        "params": params,
+    }
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(10)
+        connection.connect(str(endpoint))
+        connection.sendall((json.dumps(request) + "\n").encode("utf-8"))
+        with connection.makefile("rb") as response:
+            reply = json.loads(response.readline(2 * 1024 * 1024))
+    if (
+        not isinstance(reply, dict)
+        or not reply.get("ok")
+        or reply.get("id") != request["id"]
+    ):
+        raise RuntimeError(f"Orca did not accept {method}")
+    settings = reply["result"]["settings"]
+    if not isinstance(settings, dict):
+        raise RuntimeError("Orca returned invalid settings")
+    return settings
+
+
+def read_or_start_orca_settings(data_dir):
+    def read_settings():
+        runtime = orca_runtime_endpoint(data_dir)
+        return runtime, orca_settings_request(runtime, "settings.get")
+
+    try:
+        return read_settings()
+    except (FileNotFoundError, ConnectionRefusedError):
+        command = shutil.which("orca")
+        if command is None and sys.platform == "darwin":
+            bundled_cli = Path("/Applications/Orca.app/Contents/Resources/bin/orca")
+            if bundled_cli.is_file():
+                command = str(bundled_cli)
+        if command is None:
+            return None
+        subprocess.run(
+            [command, "open", "--environment", "local"],
+            check=True,
+            timeout=45,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return read_settings()
+
+
+def orca_profile_id(data_dir):
+    index_path = data_dir / "orca-profile-index.json"
+    try:
+        return json.loads(index_path.read_text(encoding="utf-8"))["activeProfileId"]
+    except FileNotFoundError:
+        return "local-default"
+
+
+def merge_orca_settings():
+    if VERIFY_MODE:
+        return
+    desired = load_json_object(REPO_ROOT / "orca/settings.json", "Orca settings")
+    if desired is None:
+        return
+    if (
+        desired.keys() - ORCA_SETTING_DEFAULTS.keys()
+        or not isinstance(desired.get("defaultTuiAgent"), (str, type(None)))
+        or not isinstance(desired.get("nativeChatQueueFollowUps", True), bool)
+    ):
+        print(
+            "skipping Orca settings: repo settings contain unsupported keys or values"
+        )
+        return
+
+    data_dir = orca_data_dir()
+    try:
+        profile = orca_profile_id(data_dir)
+        identity = config_digest([str(data_dir.resolve()), profile])
+        state_path = install_state_dir() / "orca" / f"{identity}.json"
+        previous = load_json_object(state_path, "Orca settings ownership")
+        if previous is None or not (desired or previous):
+            return
+        current = read_or_start_orca_settings(data_dir)
+        if current is None:
+            print(
+                "skipping Orca settings: Orca is not installed or its CLI is not on PATH"
+            )
+            return
+        if orca_profile_id(data_dir) != profile:
+            raise RuntimeError("the active Orca profile changed during install")
+        runtime, live = current
+        if ORCA_SETTING_DEFAULTS.keys() - live.keys():
+            raise RuntimeError(
+                "the installed Orca version does not expose these settings"
+            )
+        updates = {key: value for key, value in desired.items() if live[key] != value}
+        for key in ORCA_SETTING_DEFAULTS.keys() - desired.keys():
+            if previous.get(key) == config_digest(live[key]):
+                default = ORCA_SETTING_DEFAULTS[key]
+                if live[key] != default:
+                    updates[key] = default
+        if updates:
+            applied = orca_settings_request(runtime, "settings.update", updates)
+            if any(applied.get(key) != value for key, value in updates.items()):
+                raise RuntimeError("Orca did not apply all requested settings")
+            print("reconciled dotfiles settings in Orca")
+        write_json_object(
+            state_path, {key: config_digest(value) for key, value in desired.items()}
+        )
+    except RuntimeError as exc:
+        print(f"warning: unable to apply Orca settings ({exc}); continuing")
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        subprocess.SubprocessError,
+    ) as exc:
+        print(
+            f"warning: unable to apply Orca settings ({type(exc).__name__}); continuing"
+        )
+
+
 def link_pi_claude_synced_skills():
     """Expose one current Claude synced bundle to Pi without recursive collisions."""
     synced = HOME / ".claude/skills/synced"
@@ -1571,6 +1746,7 @@ def run_install_flow():
     install_codex()
     install_pi()
     merge_orca_keybindings()
+    merge_orca_settings()
     install_neovim()
     install_repo_hooks()
     reconcile_repo_links()

@@ -1,0 +1,4 @@
+{
+  "defaultTuiAgent": "claude",
+  "nativeChatQueueFollowUps": false
+}
