@@ -1,0 +1,7 @@
+{
+  "keybindings": {
+    "tab.nextAllTypes": ["Ctrl+Tab", "Mod+Shift+BracketRight"],
+    "tab.previousAllTypes": ["Ctrl+Shift+Tab", "Mod+Shift+BracketLeft"],
+    "tab.previousRecent": []
+  }
+}
