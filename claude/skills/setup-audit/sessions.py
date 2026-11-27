@@ -47,8 +47,29 @@ def local(seconds):
     return dt.datetime.fromtimestamp(seconds).strftime("%m-%d %H:%M")
 
 
+# Orca sends this itself after an app restart; nobody typed it.
+ORCA_RESTART = "Orca restarted. Resume the original unfinished user task"
+
+
+def prompt_text(record):
+    """A user record's prompt, or None for a record that carries none. A
+    terminal session writes a prompt as a string. Orca chat, and a terminal
+    prompt with an attachment, write a list of blocks; so do tool results and
+    the interrupt notice, which have no promptSource."""
+    content = (record.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return content
+    if not record.get("promptSource") or not isinstance(content, list):
+        return None
+    return "\n".join(
+        block.get("text") or ""
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
 def classify(text):
-    """(kind, text) for a user record's string content."""
+    """(kind, text) for a prompt."""
     body = text.strip()
     if body.startswith("<command-name>"):
         name = re.search(r"<command-name>(.*?)</command-name>", body, re.S)
@@ -59,14 +80,13 @@ def classify(text):
         )
     if body.startswith("This session is being continued"):
         return "compaction", ""
-    if body.startswith("<pasted_content"):
-        inner = re.sub(r"^<pasted_content[^>]*>\s*", "", body)
-        if inner.startswith("This branch starts from"):
-            return "kickoff", inner
-        if inner.startswith("Handoff from"):
-            return "handoff", inner
-        return "typed", body
-    if body.startswith("<"):
+    # A brief typed into a terminal arrives as a paste; Orca sends it bare.
+    inner = re.sub(r"^<pasted_content[^>]*>\s*", "", body)
+    if inner.startswith("This branch starts from"):
+        return "kickoff", inner
+    if inner.startswith("Handoff from"):
+        return "handoff", inner
+    if body.startswith(ORCA_RESTART) or (body.startswith("<") and inner == body):
         return None, ""
     return "typed", body
 
@@ -96,8 +116,8 @@ def read_transcript(path, since):
         out["stamps"].append(epoch(stamp))
         if kind != "user" or record.get("isMeta"):
             continue
-        content = (record.get("message") or {}).get("content")
-        if not isinstance(content, str):
+        content = prompt_text(record)
+        if content is None:
             continue
         switch = MODEL_SWITCH.search(content)
         if switch:

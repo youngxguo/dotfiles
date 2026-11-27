@@ -1,6 +1,6 @@
 ---
 name: setup-audit
-description: "Daily read-only audit of the person's actual work (their prompts across every session, the PRs and commits it produced, how they drove Herdr) and of the setup it runs through (Claude seats, Herdr, GitHub, Slack, Linear, cloud routines, launchd jobs, dotfiles, the laptop), ending in a ranked list of improvements. Triggers: 'audit my setup', 'what is wrong with my setup', '/setup-audit'."
+description: "Daily read-only audit of the person's actual work (their prompts across every session, the PRs and commits it produced, how they drove Orca and Herdr) and of the setup it runs through (Claude seats, Orca, Herdr, GitHub, Slack, Linear, cloud routines, launchd jobs, dotfiles, the laptop), ending in a ranked list of improvements. Triggers: 'audit my setup', 'what is wrong with my setup', '/setup-audit'."
 ---
 
 # Setup Audit
@@ -13,8 +13,8 @@ to steer by hand. That's where most of the cost is: a fan-out that overlaps
 itself, a correction typed for the fifth time, a PR closed after an evening of
 work.
 
-**The setup** is everything the work runs through: the Claude seats, Herdr
-workers, GitHub, Slack, Linear, the cloud routines, launchd jobs, dotfiles and
+**The setup** is everything the work runs through: the Claude seats, Orca and
+Herdr workers, GitHub, Slack, Linear, the cloud routines, launchd jobs, dotfiles and
 this machine. It drifts a little every day. A seat sits idle while another runs
 dry, a worker outlives its PR, a job fails quietly, a branch waits on nobody.
 
@@ -49,15 +49,17 @@ history and every session's transcript, leaves out the sessions tools start,
 and prints the window's numbers (sessions, peak concurrency, output by model,
 compactions, transcripts that are gone), then each session: its seats, topics,
 PRs, output, the models the person switched to, and every prompt marked
-`typed`, `kickoff`, `handoff` or `command`. Read all of it, not a sample.
+`typed`, `kickoff`, `handoff` or `command`. It leaves out the prompt Orca sends
+itself after a restart. Read all of it, not a sample.
 
-Not every `typed` prompt is the person's. A dispatcher session or devbot typing
-into a pane through Herdr leaves the same record; those read like a brief about
-the person ("Young says go…", "Reply with the single word…"), so count them
-apart. Name the sessions whose transcript is gone.
+Not every `typed` prompt is the person's. A job, a dispatcher session or devbot
+starting a worker through Orca, or typing into a pane through Herdr, leaves
+the same record as the person's own prompt; those read like a brief ("Daily
+setup audit, started by…", "Young says go…", "Reply with the single word…"),
+so count them apart. Name the sessions whose transcript is gone.
 
 **What it produced.** Use `gh search prs --author=@me --created=">=<window
-start>"` across every org, not only the repos Herdr has open, and note each
+start>"` across every org, not only the repos Orca or Herdr has open, and note each
 PR's state. For every PR closed unmerged, find the prompt that closed it and
 the ones before it. Also read `git log --author` since the window start in
 every repository under `~/Documents/code` (once per repository: sibling
@@ -66,11 +68,13 @@ and the Slack messages they sent (`from:me`, leaving out this audit's own DMs).
 When the person files work by tagging themselves in Slack, check each of those
 asks against what shipped.
 
-**How they drove Herdr.** Look at how many workers ran at once and what each
-was for, how the person addressed workers ("herdr 2"), handoffs between
-workers, kickoffs from dispatcher sessions, and workers torn down with no PR.
-The script's kickoff and handoff records and a session's topic changes show
-these; Herdr keeps no history of what was typed into its panes.
+**How they drove Orca and Herdr.** Look at how many workers ran at once and
+what each was for, which of the two each ran in, how the person addressed
+workers ("herdr 2"), handoffs between workers, kickoffs from dispatcher
+sessions, and workers torn down with no PR. The script's kickoff and handoff
+records and a session's topic changes show these, and `orca agent list --json`
+shows what is open in Orca now. Herdr keeps no history of what was typed into
+its panes, and a worktree Orca has removed leaves only its transcripts.
 
 **What the guidance already says.** Before calling a correction unwritten,
 grep the places it could live: the skills and rules in dotfiles
@@ -96,14 +100,23 @@ to a file, flag, routine or branch that no longer exists (a `How to apply`
 line, or a fact stated as current). Dated history that names something since
 deleted ("PR 4745 rewrote `test-perf-cleanup.md`") is still true: leave it.
 
+**Orca** (`orca worktree list --json`, `orca agent list --json`; the CLI is
+`orca-ide` on Linux and `$ORCA_CLI_COMMAND` in a session Orca started): a
+worktree whose branch has a merged or closed PR (`gh pr list --head <branch>
+--state all` in its repository), or no commits and no agent activity for two
+days (`lastActivityAt`); a folder beside the listed worktrees that Orca does
+not list; an agent left open with nothing to do; `orca --version` against the
+newest release.
+
 **Herdr** (`herdr workspace list`, `~/.herdr/worktrees/`): a workspace whose
 branch has a merged or closed PR (`gh pr list --head <branch> --state all` in
 its repository), or no commits and no agent activity for two days; a worktree
 on disk with no workspace; `herdr --version` against the newest release; the
 plugins the dotfiles link in.
 
-**Git and GitHub**, for every repository Herdr has open (`gh pr list --author
-@me --state open` with checks, review and mergeable state; `gh search prs
+**Git and GitHub**, for every repository Orca or Herdr has open (`orca repo
+list --json`, `herdr workspace list`; `gh pr list --author @me --state open`
+with checks, review and mergeable state; `gh search prs
 --review-requested=@me --state=open`; `gh api notifications`; `git branch
 --merged`; `git worktree list`; the person's remote branches with no open PR):
 a PR red or stale for days, one waiting on a reviewer who never came, a review
@@ -138,8 +151,8 @@ progress for over two weeks, unread notifications.
 install.py --verify-idempotent`; a seat whose settings or rules differ from the
 shared copy (`cseat doctor` says `own`).
 
-**The machine** (`df -h /`, `du -sh ~/.cache ~/.herdr/worktrees
-~/.claude*/projects`, `docker system df`, the databases in the dev Postgres
+**The machine** (`df -h /`, `du -sh ~/.cache ~/orca/workspaces
+~/.herdr/worktrees ~/.claude*/projects`, `docker system df`, the databases in the dev Postgres
 containers, `pgrep -fl claude`, `brew outdated`): disk going, databases named
 for branches or worktrees that are gone, dev servers and ports held by finished
 work, Claude processes nobody owns, tools behind.

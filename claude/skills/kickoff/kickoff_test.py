@@ -1,5 +1,6 @@
+import contextlib
+import io
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -11,46 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import kickoff  # noqa: E402
 
-MAIN = {
-    "workspace_id": "w2",
-    "worktree": {
-        "repo_name": "widget",
-        "repo_root": "/repos/widget",
-        "checkout_path": "/repos/widget",
-        "is_linked_worktree": False,
-    },
-}
-LINKED = {
-    "workspace_id": "w9",
-    "worktree": {
-        "repo_name": "widget",
-        "repo_root": "/repos/widget",
-        "checkout_path": "/worktrees/widget/mine-thing",
-        "is_linked_worktree": True,
-    },
-}
-OTHER = {
-    "workspace_id": "w1",
-    "worktree": {
-        "repo_name": "gadget",
-        "repo_root": "/repos/gadget",
-        "checkout_path": "/repos/gadget",
-        "is_linked_worktree": False,
-    },
-}
+RUNNING = {"runtime": {"reachable": True}}
 
 
-def fake_herdr(**responses):
-    """Dispatch on the herdr subcommand, so a test only states what it needs."""
-
-    def call(*args, **kwargs):
-        key = "_".join(args[:2]).replace("-", "_")
-        if key not in responses:
-            raise AssertionError(f"unexpected herdr call: {' '.join(args)}")
-        payload = responses[key]
-        return payload(*args) if callable(payload) else payload
-
-    return call
+def opened(path, kind="structured", branch="refs/heads/me/thing"):
+    launch = {"outcome": {"kind": kind}} if kind else None
+    return {"worktree": {"path": path, "branch": branch}, "launch": launch}
 
 
 class SlugifyTest(unittest.TestCase):
@@ -58,480 +25,243 @@ class SlugifyTest(unittest.TestCase):
         self.assertEqual(kickoff.slugify("Signup rate limit!"), "signup-rate-limit")
 
     def test_edges_are_trimmed_even_after_truncation(self):
-        self.assertEqual(kickoff.slugify("--tidy--"), "tidy")
-        self.assertEqual(len(kickoff.slugify("x" * 40)), 32)
-        self.assertFalse(kickoff.slugify(f"{'y' * 32} tail").endswith("-"))
+        slug = kickoff.slugify("x" * 31 + "-tail")
+        self.assertEqual(slug, "x" * 31)
 
-    def test_a_slug_with_nothing_in_it_is_empty(self):
-        self.assertEqual(kickoff.slugify("!!!"), "")
+
+class OrcaCommandTest(unittest.TestCase):
+    def test_a_session_orca_started_uses_the_cli_it_names(self):
+        with mock.patch.dict("os.environ", {"ORCA_CLI_COMMAND": "/opt/orca"}):
+            self.assertEqual(kickoff.orca_command(), "/opt/orca")
+
+    def test_linux_never_runs_the_bare_name(self):
+        looked_up = []
+
+        def which(name):
+            looked_up.append(name)
+            return f"/usr/bin/{name}"
+
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.object(kickoff.sys, "platform", "linux"),
+            mock.patch.object(kickoff.shutil, "which", which),
+        ):
+            self.assertEqual(kickoff.orca_command(), "/usr/bin/orca-ide")
+        self.assertEqual(looked_up, ["orca-ide"])
+
+    def test_a_machine_without_orca_stops_with_the_reason(self):
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.object(kickoff.shutil, "which", return_value=None),
+            mock.patch.object(kickoff, "ORCA_APP_BIN", "/nonexistent/orca"),
+            self.assertRaisesRegex(SystemExit, "is missing"),
+        ):
+            kickoff.orca_command()
+
+
+class OrcaCallTest(unittest.TestCase):
+    def answer(self, stdout, returncode=0, stderr=""):
+        return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+    def call(self, completed):
+        with (
+            mock.patch.object(kickoff, "orca_command", return_value="orca"),
+            mock.patch.object(kickoff.subprocess, "run", return_value=completed) as run,
+        ):
+            result = kickoff.orca("worktree", "create", "--name", "thing")
+        self.assertEqual(
+            run.call_args.args[0],
+            ["orca", "worktree", "create", "--name", "thing", "--json"],
+        )
+        return result
+
+    def test_an_ok_answer_returns_its_result(self):
+        result = self.call(self.answer('{"ok": true, "result": {"a": 1}}'))
+        self.assertEqual(result, {"a": 1})
+
+    def test_orcas_error_is_the_reason(self):
+        with self.assertRaisesRegex(
+            SystemExit, "orca worktree create failed: repo_not_found"
+        ):
+            self.call(
+                self.answer('{"ok": false, "error": {"code": "repo_not_found"}}', 1)
+            )
+
+    def test_output_that_is_not_json_is_the_reason(self):
+        with self.assertRaisesRegex(SystemExit, "failed: command not understood"):
+            self.call(self.answer("", 2, "command not understood"))
+
+
+class RepoSelectorTest(unittest.TestCase):
+    def test_another_repository_goes_by_its_orca_name(self):
+        self.assertEqual(kickoff.repo_selector("widget"), "name:widget")
+
+    def in_dir(self, path):
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(path)
+
+    def test_a_linked_worktree_resolves_to_the_main_checkout(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        main = Path(tmp.name).resolve() / "widget"
+        linked = Path(tmp.name).resolve() / "linked"
+        identity = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+        for cmd in (
+            ["init", "-q", str(main)],
+            ["-C", str(main), "commit", "-q", "--allow-empty", "-m", "one"],
+            ["-C", str(main), "worktree", "add", "-q", str(linked)],
+        ):
+            subprocess.run(["git", *identity, *cmd], check=True, capture_output=True)
+        self.in_dir(linked)
+        self.assertEqual(kickoff.repo_selector(None), f"path:{main}")
+
+    def test_outside_a_checkout_it_asks_for_a_repository(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.in_dir(tmp.name)
+        with (
+            mock.patch.dict("os.environ", {"GIT_CEILING_DIRECTORIES": tmp.name}),
+            self.assertRaisesRegex(SystemExit, "needs a Git checkout"),
+        ):
+            kickoff.repo_selector(None)
 
 
 class MainTest(unittest.TestCase):
-    def test_a_task_is_required(self):
-        with self.assertRaisesRegex(SystemExit, "needs a task"):
-            kickoff.main(["new-work"])
+    def run_main(self, argv, result=None, default="main", status=RUNNING):
+        """Run main against a fake Orca; returns (create args, stdout, git calls)."""
+        calls = []
 
+        def orca(*args, **kwargs):
+            calls.append(args)
+            return status if args[0] == "status" else result
 
-class CseatTest(unittest.TestCase):
-    def test_a_grilling_worker_shapes_on_fable_unless_a_model_is_named(self):
-        self.assertEqual(kickoff.launch_model(None, grill=True), "fable")
-        self.assertEqual(kickoff.launch_model("opus", grill=True), "opus")
-        self.assertIsNone(kickoff.launch_model(None, grill=False))
-
-    def test_default_launch_leaves_the_model_to_cseat(self):
-        self.assertEqual(
-            kickoff.cseat_args("run", None, None),
-            ["cseat", "run", "--size", "M", "--handoff"],
-        )
-
-    def test_account_model_and_size_are_forwarded(self):
-        self.assertEqual(
-            kickoff.cseat_args("run", "yc3", "opus", "S"),
-            [
-                "cseat",
-                "run",
-                "--size",
-                "S",
-                "--model",
-                "opus",
-                "--handoff",
-                "--seat",
-                "yc3",
-            ],
-        )
-
-    def test_preflight_uses_the_same_constraints(self):
-        result = mock.Mock(returncode=0, stdout="{}", stderr="")
+        out = io.StringIO()
         with (
-            mock.patch.object(kickoff, "cseat_available", return_value=True),
-            mock.patch.object(
-                kickoff, "run_in_login_shell", return_value=result
-            ) as run,
+            mock.patch.object(kickoff, "orca", orca),
+            mock.patch.object(kickoff, "repo_selector", lambda repo: f"sel:{repo}"),
+            mock.patch.object(kickoff, "default_branch", return_value=default),
+            mock.patch.object(kickoff.subprocess, "run") as run,
+            contextlib.redirect_stdout(out),
         ):
-            self.assertTrue(kickoff.preflight_cseat("yc3", "opus", "S"))
-        run.assert_called_once_with(
-            [
-                "cseat",
-                "pick",
-                "--size",
-                "S",
-                "--model",
-                "opus",
-                "--json",
-                "--dry-run",
-                "--seat",
-                "yc3",
-            ]
+            kickoff.main(argv)
+        create = next(c for c in calls if c[:2] == ("worktree", "create"))
+        return create, out.getvalue(), [c.args[0] for c in run.call_args_list]
+
+    def flag(self, create, name):
+        return create[create.index(name) + 1]
+
+    def test_default_starts_an_independent_worktree_and_lets_orca_choose(self):
+        create, out, git_calls = self.run_main(
+            ["Signup limit", "cap", "signups"], opened("/wt/signup-limit")
         )
+        self.assertEqual(self.flag(create, "--name"), "signup-limit")
+        self.assertEqual(self.flag(create, "--repo"), "sel:None")
+        self.assertEqual(self.flag(create, "--agent"), "claude")
+        self.assertIn("--no-parent", create)
+        # Orca's Claude command picks the login and model, its setting the surface.
+        for absent in ("--base-branch", "--model", "--surface", "--branch"):
+            self.assertNotIn(absent, create)
+        self.assertEqual(git_calls, [])
+        self.assertEqual(out, "chat  me/thing from main  /wt/signup-limit\n")
 
-    def test_preflight_reports_cseat_refusal(self):
-        result = mock.Mock(
-            returncode=2,
-            stdout='{"reason": "no seat has headroom"}',
-            stderr="",
-        )
-        with (
-            mock.patch.object(kickoff, "cseat_available", return_value=True),
-            mock.patch.object(kickoff, "run_in_login_shell", return_value=result),
-        ):
-            with self.assertRaisesRegex(SystemExit, "no seat has headroom"):
-                kickoff.preflight_cseat(None, None)
-
-    def test_a_named_watch_only_seat_still_launches(self):
-        result = mock.Mock(
-            returncode=2,
-            stdout='{"reason": "seat yc3 is watch only"}',
-            stderr="",
-        )
-        with (
-            mock.patch.object(kickoff, "cseat_available", return_value=True),
-            mock.patch.object(kickoff, "run_in_login_shell", return_value=result),
-        ):
-            self.assertTrue(kickoff.preflight_cseat("yc3", None))
-            with self.assertRaisesRegex(SystemExit, "watch only"):
-                kickoff.preflight_cseat(None, None)
-
-    def test_missing_cseat_uses_the_portable_fallback(self):
-        with mock.patch.object(kickoff, "cseat_available", return_value=False):
-            self.assertFalse(kickoff.preflight_cseat(None, None))
-        self.assertEqual(
-            kickoff.plain_claude_command(None),
-            "env -u CLAUDE_CONFIG_DIR claude",
-        )
-
-    def test_a_named_seat_needs_cseat(self):
-        with mock.patch.object(kickoff, "cseat_available", return_value=False):
-            with self.assertRaisesRegex(SystemExit, "cseat is unavailable"):
-                kickoff.preflight_cseat("yc3", None)
-
-    def test_launch_runs_cseat_in_the_pane(self):
-        # A paragraph longer than a terminal's typed-line limit, as the
-        # grilling instruction is.
-        brief = "it's\nthe task\n" + "long " * 400 + "end"
-        with mock.patch.object(kickoff, "herdr") as herdr:
-            kickoff.launch_claude(
-                "w1:p2", lambda _: None, brief, "yc3", "opus", True, "S"
-            )
-        herdr.assert_called_once()
-        self.assertEqual(herdr.call_args.args[:3], ("pane", "run", "w1:p2"))
-        command = herdr.call_args.args[3]
-        # The leading space keeps the launch out of shell history.
-        launcher = " cseat run --size S --model opus --handoff --seat yc3 "
-        self.assertTrue(command.startswith(launcher), command)
-        self.assertNotIn("\n", command)
-        self.assertNotIn("long", command)
-        argument = command[len(launcher) :]
-        brief_file = re.search(r"cat (\S+)", argument).group(1)
-        self.assertTrue(os.path.exists(brief_file))
-        # What the pane's shell hands cseat as the prompt.
-        prompt = subprocess.run(
-            ["sh", "-c", f"printf %s {argument}"], capture_output=True, text=True
-        ).stdout
-        self.assertEqual(prompt, brief)
-        self.assertFalse(os.path.exists(brief_file))
-
-
-class AgentNameTest(unittest.TestCase):
-    def name(self, slug, live=()):
-        agents = {"agent_list": {"result": {"agents": [{"name": n} for n in live]}}}
-        with mock.patch.object(kickoff, "herdr", fake_herdr(**agents)):
-            return kickoff.agent_name(slug)
-
-    def test_a_free_slug_is_used_as_is(self):
-        self.assertEqual(self.name("signup", ["other"]), "signup")
-
-    def test_a_leading_digit_is_prefixed(self):
-        self.assertEqual(self.name("2fa"), "a2fa")
-
-    def test_a_live_name_is_not_reused(self):
-        self.assertEqual(self.name("signup", ["signup", "signup-2"]), "signup-3")
-
-
-class MainCheckoutTest(unittest.TestCase):
-    def test_repo_name_finds_the_main_checkout(self):
-        with mock.patch.object(
-            kickoff,
-            "herdr",
-            fake_herdr(workspace_list={"result": {"workspaces": [LINKED, MAIN]}}),
-        ):
-            self.assertEqual(
-                kickoff.main_checkout("widget"),
-                (["--workspace", "w2"], "/repos/widget"),
-            )
-
-    def test_a_repo_with_no_open_workspace_fails_before_creating_anything(self):
-        with mock.patch.object(
-            kickoff,
-            "herdr",
-            fake_herdr(workspace_list={"result": {"workspaces": [OTHER]}}),
-        ):
-            with self.assertRaises(SystemExit):
-                kickoff.main_checkout("widget")
-
-    def test_a_linked_worktree_resolves_up_to_its_parent(self):
-        calls = fake_herdr(
-            worktree_list={"result": {"source": {"repo_root": "/repos/widget"}}},
-            workspace_list={"result": {"workspaces": [LINKED, MAIN]}},
-        )
-        with mock.patch.object(kickoff, "herdr", calls):
-            self.assertEqual(
-                kickoff.main_checkout(None),
-                (["--workspace", "w2"], "/repos/widget"),
-            )
-
-    def test_a_closed_parent_workspace_falls_back_to_its_path(self):
-        calls = fake_herdr(
-            worktree_list={"result": {"source": {"repo_root": "/repos/widget"}}},
-            workspace_list={"result": {"workspaces": [LINKED]}},
-        )
-        with mock.patch.object(kickoff, "herdr", calls):
-            self.assertEqual(
-                kickoff.main_checkout(None),
-                (["--cwd", "/repos/widget"], "/repos/widget"),
-            )
-
-
-class CatchUpTest(unittest.TestCase):
-    """A parent branch with an upstream catches up before the worktree is cut."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.origin = Path(self.tmp.name) / "origin"
-        self.origin.mkdir()
-        self.git("init", "-b", "main", path=self.origin)
-        self.commit("first", path=self.origin)
-        self.clone = Path(self.tmp.name) / "clone"
-        self.git(
-            "clone", "--quiet", str(self.origin), str(self.clone), path=self.tmp.name
-        )
-        self.ahead = self.commit("merged elsewhere", path=self.origin)
-
-    def git(self, *args, path):
-        return subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.invalid",
-                "-c",
-                "commit.gpgsign=false",
-                "-C",
-                str(path),
-                *args,
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    def commit(self, name, path):
-        (path / "file").write_text(name)
-        self.git("add", "file", path=path)
-        self.git("commit", "--quiet", "-m", name, path=path)
-        return self.git("rev-parse", "HEAD", path=path)
-
-    def start(self, base=None):
-        with mock.patch("sys.stderr") as stderr:
-            result = kickoff.starting_point(str(self.clone), base)
-        return result, "".join(c.args[0] for c in stderr.write.call_args_list)
-
-    def test_a_checked_out_parent_fast_forwards_with_its_files(self):
-        (result, _) = self.start()
-        self.assertEqual(result, ("main", self.ahead))
-        self.assertEqual((self.clone / "file").read_text(), "merged elsewhere")
-
-    def test_a_parent_checked_out_nowhere_moves_its_ref(self):
-        self.git("checkout", "--quiet", "-b", "side", path=self.clone)
-        self.assertEqual(self.start("main")[0], ("main", self.ahead))
-        self.assertEqual(self.git("branch", "--show-current", path=self.clone), "side")
-
-    def test_conflicting_edits_keep_the_local_tip(self):
-        local = self.git("rev-parse", "HEAD", path=self.clone)
-        (self.clone / "file").write_text("mine")
-        (result, err) = self.start()
-        self.assertEqual(result, ("main", local))
-        self.assertIn("could not fast-forward", err)
-        self.assertEqual((self.clone / "file").read_text(), "mine")
-
-    def test_unpushed_and_diverged_work_is_never_dropped(self):
-        mine = self.commit("unpushed", path=self.clone)
-        (result, err) = self.start()
-        self.assertEqual(result, ("main", mine))
-        self.assertIn("diverged", err)
-
-    def test_an_unreachable_remote_keeps_the_local_tip(self):
-        local = self.git("rev-parse", "HEAD", path=self.clone)
-        self.git(
-            "remote", "set-url", "origin", str(self.origin) + "-gone", path=self.clone
-        )
-        (result, err) = self.start()
-        self.assertEqual(result, ("main", local))
-        self.assertIn("could not fetch", err)
-
-
-class StackingTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name) / "repo"
-        self.root.mkdir()
-        self.git("init", "-b", "main")
-        self.git("config", "user.name", "Test")
-        self.git("config", "user.email", "test@example.invalid")
-        self.git("config", "commit.gpgsign", "false")
-        self.git("commit", "--allow-empty", "-m", "main")
-        self.main_oid = self.git("rev-parse", "HEAD")
-        self.linked = Path(self.tmp.name) / "linked"
-        self.git("worktree", "add", "-b", "parent", str(self.linked))
-        self.git("commit", "--allow-empty", "-m", "parent", path=self.linked)
-        self.parent_oid = self.git("rev-parse", "HEAD", path=self.linked)
-
-    def git(self, *args, path=None):
-        return subprocess.run(
-            ["git", "-C", str(path or self.root), *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    def test_linked_checkout_keeps_its_parent_and_pins_commit(self):
-        self.assertEqual(
-            kickoff.starting_point(str(self.linked), None),
-            ("parent", self.parent_oid),
-        )
-        self.assertEqual(
-            kickoff.starting_point(str(self.root), None),
-            ("main", self.main_oid),
-        )
-
-    def test_explicit_base_overrides_worktree_and_detached_head(self):
-        self.git("checkout", "--detach", path=self.linked)
-        with self.assertRaisesRegex(SystemExit, "detached HEAD"):
-            kickoff.starting_point(str(self.linked), None)
-        self.assertEqual(
-            kickoff.starting_point(str(self.linked), "main"),
-            ("main", self.main_oid),
-        )
-        with self.assertRaisesRegex(SystemExit, "existing local branch"):
-            kickoff.starting_point(str(self.linked), "missing")
-
-    def test_parent_metadata_survives_upstream_change(self):
-        kickoff.record_parent(str(self.linked), "parent", "main")
-        self.git("config", "branch.parent.remote", "origin")
-        self.git("config", "branch.parent.merge", "refs/heads/parent")
-        self.assertEqual(self.git("config", "branch.parent.gh-merge-base"), "main")
-
-    def test_dirty_source_warns_without_copying_or_committing(self):
-        (self.linked / "uncommitted").write_text("keep here")
-        with mock.patch("sys.stderr") as stderr:
-            self.assertEqual(
-                kickoff.starting_point(str(self.linked), None),
-                ("parent", self.parent_oid),
-            )
-        self.assertIn(
-            "uncommitted", "".join(c.args[0] for c in stderr.write.call_args_list)
-        )
-        self.assertEqual(
-            self.git("status", "--porcelain", path=self.linked), "?? uncommitted"
-        )
-
-    def test_source_selection_keeps_cwd_for_same_repo(self):
-        # Herdr refuses linked_worktree_source, so the target is the parent
-        # workspace while git reads the parent branch from the linked checkout.
-        root = str(self.root)
-        main = {
-            "workspace_id": "w2",
-            "worktree": {"checkout_path": root, "is_linked_worktree": False},
-        }
-        linked = {
-            "workspace_id": "w9",
-            "worktree": {"checkout_path": str(self.linked), "is_linked_worktree": True},
-        }
-        calls = fake_herdr(
-            worktree_list={"result": {"source": {"repo_root": root}}},
-            workspace_list={"result": {"workspaces": [linked, main]}},
-        )
-        result = mock.Mock(returncode=0, stdout=str(self.linked) + "\n")
-        with (
-            mock.patch.object(kickoff.subprocess, "run", return_value=result),
-            mock.patch.object(kickoff, "herdr", calls),
-            mock.patch.object(
-                kickoff, "main_checkout", return_value=(["--cwd", "/other"], "/other")
-            ) as other,
-        ):
-            for repo in (None, "repo"):
-                self.assertEqual(
-                    kickoff.source_checkout(repo),
-                    (["--workspace", "w2"], str(self.linked)),
-                )
-            other.assert_not_called()
-            self.assertEqual(
-                kickoff.source_checkout("other"), (["--cwd", "/other"], "/other")
-            )
-            other.assert_called_once_with("other")
-
-    def launch(self, *argv):
-        """Run main() against a faked Herdr; return its herdr mock."""
-        opened = {
-            "result": {
-                "workspace": {"workspace_id": "w1"},
-                "root_pane": {"pane_id": "w1:p1"},
-                "worktree": {"path": "/new-worktree"},
-            }
-        }
-        with (
-            mock.patch.object(kickoff, "preflight_cseat", return_value=True),
-            mock.patch.object(
-                kickoff,
-                "source_checkout",
-                return_value=(["--workspace", "w2"], str(self.linked)),
-            ),
-            mock.patch.object(kickoff, "herdr", return_value=opened) as herdr,
-            mock.patch.object(kickoff, "record_parent") as record,
-            mock.patch.object(kickoff, "wait_for", return_value=True),
-            mock.patch.object(kickoff, "agent_name", return_value="child"),
-            mock.patch.object(kickoff, "launch_claude") as launch,
-            mock.patch.object(kickoff, "settle_agent", return_value="idle"),
-            mock.patch("builtins.print"),
-        ):
-            launch.side_effect = lambda *a: record.assert_called_once_with(
-                "/new-worktree", "test/child", "parent"
-            )
-            self.assertEqual(kickoff.main(["child", "do work", *argv]), 0)
-        self.assertFalse(
-            [c for c in herdr.call_args_list if c.args[:2] == ("agent", "prompt")]
-        )
-        return herdr, launch.call_args.args[2]
-
-    def created_in_background(self, herdr):
-        herdr.assert_any_call(
-            "worktree",
-            "create",
-            "--workspace",
-            "w2",
-            "--branch",
-            "test/child",
-            "--base",
-            self.parent_oid,
-            "--no-focus",
-        )
-
-    def test_launch_passes_pinned_base_and_records_parent_before_agent(self):
-        self.launch()
-
-    def test_by_default_the_agent_grills_in_a_background_workspace(self):
-        herdr, brief = self.launch()
-        self.created_in_background(herdr)
-        self.assertIn("grilling skill", brief)
-        self.assertTrue(brief.endswith("do work"))
-
-    def test_a_pinned_shape_launches_in_the_background_without_grilling(self):
-        herdr, brief = self.launch("--no-grill")
-        self.created_in_background(herdr)
-        self.assertNotIn("grilling", brief)
-
-
-class ShellReadyTest(unittest.TestCase):
-    def ready(self, info):
-        with mock.patch.object(
-            kickoff,
-            "herdr",
-            fake_herdr(pane_process_info={"result": {"process_info": info}}),
-        ):
-            return kickoff.shell_ready("w1:p1")
-
-    def test_a_bare_prompt_is_ready(self):
-        self.assertTrue(self.ready({"shell_pid": 7, "foreground_processes": []}))
-
-    def test_the_shell_in_the_foreground_is_still_a_prompt(self):
+    def test_the_prompt_names_the_parent_then_grills_then_carries_the_task(self):
+        create, _, _ = self.run_main(["thing", "cap signups"], opened("/wt/thing"))
+        prompt = self.flag(create, "--prompt")
         self.assertTrue(
-            self.ready({"shell_pid": 7, "foreground_processes": [{"pid": 7}]})
-        )
-
-    def test_a_running_command_is_not_ready(self):
-        self.assertFalse(
-            self.ready(
-                {"shell_pid": 7, "foreground_processes": [{"pid": 7}, {"pid": 9}]}
+            prompt.startswith(
+                "This branch starts from main. Use main as the PR base unless"
             )
         )
+        self.assertIn("never reply to them.\n\n" + kickoff.GRILL + "\n\n", prompt)
+        self.assertTrue(prompt.endswith("\n\ncap signups"))
 
-    def test_a_pane_herdr_cannot_describe_is_not_ready(self):
-        self.assertFalse(self.ready({}))
+    def test_no_grill_sends_the_task_without_the_grilling_instruction(self):
+        create, _, _ = self.run_main(
+            ["--no-grill", "thing", "cap signups"], opened("/wt/thing")
+        )
+        prompt = self.flag(create, "--prompt")
+        self.assertNotIn("grilling skill", prompt)
+        self.assertTrue(prompt.endswith("never reply to them.\n\ncap signups"))
 
+    def test_base_stacks_keeps_orcas_lineage_and_records_the_pr_base(self):
+        create, out, git_calls = self.run_main(
+            ["--base", "me/parent", "thing", "task"], opened("/wt/thing")
+        )
+        self.assertEqual(self.flag(create, "--base-branch"), "me/parent")
+        self.assertNotIn("--no-parent", create)
+        self.assertIn(
+            "This branch starts from me/parent.", self.flag(create, "--prompt")
+        )
+        self.assertEqual(
+            git_calls,
+            [
+                [
+                    "git",
+                    "-C",
+                    "/wt/thing",
+                    "config",
+                    "branch.me/thing.gh-merge-base",
+                    "me/parent",
+                ]
+            ],
+        )
+        self.assertIn("me/thing from me/parent", out)
 
-class BranchPrefixTest(unittest.TestCase):
-    def test_the_git_email_becomes_the_branch_prefix(self):
-        result = mock.Mock(stdout="Ada.Lovelace@Example.com\n")
-        with mock.patch.object(kickoff.subprocess, "run", return_value=result):
-            self.assertEqual(kickoff.branch_prefix("/repos/widget"), "ada-lovelace")
+    def test_a_named_model_is_passed_to_orca(self):
+        create, _, _ = self.run_main(
+            ["--model", "opus", "thing", "task"], opened("/wt/thing")
+        )
+        self.assertEqual(self.flag(create, "--model"), "opus")
 
-    def test_no_configured_email_means_no_prefix(self):
-        with mock.patch.object(
-            kickoff.subprocess, "run", return_value=mock.Mock(stdout="\n")
+    def test_another_repository_does_not_borrow_this_ones_default_branch(self):
+        create, out, _ = self.run_main(
+            ["--repo", "widget", "thing", "task"], opened("/wt/thing")
+        )
+        self.assertEqual(self.flag(create, "--repo"), "sel:widget")
+        self.assertIn(
+            "starts from the repository's default branch. Use it as the PR base",
+            self.flag(create, "--prompt"),
+        )
+        self.assertIn("from the default branch", out)
+
+    def test_the_brief_can_come_from_a_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".md") as brief:
+            brief.write("a long task")
+            brief.flush()
+            create, _, _ = self.run_main(
+                ["--brief-file", brief.name, "thing"], opened("/wt/thing")
+            )
+        self.assertTrue(self.flag(create, "--prompt").endswith("a long task"))
+
+    def test_a_terminal_launch_is_reported_as_one(self):
+        _, out, _ = self.run_main(["thing", "task"], opened("/wt/thing", "terminal"))
+        self.assertTrue(out.startswith("terminal  "))
+
+    def test_a_worktree_without_an_agent_fails_and_names_the_path(self):
+        with self.assertRaisesRegex(SystemExit, "did not start.*at /wt/thing"):
+            self.run_main(["thing", "task"], opened("/wt/thing", kind=None))
+
+    def test_orca_not_running_stops_before_anything_is_created(self):
+        calls = []
+
+        def orca(*args, **kwargs):
+            calls.append(args)
+            return {"runtime": {"reachable": False}}
+
+        with (
+            mock.patch.object(kickoff, "orca", orca),
+            mock.patch.object(kickoff, "repo_selector", return_value="sel"),
+            self.assertRaisesRegex(SystemExit, "Orca is not running"),
         ):
-            self.assertEqual(kickoff.branch_prefix("/repos/widget"), "")
+            kickoff.main(["thing", "task"])
+        self.assertEqual([c[0] for c in calls], ["status"])
+
+    def test_an_empty_slug_or_task_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "slug needs"):
+            kickoff.main(["!!!", "task"])
+        with self.assertRaisesRegex(SystemExit, "needs a task"):
+            kickoff.main(["thing", " "])
 
 
 if __name__ == "__main__":

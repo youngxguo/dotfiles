@@ -1102,7 +1102,7 @@ def setup_audit_launchd_plist(script):
             str(script),
         ],
         # The 09:00 slot runs at the first wake when the Mac sleeps through it;
-        # the ten-minute ticks retry until Herdr and the network are up.
+        # the ten-minute ticks retry until Orca and the network are up.
         "StartCalendarInterval": {"Hour": 9, "Minute": 0},
         "StartInterval": 600,
         "RunAtLoad": True,
@@ -1149,7 +1149,7 @@ Environment="PATH={setup_audit_job_path()}"
 ExecStart={script}
 """
     # Persistent runs a tick missed while the machine was off or asleep at the
-    # next start; the ten-minute ticks retry until Herdr and the network are up.
+    # next start; the ten-minute ticks retry until Orca and the network are up.
     timer = """[Unit]
 Description=Tick the setup audit kickoff every ten minutes
 
