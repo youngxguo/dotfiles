@@ -78,24 +78,27 @@ def orca(*args: str, timeout: int = 60) -> dict:
 SETUP_PASSED = re.compile(r"^__ORCA_SETUP_COMPLETE__:[\w-]+:0\s*$", re.MULTILINE)
 
 
-def close_passed_setup(path: str, wait: float = 10) -> None:
+def close_passed_setup(
+    path: str, wait: float = 10, target: tuple[str, ...] = ()
+) -> None:
     """Close the Setup tab of a new chat worktree once its setup has passed.
 
     Orca runs a repository's setup script in a terminal tab, and a worktree
     made through its CLI opens on that tab instead of the chat; the CLI has no
     option for which tab to open on. A setup that fails, or is still running
-    after `wait` seconds, keeps its tab."""
+    after `wait` seconds, keeps its tab. `target` names another machine's Orca
+    (`--environment`, its name)."""
     deadline = time.monotonic() + wait
     try:
         while True:
-            listed = orca("terminal", "list", "--worktree", f"path:{path}")
+            listed = orca("terminal", "list", "--worktree", f"path:{path}", *target)
             terminals = listed.get("terminals") or []
             for terminal in terminals:
                 handle = terminal["handle"]
-                read = orca("terminal", "read", "--terminal", handle)
+                read = orca("terminal", "read", "--terminal", handle, *target)
                 tail = (read.get("terminal") or {}).get("tail") or []
                 if SETUP_PASSED.search("\n".join(tail)):
-                    orca("terminal", "close", "--terminal", handle, "--tab")
+                    orca("terminal", "close", "--terminal", handle, "--tab", *target)
                     return
             if not terminals or time.monotonic() >= deadline:
                 return
