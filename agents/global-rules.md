@@ -1,13 +1,13 @@
 # Claude accounts
 
 Claude subscriptions live side by side (`~/.claude`, numbered `~/.claudeN`,
-or named login directories). On a machine that has `cseat`, start new Claude
-agents through `cseat run --handoff`, which chooses an account with headroom,
-picks the model from cseat's policy unless one is pinned, and moves the session
-to another account when that one reaches a usage limit. The kickoff skill
-handles this automatically, and falls back to the default account where cseat
-is absent. cseat is the only handoff mechanism; `cseat usage` shows every
-account's windows.
+or named login directories). The kickoff skill starts new Claude agents in
+Orca, and Orca's Claude command decides the account and the model: on a
+machine set up with `cseat`, that command asks cseat for an account with
+headroom. A chat session stays on the account it started on. In a terminal,
+`cseat run --handoff` makes the same pick and also moves the session to
+another account when that one reaches a usage limit. cseat is the only handoff
+mechanism; `cseat usage` shows every account's windows.
 
 # The bar for a change
 

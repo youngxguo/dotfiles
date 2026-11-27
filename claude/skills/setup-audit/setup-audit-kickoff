@@ -11,7 +11,12 @@ set -uo pipefail
 
 script=$(realpath "$0")
 repo=$(git -C "$(dirname "$script")" rev-parse --show-toplevel) || { echo "== $(date '+%F %T') cannot find the dotfiles repo from $script"; exit 1; }
-orca=$(command -v orca || echo /Applications/Orca.app/Contents/Resources/bin/orca)
+# On Linux the CLI is orca-ide: a bare orca there is the GNOME screen reader.
+if [[ $(uname) == Linux ]]; then
+  orca=$(command -v orca-ide || echo orca-ide)
+else
+  orca=$(command -v orca || echo /Applications/Orca.app/Contents/Resources/bin/orca)
+fi
 state=$HOME/.local/state/setup-audit
 due_hour=9
 today=$(date +%F)

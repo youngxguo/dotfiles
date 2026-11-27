@@ -1,83 +1,5 @@
 #!/bin/sh
 
-HERDR_METADATA_SOURCE=claude-statusline
-HERDR_MODEL_SOURCE=claude-statusline-model
-HERDR_SUBSCRIPTION_SOURCE=claude-statusline-subscription
-
-herdr_metadata_seq() {
-  python3 -c 'import time; print(time.time_ns())' 2>/dev/null ||
-    printf '%s000000000\n' "$(date +%s)"
-}
-
-herdr_repo_token() {
-  HERDR_REPO_NAME=$1 python3 -c '
-import os
-value = 2166136261
-for byte in os.environ["HERDR_REPO_NAME"].encode():
-    value = ((value ^ byte) * 16777619) & 0xffffffff
-print("repo_color_%d" % (value % 6 + 1))
-'
-}
-
-herdr_pane_cwd() {
-  # A resumed Claude session can restore a nested worktree while the pane's
-  # launch cwd stays fixed. Route against the foreground process when present.
-  herdr_bin=${HERDR_BIN_PATH:-herdr}
-  "$herdr_bin" pane get "$1" 2>/dev/null | python3 -c '
-import json, sys
-pane = json.load(sys.stdin).get("result", {}).get("pane", {})
-print(pane.get("foreground_cwd") or pane.get("cwd", ""))
-' 2>/dev/null
-}
-
-path_is_within() {
-  [ -n "$2" ] || return 1
-  path=$(cd "$1" 2>/dev/null && pwd -P) || return 1
-  root=$(cd "$2" 2>/dev/null && pwd -P) || return 1
-  case "$path/" in
-    "$root/"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-clear_herdr_metadata() {
-  [ -n "${HERDR_PANE_ID:-}" ] || return 0
-  herdr_bin=${HERDR_BIN_PATH:-herdr}
-  pane_cwd=$(herdr_pane_cwd "$HERDR_PANE_ID")
-  path_is_within "$PWD" "$pane_cwd" || return 0
-  "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
-    --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" \
-    --clear-token title1 --clear-token title2 --clear-token title3 \
-    --clear-token repo \
-    --clear-token repo_color_1 --clear-token repo_color_2 \
-    --clear-token repo_color_3 --clear-token repo_color_4 \
-    --clear-token repo_color_5 --clear-token repo_color_6 \
-    --clear-token branch --clear-token pr_open --clear-token pr_draft \
-    --clear-token pr_merged --clear-token pr_closed \
-    </dev/null >/dev/null 2>&1 || true
-  "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
-    --source "$HERDR_MODEL_SOURCE" --seq "$(herdr_metadata_seq)" \
-    --clear-token model \
-    --clear-token model_fable --clear-token model_opus \
-    --clear-token model_sonnet --clear-token model_haiku \
-    --clear-token model_sol --clear-token model_terra \
-    --clear-token model_luna --clear-token model_other \
-    </dev/null >/dev/null 2>&1 || true
-  "$herdr_bin" pane report-metadata "$HERDR_PANE_ID" \
-    --source "$HERDR_SUBSCRIPTION_SOURCE" --seq "$(herdr_metadata_seq)" \
-    --clear-token subscription \
-    --clear-token subscription_color_1 --clear-token subscription_color_2 \
-    --clear-token subscription_color_3 --clear-token subscription_color_4 \
-    --clear-token subscription_color_5 --clear-token subscription_color_6 \
-    --clear-token subscription_color_7 --clear-token subscription_codex \
-    </dev/null >/dev/null 2>&1 || true
-}
-
-if [ "${1:-}" = --clear-herdr-metadata ]; then
-  clear_herdr_metadata
-  exit 0
-fi
-
 input=$(cat)
 
 used_pct=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); v=d.get('context_window',{}).get('used_percentage'); print(v if v is not None else '')")
@@ -106,11 +28,9 @@ else:
 # CLAUDE_CONFIG_DIR is unset on the default one; the transcript sits under the
 # config dir actually in use, so it answers for every configured account.
 transcript=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))")
-session_name=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_name',''))")
 # The login email comes from the account's .claude.json: the default account
 # keeps that state file beside ~/.claude, every other account keeps it inside
-# its config dir. It is shown in the pane only; Herdr's sidebar keeps the short
-# account label.
+# its config dir.
 { read -r account; read -r account_email; } <<EOF
 $(TRANSCRIPT="$transcript" python3 -c "
 import json, os, re
@@ -145,20 +65,6 @@ EOF
 
 CLAUDE_DIR="$HOME/.claude"
 
-# Claude Code cancels an in-flight statusline by killing its process group, and
-# a new update cancels the running one whenever an agent is busy. Job control
-# (set -m) gives background work a group of its own so it outlives the cancel;
-# otherwise a refresh dies after touching its cache and waits a whole TTL.
-# stat's mtime flag differs between GNU (-c %Y) and BSD (-f %m).
-refresh_if_stale() {
-  cache=$1; ttl=$2; shift 2
-  mtime=$(stat -c %Y "$cache" 2>/dev/null || stat -f %m "$cache" 2>/dev/null)
-  if [ -z "$mtime" ] || [ $(( $(date +%s) - mtime )) -ge "$ttl" ]; then
-    touch "$cache"
-    (set -m; nohup "$@" </dev/null >/dev/null 2>&1 &) 2>/dev/null
-  fi
-}
-
 session_id=$(echo "$input" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))")
 
 build_bar() {
@@ -182,8 +88,7 @@ print(color + bar + reset + overflow, end='')
 }
 
 # A fixed palette, not an account allowlist. Numbered subscriptions cycle through
-# seven slots; named ones use FNV-1a. Slot eight is Codex. Keep in sync with Pi's
-# herdrSubscriptionToken; tests compare both implementations.
+# seven slots; named ones use FNV-1a.
 account_slot=$(ACCOUNT="$account" python3 -c '
 import os, re
 name = os.environ["ACCOUNT"]
@@ -191,7 +96,7 @@ match = re.fullmatch(r"c([0-9]+)", name)
 value = 2166136261
 for byte in name.encode():
     value = ((value ^ byte) * 16777619) & 0xffffffff
-print(8 if name == "codex" else (int(match.group(1)) - 1 if match else value) % 7 + 1)
+print((int(match.group(1)) - 1 if match else value) % 7 + 1)
 ')
 case $account_slot in
   1) account_color=34 ;;
@@ -211,189 +116,13 @@ printf "\033[01;35m%s\033[00m" "$model"
 
 workspace_dir=$(echo "$input" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('current_dir') or d.get('cwd') or '')")
 if [ -n "$workspace_dir" ] && [ -d "$workspace_dir" ]; then
-  { read -r repo_root; read -r git_branch; read -r git_dir; read -r git_common_dir; } <<EOF
-$(git -C "$workspace_dir" rev-parse --show-toplevel --abbrev-ref HEAD --git-dir --git-common-dir 2>/dev/null)
-EOF
+  git_branch=$(git -C "$workspace_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
   if [ "$git_branch" = HEAD ]; then
     git_branch=$(git -C "$workspace_dir" rev-parse --short HEAD 2>/dev/null)
   fi
   if [ -n "$git_branch" ]; then
     printf " | \033[01;32m %s\033[00m" "$git_branch"
   fi
-fi
-
-# Claude Code owns the in-pane PR badge. Look the PR up separately for Herdr's
-# agent sidebar, including resumed sessions and PRs opened outside Claude.
-# --state all keeps the sidebar metadata available once a PR is merged or closed.
-# A branch name can be reused after its PR merges, so a merged or closed PR
-# counts only when its head commit is in this branch's history.
-pr_state="" pr_number="" pr_label=""
-if [ -n "$git_branch" ] && command -v gh >/dev/null 2>&1; then
-  PR_CACHE_DIR="$CLAUDE_DIR/pr-cache"
-  pr_cache="$PR_CACHE_DIR/$(printf '%s' "$repo_root/$git_branch" | tr -c 'A-Za-z0-9._-' '_')"
-  if [ ! -f "$pr_cache" ]; then
-    mkdir -p "$PR_CACHE_DIR"
-    find "$PR_CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null
-  fi
-  # The third field consumes URLs written by caches from older versions.
-  [ -f "$pr_cache" ] && read -r pr_state pr_number _pr_url < "$pr_cache"
-  # A missing, open or draft PR is the one that changes next, by being opened,
-  # merged or marked ready, so it polls often; a finished PR rarely changes.
-  # Runs come every 10s (refreshInterval), so 15s rechecks every other run, and
-  # the refresh lands on the run after.
-  case $pr_state in
-    merged | closed) pr_ttl=300 ;;
-    *) pr_ttl=15 ;;
-  esac
-  refresh_if_stale "$pr_cache" "$pr_ttl" sh -c '
-    cache=$3
-    cd "$1" || exit
-    pr=$(gh pr list --state all --head "$2" --limit 1 --json number,state,isDraft,headRefOid \
-      --jq ".[0] // empty | (if .isDraft then \"draft\" else (.state | ascii_downcase) end) + \" \" + (.number | tostring) + \" \" + .headRefOid") || exit
-    set -- $pr
-    case "${1:-}" in
-      ""|open|draft) ;;
-      *) git merge-base --is-ancestor "$3" HEAD 2>/dev/null || set -- ;;
-    esac
-    { [ -z "${1:-}" ] || printf "%s %s\n" "$1" "$2"; } > "$cache.tmp" &&
-      mv -f "$cache.tmp" "$cache" || rm -f "$cache.tmp"
-  ' _ "$workspace_dir" "$git_branch" "$pr_cache"
-
-  if [ -n "$pr_number" ]; then
-    pr_label="#$pr_number"
-    [ "$pr_state" = open ] || pr_label="$pr_label $pr_state"
-  fi
-fi
-
-# herdr has no repo, branch or PR token for agent rows, so they go out as pane
-# metadata. Token colors are fixed in herdr/config.toml, so repositories are
-# assigned deterministic palette tokens and the PR is sent as one token per
-# state. Claude owns the clickable in-pane PR link.
-if [ -n "$HERDR_PANE_ID" ]; then
-  herdr_bin=${HERDR_BIN_PATH:-herdr}
-  # Claude's shared daemon can leak another session's Herdr pane ID. Never
-  # write across workspaces; the pane's own statusline will refresh its data.
-  route_dir=${repo_root:-${workspace_dir:-$PWD}}
-  pane_cwd=$(herdr_pane_cwd "$HERDR_PANE_ID")
-  path_is_within "$route_dir" "$pane_cwd" || HERDR_PANE_ID=
-fi
-
-if [ -n "$HERDR_PANE_ID" ]; then
-  # Herdr cuts a row at the sidebar's width and cannot wrap. It saves the width
-  # to session.json next to the socket.
-  herdr_session=${HERDR_SOCKET_PATH:+${HERDR_SOCKET_PATH%/*}/session.json}
-  : "${herdr_session:=$HOME/.config/herdr/session.json}"
-  # young.agent-index owns $num centrally so every row changes together when
-  # an agent starts, exits, or moves.
-  set --
-  if [ -n "$session_name" ]; then
-    title_rows=$(HERDR_SESSION_FILE="$herdr_session" SESSION_NAME="$session_name" python3 -c "
-import json, os, textwrap
-width = 26
-state_dot_and_padding = 4
-try:
-    width = int(json.load(open(os.environ['HERDR_SESSION_FILE'])).get('sidebar_width') or width)
-except (OSError, ValueError, TypeError):
-    pass
-rows = textwrap.wrap(os.environ['SESSION_NAME'], max(10, width - state_dot_and_padding), initial_indent='  ', max_lines=3, placeholder='…')
-for part in rows:
-    print(part.strip())
-")
-    n=0
-    while IFS= read -r chunk; do
-      [ -n "$chunk" ] || continue
-      n=$((n + 1))
-      set -- "$@" --token "title$n=$chunk"
-    done <<EOF
-$title_rows
-EOF
-    while [ "$n" -lt 3 ]; do
-      n=$((n + 1))
-      set -- "$@" --clear-token "title$n"
-    done
-  fi
-  # Opening a task starts a second status-line loop for an unnamed transient
-  # session that inherits this pane ID. An absent name must not clear the parent
-  # title; SessionEnd clears every title row at a real session boundary.
-  if [ -n "$git_branch" ]; then
-    if [ "$git_dir" = "$git_common_dir" ]; then
-      repo_name=${repo_root##*/}
-    else
-      repo_dir=${git_common_dir%/.git}
-      repo_name=${repo_dir##*/}
-    fi
-    repo_token=$(herdr_repo_token "$repo_name")
-    set -- "$@" --clear-token repo
-    for token in repo_color_1 repo_color_2 repo_color_3 repo_color_4 repo_color_5 repo_color_6; do
-      if [ "$token" = "$repo_token" ]; then
-        set -- "$@" --token "$token=📁 $repo_name"
-      else
-        set -- "$@" --clear-token "$token"
-      fi
-    done
-    set -- "$@" --token "branch= $git_branch"
-  else
-    set -- "$@" --clear-token repo
-    for token in repo_color_1 repo_color_2 repo_color_3 repo_color_4 repo_color_5 repo_color_6; do
-      set -- "$@" --clear-token "$token"
-    done
-    set -- "$@" --clear-token branch
-  fi
-  model_key=$(printf '%s' "$model" | tr '[:upper:]' '[:lower:]')
-  case $model_key in
-    *fable*) model_token=model_fable ;;
-    *opus*) model_token=model_opus ;;
-    *sonnet*) model_token=model_sonnet ;;
-    *haiku*) model_token=model_haiku ;;
-    *sol*) model_token=model_sol ;;
-    *terra*) model_token=model_terra ;;
-    *luna*) model_token=model_luna ;;
-    *) model_token=model_other ;;
-  esac
-  subscription_token=subscription_color_$account_slot
-  [ "$account_slot" = 8 ] && subscription_token=subscription_codex
-  case $pr_state in
-    open | draft | merged) pr_token=pr_$pr_state ;;
-    *) pr_token=pr_closed ;;
-  esac
-  for state in open draft merged closed; do
-    if [ -n "$pr_label" ] && [ "pr_$state" = "$pr_token" ]; then
-      set -- "$@" --token "pr_$state= $pr_label"
-    else
-      set -- "$@" --clear-token "pr_$state"
-    fi
-  done
-  report_herdr_metadata() {
-    report_bin=$1
-    report_pane=$2
-    shift 2
-    "$report_bin" pane report-metadata "$report_pane" \
-      --source "$HERDR_METADATA_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
-
-    set -- --clear-token model
-    for token in model_fable model_opus model_sonnet model_haiku model_sol model_terra model_luna model_other; do
-      if [ "$token" = "$model_token" ]; then
-        set -- "$@" --token "$token=$model"
-      else
-        set -- "$@" --clear-token "$token"
-      fi
-    done
-    "$report_bin" pane report-metadata "$report_pane" \
-      --source "$HERDR_MODEL_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
-
-    set -- --clear-token subscription
-    for token in subscription_color_1 subscription_color_2 subscription_color_3 subscription_color_4 subscription_color_5 subscription_color_6 subscription_color_7 subscription_codex; do
-      if [ "$token" = "$subscription_token" ]; then
-        set -- "$@" --token "$token=$account"
-      else
-        set -- "$@" --clear-token "$token"
-      fi
-    done
-    "$report_bin" pane report-metadata "$report_pane" \
-      --source "$HERDR_SUBSCRIPTION_SOURCE" --seq "$(herdr_metadata_seq)" "$@" || true
-  }
-  (set -m; report_herdr_metadata "$herdr_bin" "$HERDR_PANE_ID" "$@" \
-    </dev/null >/dev/null 2>&1 &) 2>/dev/null
 fi
 
 timer_file="$CLAUDE_DIR/prompt-timer/$session_id"

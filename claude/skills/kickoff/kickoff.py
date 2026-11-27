@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a Herdr worktree, start an agent, and hand it the user's task."""
+"""Create an Orca worktree, start Claude in it, and hand it the user's task."""
 
 from __future__ import annotations
 
@@ -7,17 +7,12 @@ import argparse
 import json
 import os
 import re
-import shlex
+import shutil
 import subprocess
 import sys
-import tempfile
-import time
 from pathlib import Path
 
-MODEL_ENV = "ANTHROPIC_MODEL"
-# A worker that grills shapes the task with the user, and the shape is where
-# the deeper cut comes from, so it runs on Fable unless the user names a model.
-SHAPING_MODEL = "fable"
+ORCA_APP_BIN = "/Applications/Orca.app/Contents/Resources/bin/orca"
 GRILL = (
     "Before building, settle the shape of this task with the user: invoke the "
     "grilling skill. Cover what a reviewer would need settled: what changes and "
@@ -37,459 +32,93 @@ GRILL = (
 )
 
 
-def herdr(*args: str, check: bool = True, timeout: int = 60) -> dict:
-    proc = subprocess.run(
-        ["herdr", *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
-    payload = proc.stdout.strip() or proc.stderr.strip()
+def orca_command() -> str:
+    """Orca's CLI. A session Orca started names it in ORCA_CLI_COMMAND. On Linux
+    the CLI is `orca-ide`: a bare `orca` there is the GNOME screen reader."""
+    name = "orca-ide" if sys.platform.startswith("linux") else "orca"
+    found = os.environ.get("ORCA_CLI_COMMAND") or shutil.which(name)
+    if not found and Path(ORCA_APP_BIN).is_file():
+        found = ORCA_APP_BIN
+    if not found:
+        raise SystemExit(f"kickoff starts its workers in Orca, and `{name}` is missing")
+    return found
+
+
+def orca(*args: str, timeout: int = 60) -> dict:
     try:
-        data = json.loads(payload) if payload else {}
-    except ValueError:
-        data = {"error": {"message": payload}}
-    if proc.returncode != 0 and "error" not in data:
-        data["error"] = {"message": payload or f"exit status {proc.returncode}"}
-    if check and "error" in data:
-        message = (data.get("error") or {}).get("message") or payload
-        raise SystemExit(f"herdr {' '.join(args)} failed: {message}")
-    return data
-
-
-def wait_for(predicate, timeout: float, interval: float = 0.5) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return False
-
-
-def pane_screen(pane_id: str) -> str:
-    proc = subprocess.run(
-        ["herdr", "pane", "read", pane_id, "--source", "visible", "--lines", "60"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return proc.stdout
-
-
-def dismiss_startup_dialogs(pane_id: str, log) -> bool:
-    """A config dir shows folder-trust, bypass-permissions and Chrome-extension
-    dialogs for a folder it has never opened; herdr classifies them as idle, so
-    the screen is the only signal."""
-    answered = False
-    for _ in range(5):
-        screen = pane_screen(pane_id)
-        if "Enter to confirm" not in screen:
-            return answered
-        if "No, exit" in screen:
-            # Trust and bypass dialogs start on "No, exit"; the yes is below.
-            herdr("pane", "send-keys", pane_id, "down", check=False)
-            time.sleep(0.3)
-            what = "the folder trust dialog" if "trust" in screen else "a yes/no dialog"
-        else:
-            what = "a notice"
-        herdr("pane", "send-keys", pane_id, "enter", check=False)
-        log(f"  confirmed {what}")
-        answered = True
-        wait_for(lambda: pane_screen(pane_id) != screen, 5)
-        time.sleep(1)
-    return answered
-
-
-def settle_agent(pane_id: str, log) -> str:
-    """Wait for a freshly launched agent to come up, answering the first-run
-    dialogs a config dir shows for a folder it has never opened; claude holds
-    its prompt until they are answered. `done` never counts: herdr keeps the
-    record of the claude that just quit, marked `done`, until it detects the
-    new one, and a plain wait would return that at once."""
-
-    def wait() -> dict:
-        return herdr(
-            "agent",
-            "wait",
-            pane_id,
-            "--until",
-            "idle",
-            "--until",
-            "blocked",
-            "--until",
-            "working",
-            "--timeout",
-            "90000",
+        proc = subprocess.run(
+            [orca_command(), *args, "--json"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
             check=False,
-            timeout=120,
         )
-
-    settled = wait()
-    if dismiss_startup_dialogs(pane_id, log):
-        settled = wait()
-    result = settled.get("result") or {}
-    status = (result.get("agent") or {}).get("agent_status")
-    return status or result.get("status") or "unknown"
-
-
-NAME_RE = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"orca {' '.join(args[:2])} timed out after {timeout}s")
+    try:
+        answer = json.loads(proc.stdout)
+    except ValueError:
+        answer = None
+    if isinstance(answer, dict) and answer.get("ok"):
+        return answer.get("result") or {}
+    error = answer.get("error") if isinstance(answer, dict) else None
+    why = (
+        error.get("message") or error.get("code")
+        if isinstance(error, dict)
+        else (proc.stderr or proc.stdout).strip()[:300]
+    )
+    raise SystemExit(
+        f"orca {' '.join(args[:2])} failed: {why or f'exit status {proc.returncode}'}"
+    )
 
 
 def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:32].strip("-")
 
 
-def agent_name(slug: str) -> str:
-    name = slug if NAME_RE.match(slug) else f"a{slug}"[:32].strip("-")
-    live = {a.get("name") for a in herdr("agent", "list")["result"]["agents"]}
-    if name not in live:
-        return name
-    for n in range(2, len(live) + 3):  # only live agents can collide
-        candidate = f"{name[: 30 - len(str(n))]}-{n}"
-        if candidate not in live:
-            return candidate
-    raise SystemExit(f"no free agent name near {name!r}")
+def git(*args: str) -> str:
+    """A git answer about the current checkout, or "" when git has none."""
+    proc = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
-def workspaces() -> list[dict]:
-    return herdr("workspace", "list")["result"]["workspaces"]
-
-
-def main_checkout(repo: str | None) -> tuple[list[str], str]:
-    """Resolve worktree actions to the repo's main checkout."""
+def repo_selector(repo: str | None) -> str:
+    """Another repository by the name Orca knows it by; otherwise the current
+    one by its main checkout, the only path of a repository Orca resolves."""
     if repo:
-        hits = [
-            w
-            for w in workspaces()
-            if (w.get("worktree") or {}).get("repo_name") == repo
-            and not (w.get("worktree") or {}).get("is_linked_worktree")
-        ]
-        if not hits:
-            raise SystemExit(f"no open workspace holds the main checkout of {repo!r}")
-        workspace = hits[0]
-        return (
-            ["--workspace", workspace["workspace_id"]],
-            (workspace.get("worktree") or {})["repo_root"],
-        )
-
-    listing = herdr("worktree", "list", "--cwd", str(Path.cwd()))["result"]
-    return parent_workspace(listing["source"]["repo_root"])
+        return f"name:{repo}"
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        raise SystemExit("kickoff needs a Git checkout, or --repo for another one")
+    return f"path:{Path(common).parent}"
 
 
-def parent_workspace(root: str) -> tuple[list[str], str]:
-    """Herdr creates worktrees only from the repo's parent workspace, never a linked one."""
-    for workspace in workspaces():
-        worktree = workspace.get("worktree") or {}
-        if worktree.get("checkout_path") == root and not worktree.get(
-            "is_linked_worktree"
-        ):
-            return ["--workspace", workspace["workspace_id"]], root
-    return ["--cwd", root], root
-
-
-def source_checkout(repo: str | None) -> tuple[list[str], str]:
-    """Keep the caller's checkout as the git source, including when --repo names
-    this repository; Herdr still creates the worktree from the parent workspace."""
-    current = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
+def default_branch() -> str:
+    """The branch Orca starts a worktree from when none is named."""
+    return git("symbolic-ref", "--short", "refs/remotes/origin/HEAD").removeprefix(
+        "origin/"
     )
-    if current.returncode == 0:
-        path = current.stdout.strip()
-        listing = herdr("worktree", "list", "--cwd", path)["result"]
-        root = listing["source"]["repo_root"]
-        if not repo or Path(root).name == repo:
-            return parent_workspace(root)[0], path
-    if repo:
-        return main_checkout(repo)
-    raise SystemExit(
-        "kickoff needs a Git checkout, or --repo for another open repository"
-    )
-
-
-def catch_up(path: str, base: str) -> None:
-    """Fast-forward the parent branch to its upstream, so a new worktree never
-    starts behind what has already merged. Offline, diverged, or blocked by
-    local edits, the local tip stands and the reason goes to stderr."""
-
-    def git(*args: str, cwd: str = path) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["git", "-C", cwd, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
-
-    def note(message: str) -> None:
-        print(f"Note: {message}; starting from the local {base}.", file=sys.stderr)
-
-    remote = git("config", f"branch.{base}.remote").stdout.strip()
-    merge = git("config", f"branch.{base}.merge").stdout.strip()
-    if not remote or not merge:
-        return
-    try:
-        fetched = git("fetch", "--quiet", remote, merge).returncode == 0
-    except subprocess.TimeoutExpired:
-        fetched = False
-    if not fetched:
-        return note(f"could not fetch {base} from {remote}")
-    upstream = git("rev-parse", "FETCH_HEAD").stdout.strip()
-    local = git("rev-parse", f"refs/heads/{base}").stdout.strip()
-    if git("merge-base", "--is-ancestor", upstream, local).returncode == 0:
-        return  # already current, or ahead with unpushed commits
-    if git("merge-base", "--is-ancestor", local, upstream).returncode:
-        return note(f"{base} has diverged from {remote}")
-    listing = git("worktree", "list", "--porcelain").stdout.split("\n\n")
-    checkout = next(
-        (
-            block.split("\n", 1)[0].removeprefix("worktree ")
-            for block in listing
-            if f"\nbranch refs/heads/{base}\n" in f"{block}\n"
-        ),
-        None,
-    )
-    if checkout:
-        # The branch is checked out: move its working tree too, which git
-        # refuses when local edits touch the incoming files.
-        moved = git("merge", "--ff-only", "--quiet", upstream, cwd=checkout)
-    else:
-        moved = git("update-ref", f"refs/heads/{base}", upstream, local)
-    if moved.returncode:
-        return note(f"could not fast-forward {base} in {checkout or path}")
-    print(f"Fast-forwarded {base} to {upstream[:12]} from {remote}.", file=sys.stderr)
-
-
-def starting_point(path: str, base: str | None) -> tuple[str, str]:
-    """Resolve a local parent branch and pin its commit before creating anything."""
-    if not base:
-        result = subprocess.run(
-            ["git", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode:
-            raise SystemExit("detached HEAD: pass --base with a local parent branch")
-        base = result.stdout.strip()
-    catch_up(path, base)
-    result = subprocess.run(
-        ["git", "-C", path, "rev-parse", "--verify", f"refs/heads/{base}^{{commit}}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode:
-        raise SystemExit(f"base {base!r} must name an existing local branch")
-    dirty = subprocess.run(
-        ["git", "-C", path, "status", "--porcelain"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    if dirty.stdout:
-        print(
-            "Note: uncommitted changes stay in the source checkout; only commits are inherited.",
-            file=sys.stderr,
-        )
-    return base, result.stdout.strip()
-
-
-def record_parent(path: str, branch: str, parent: str) -> None:
-    # Native gh pr create setting; separate from the push/pull upstream, which
-    # changes when the child is first pushed with git push -u.
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            path,
-            "config",
-            "--local",
-            f"branch.{branch}.gh-merge-base",
-            parent,
-        ],
-        check=True,
-    )
-
-
-def branch_prefix(root: str) -> str:
-    email = subprocess.run(
-        ["git", "-C", root, "config", "user.email"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    return slugify(email.split("@")[0]) if email else ""
-
-
-def shell_ready(pane_id: str) -> bool:
-    info = (
-        herdr("pane", "process-info", "--pane", pane_id, check=False).get("result")
-        or {}
-    ).get("process_info") or {}
-    shell = info.get("shell_pid")
-    running = [
-        p for p in info.get("foreground_processes") or [] if p.get("pid") != shell
-    ]
-    return bool(shell) and not running
-
-
-def pane_agent(pane_id: str) -> str | None:
-    got = herdr("agent", "get", pane_id, check=False).get("result") or {}
-    return (got.get("agent") or {}).get("agent")
-
-
-def launch_model(requested_model: str | None, grill: bool) -> str | None:
-    """The user's model, else Fable for a grilling worker, else cseat's policy."""
-    return requested_model or (SHAPING_MODEL if grill else None)
-
-
-def cseat_args(
-    subcommand: str,
-    to_label: str | None,
-    requested_model: str | None,
-    task_size: str = "M",
-) -> list[str]:
-    args = ["cseat", subcommand, "--size", task_size]
-    if requested_model:
-        args.extend(["--model", requested_model])
-    if subcommand == "run":
-        args.append("--handoff")
-    else:
-        args.extend(["--json", "--dry-run"])
-    if to_label:
-        args.extend(["--seat", to_label])
-    return args
-
-
-def run_in_login_shell(
-    args: list[str], timeout: int = 20
-) -> subprocess.CompletedProcess:
-    """Run a command that may be provided by the user's interactive shell."""
-    shell = os.environ.get("SHELL") or "/bin/zsh"
-    try:
-        return subprocess.run(
-            [shell, "-ic", shlex.join(args)],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            stdin=subprocess.DEVNULL,
-        )
-    except subprocess.TimeoutExpired:
-        raise SystemExit(f"{' '.join(args[:2])} timed out after {timeout}s")
-    except OSError as exc:
-        raise SystemExit(f"could not run {shell}: {exc}")
-
-
-def cseat_available() -> bool:
-    return run_in_login_shell(["command", "-v", "cseat"]).returncode == 0
-
-
-def preflight_cseat(
-    to_label: str | None, requested_model: str | None, task_size: str = "M"
-) -> bool:
-    """Check cseat before changing the repo; false uses the portable fallback."""
-    if not cseat_available():
-        if to_label:
-            raise SystemExit(
-                f"--to {to_label!r} names a cseat seat, but cseat is unavailable"
-            )
-        return False
-
-    args = cseat_args("pick", to_label, requested_model, task_size)
-    proc = run_in_login_shell(args)
-    if proc.returncode == 0:
-        return True
-    detail = ""
-    try:
-        detail = json.loads(proc.stdout).get("reason", "")
-    except (AttributeError, json.JSONDecodeError):
-        pass
-    if to_label and "watch only" in detail:
-        # cseat pick never lands on a watch-only seat, but cseat run --seat still
-        # launches there when a person names it.
-        return True
-    if not detail:
-        lines = (proc.stderr or proc.stdout).strip().splitlines()
-        detail = lines[-1] if lines else f"exit {proc.returncode}"
-    raise SystemExit(f"cseat cannot start the agent: {detail}")
-
-
-def plain_claude_command(requested_model: str | None) -> str:
-    """Portable fallback for machines without cseat: the default account. Its
-    login is only reachable with CLAUDE_CONFIG_DIR unset: setting it, even to
-    ~/.claude, gives claude its own .claude.json inside the dir and its own
-    `Claude Code-credentials-<hash>` keychain entry, so the session lands on a
-    login prompt instead of the subscription."""
-    parts = ["env", "-u", "CLAUDE_CONFIG_DIR"]
-    if requested_model:
-        parts.append(f"{MODEL_ENV}={shlex.quote(requested_model)}")
-    return " ".join([*parts, "claude"])
-
-
-def launch_claude(
-    pane_id: str,
-    log,
-    brief: str,
-    to_label: str | None = None,
-    requested_model: str | None = None,
-    use_cseat: bool = True,
-    task_size: str = "M",
-) -> None:
-    """Start Claude on the brief with cseat handoffs, or directly when cseat is
-    absent. The brief goes on the command line, never typed in after: a claude
-    still starting up can drop typed text. The shell reads it from a file the
-    same line deletes, because a terminal refuses a typed line over its input
-    limit (1,024 bytes on macOS) and a brief's paragraph can be longer. The
-    leading space keeps that line out of shell history (zsh's
-    HIST_IGNORE_SPACE), where it would bury real commands in Ctrl-R."""
-    launcher = (
-        shlex.join(cseat_args("run", to_label, requested_model, task_size))
-        if use_cseat
-        else plain_claude_command(requested_model)
-    )
-    handle, path = tempfile.mkstemp(prefix="kickoff-brief-", suffix=".md")
-    with os.fdopen(handle, "w") as brief_file:
-        brief_file.write(brief)
-    path = shlex.quote(path)
-    herdr("pane", "run", pane_id, f' {launcher} "$(cat {path} && rm {path})"')
-    log(f"  ran: {launcher} with the brief")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("slug", help="short name for the worktree and agent")
+    parser.add_argument("slug", help="short name for the worktree and its branch")
     parser.add_argument("brief", nargs="*", help="the user's task")
     parser.add_argument("--brief-file", help="read the task from a file")
-    parser.add_argument("--repo", help="use another open repository")
+    parser.add_argument("--repo", help="another repository, by its name in Orca")
     parser.add_argument(
-        "--base", help="local parent branch (default: current checkout's branch)"
-    )
-    parser.add_argument(
-        "--to",
-        help="cseat seat to launch on, by the name `cseat list` shows",
+        "--base",
+        help="branch to stack on (default: the repository's default branch)",
     )
     parser.add_argument(
         "--model",
-        choices=("fable", "opus"),
-        help="Claude model to pin for the new session (default: cseat's policy)",
-    )
-    parser.add_argument(
-        "--size",
-        type=str.upper,
-        choices=("S", "M", "L"),
-        default="M",
-        help="task size passed to cseat (default: M)",
+        help="Claude model for the new session (default: Orca's Claude command picks)",
     )
     parser.add_argument(
         "--grill",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="have the agent settle the task's shape with the user first, "
+        help="have the agent settle the task's shape with the user first "
         "(default: on; --no-grill when the shape is pinned)",
     )
 
@@ -503,62 +132,45 @@ def main(argv: list[str] | None = None) -> int:
     if not brief.strip():
         raise SystemExit("kickoff needs a task")
 
-    model = launch_model(args.model, args.grill)
-    use_cseat = preflight_cseat(args.to, model, args.size)
-    target, root = source_checkout(args.repo)
-    parent, base_oid = starting_point(root, args.base)
-    prefix = branch_prefix(root)
-    branch = f"{prefix}/{slug}" if prefix else slug
-    log = print
+    repo = repo_selector(args.repo)
+    if not (orca("status", timeout=30).get("runtime") or {}).get("reachable"):
+        raise SystemExit("Orca is not running; open it and run kickoff again")
 
-    print(
-        f"{Path(root).name}: {branch} from {parent} ({base_oid[:12]}; {' '.join(target)})"
+    parent = args.base or (not args.repo and default_branch()) or ""
+    start = (
+        f"This branch starts from {parent}. Use {parent} as the PR base"
+        if parent
+        else "This branch starts from the repository's default branch. Use it as the PR base"
     )
-    opened = herdr(
-        "worktree",
-        "create",
-        *target,
-        "--branch",
-        branch,
-        "--base",
-        base_oid,
-        "--no-focus",
-    )["result"]
-
-    workspace_id = opened["workspace"]["workspace_id"]
-    pane_id = opened["root_pane"]["pane_id"]
-    path = opened["worktree"]["path"]
-    record_parent(path, branch, parent)
-    brief = (
-        f"This branch starts from {parent} ({base_oid}). Use {parent} as the PR base unless the task requires otherwise. "
+    prompt = (
+        f"{start} unless the task requires otherwise. "
         "Links in this task (Slack threads, issues, PRs) are context: read them, never reply to them.\n\n"
         + (f"{GRILL}\n\n" if args.grill else "")
         + brief
     )
-    log(f"  workspace {workspace_id} pane {pane_id} at {path}")
+    # A stacked worktree keeps Orca's own lineage to the checkout it came from.
+    # Without --surface, the person's Orca setting picks chat or terminal.
+    create = ["worktree", "create", "--repo", repo, "--name", slug]
+    create += ["--base-branch", args.base] if args.base else ["--no-parent"]
+    create += ["--model", args.model] if args.model else []
+    opened = orca(*create, "--agent", "claude", "--prompt", prompt, timeout=600)
 
-    if not wait_for(lambda: shell_ready(pane_id), 20):
-        raise SystemExit(
-            f"the shell in {pane_id} never reached a prompt; {workspace_id} is open at {path}"
+    worktree = opened.get("worktree") or {}
+    path = worktree.get("path")
+    branch = (worktree.get("branch") or "").removeprefix("refs/heads/")
+    started = ((opened.get("launch") or {}).get("outcome") or {}).get("kind")
+    if not started:
+        raise SystemExit(f"Claude did not start in Orca; the worktree is at {path}")
+    if args.base:
+        # Native gh pr create setting, separate from the push/pull upstream.
+        subprocess.run(
+            ["git", "-C", path, "config", f"branch.{branch}.gh-merge-base", args.base],
+            check=True,
         )
 
-    name = agent_name(slug)
-    launch_claude(pane_id, log, brief, args.to, model, use_cseat, args.size)
-    if not wait_for(lambda: pane_agent(pane_id) == "claude", 60):
-        raise SystemExit(
-            f"herdr never detected claude in {pane_id}; {workspace_id} is open at {path}"
-        )
-
-    status = settle_agent(pane_id, log)
-    herdr("agent", "rename", pane_id, name, check=False)
-    log(f"  agent {name} is {status}")
-
-    if status == "blocked":
-        raise SystemExit(
-            f"agent {name} is blocked in {pane_id}; its brief starts once that is answered"
-        )
-
-    print(f"\n{name}  {branch}  {workspace_id}  {path}")
+    # Orca calls a chat a structured session.
+    surface = "chat" if started == "structured" else started
+    print(f"{surface}  {branch} from {parent or 'the default branch'}  {path}")
     return 0
 
 
