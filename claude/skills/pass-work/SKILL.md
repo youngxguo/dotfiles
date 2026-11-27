@@ -50,9 +50,10 @@ something the other has. Leave those out.
 python3 ${CLAUDE_SKILL_DIR}/pass_work.py --to <machine> --brief-file <file>
 ```
 
-`--to` takes the other machine's name in `orca environment list`, or any part
-only it has, such as `work` or `personal`. `--dry-run`, which needs no brief,
-says what a pass would do and changes nothing.
+`--to` takes the other machine's name in `orca environment list`, or a word
+from it that no other paired machine shares, such as `work` or `personal`.
+`--dry-run`, which needs no brief, says what a pass would do and changes
+nothing.
 
 The other Orca gets the branch in a new worktree, or fast-forwarded in the one
 it already has on that branch, and Claude starts there with the brief. The
@@ -62,6 +63,8 @@ Then stop working on this branch here. This worktree stays, and a pass back
 lands in it.
 
 ## When it refuses
+
+A refusal exits 1 and prints one line that says why. The usual ones:
 
 - **The other machine has commits or changes of its own on the branch.** It was
   worked on there since the last pass. Nothing was started. Tell the user: that
