@@ -127,6 +127,58 @@ class RepoSelectorTest(unittest.TestCase):
             kickoff.repo_selector(None)
 
 
+class ClosePassedSetupTest(unittest.TestCase):
+    def run_close(self, tails, wait=10):
+        """Run against a worktree whose terminals show `tails`; returns the calls."""
+        calls = []
+
+        def orca(*args, **kwargs):
+            calls.append(args)
+            if args[:2] == ("terminal", "list"):
+                return {"terminals": [{"handle": handle} for handle in tails]}
+            if args[:2] == ("terminal", "read"):
+                return {"terminal": {"tail": tails[args[3]]}}
+            return {}
+
+        with (
+            mock.patch.object(kickoff, "orca", orca),
+            mock.patch.object(kickoff.time, "sleep"),
+        ):
+            kickoff.close_passed_setup("/wt/thing", wait=wait)
+        return calls
+
+    def closed(self, calls):
+        return [c[3] for c in calls if c[:2] == ("terminal", "close")]
+
+    def test_a_passed_setup_has_its_tab_closed(self):
+        calls = self.run_close(
+            {"term_1": ["$ bash -lc '...'", "__ORCA_SETUP_COMPLETE__:ab-12:0", "$"]}
+        )
+        self.assertEqual(calls[0], ("terminal", "list", "--worktree", "path:/wt/thing"))
+        self.assertEqual(
+            calls[-1], ("terminal", "close", "--terminal", "term_1", "--tab")
+        )
+
+    def test_a_failed_setup_keeps_its_tab(self):
+        calls = self.run_close({"term_1": ["__ORCA_SETUP_COMPLETE__:ab-12:1"]}, wait=0)
+        self.assertEqual(self.closed(calls), [])
+
+    def test_the_echoed_command_is_not_taken_for_the_result(self):
+        echoed = "printf '\\n__ORCA_SETUP_COMPLETE__:ab-12:%s\\n' \"$status\""
+        calls = self.run_close({"term_1": [echoed]}, wait=0)
+        self.assertEqual(self.closed(calls), [])
+
+    def test_a_worktree_without_terminals_returns_at_once(self):
+        self.assertEqual(len(self.run_close({})), 1)
+
+    def test_an_orca_error_leaves_the_kickoff_standing(self):
+        def orca(*args, **kwargs):
+            raise SystemExit("orca terminal list failed")
+
+        with mock.patch.object(kickoff, "orca", orca):
+            kickoff.close_passed_setup("/wt/thing")
+
+
 class MainTest(unittest.TestCase):
     def run_main(self, argv, result=None, default="main", status=RUNNING):
         """Run main against a fake Orca; returns (create args, stdout, git calls)."""
@@ -237,6 +289,12 @@ class MainTest(unittest.TestCase):
     def test_a_terminal_launch_is_reported_as_one(self):
         _, out, _ = self.run_main(["thing", "task"], opened("/wt/thing", "terminal"))
         self.assertTrue(out.startswith("terminal  "))
+
+    def test_only_a_chat_launch_has_its_setup_tab_closed(self):
+        for kind, expected in (("structured", ["/wt/thing"]), ("terminal", [])):
+            with mock.patch.object(kickoff, "close_passed_setup") as close:
+                self.run_main(["thing", "task"], opened("/wt/thing", kind))
+            self.assertEqual([c.args[0] for c in close.call_args_list], expected)
 
     def test_a_worktree_without_an_agent_fails_and_names_the_path(self):
         with self.assertRaisesRegex(SystemExit, "did not start.*at /wt/thing"):
