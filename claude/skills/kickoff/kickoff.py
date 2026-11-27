@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ORCA_APP_BIN = "/Applications/Orca.app/Contents/Resources/bin/orca"
@@ -70,6 +71,38 @@ def orca(*args: str, timeout: int = 60) -> dict:
     raise SystemExit(
         f"orca {' '.join(args[:2])} failed: {why or f'exit status {proc.returncode}'}"
     )
+
+
+# What Orca prints in a setup terminal when the repository's setup script
+# ends, here with exit status 0.
+SETUP_PASSED = re.compile(r"^__ORCA_SETUP_COMPLETE__:[\w-]+:0\s*$", re.MULTILINE)
+
+
+def close_passed_setup(path: str, wait: float = 10) -> None:
+    """Close the Setup tab of a new chat worktree once its setup has passed.
+
+    Orca runs a repository's setup script in a terminal tab, and a worktree
+    made through its CLI opens on that tab instead of the chat; the CLI has no
+    option for which tab to open on. A setup that fails, or is still running
+    after `wait` seconds, keeps its tab."""
+    deadline = time.monotonic() + wait
+    try:
+        while True:
+            listed = orca("terminal", "list", "--worktree", f"path:{path}")
+            terminals = listed.get("terminals") or []
+            for terminal in terminals:
+                handle = terminal["handle"]
+                read = orca("terminal", "read", "--terminal", handle)
+                tail = (read.get("terminal") or {}).get("tail") or []
+                if SETUP_PASSED.search("\n".join(tail)):
+                    orca("terminal", "close", "--terminal", handle, "--tab")
+                    return
+            if not terminals or time.monotonic() >= deadline:
+                return
+            time.sleep(1)
+    except (SystemExit, KeyError):
+        # The worktree and its agent are already running; the tab just stays.
+        return
 
 
 def slugify(text: str) -> str:
@@ -170,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Orca calls a chat a structured session.
     surface = "chat" if started == "structured" else started
+    if surface == "chat":
+        close_passed_setup(path)
     print(f"{surface}  {branch} from {parent or 'the default branch'}  {path}")
     return 0
 

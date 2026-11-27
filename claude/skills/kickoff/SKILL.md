@@ -62,6 +62,9 @@ The script asks Orca for a new worktree of the current repository with Claude
 started on the brief, and returns. Orca decides the rest. Its Claude command
 picks the login and the model, so there is no seat or task size to pass. Its
 Chat or CLI setting picks the surface; a chat stays on the login it started on.
+When the repository has a setup script, Orca runs it in a Setup tab and would
+open the worktree on that tab; the script closes it once setup has passed, so
+the worktree opens on the chat. A failed or slow setup keeps its tab.
 Pass `--model` only when the user names a model:
 
 ```bash
