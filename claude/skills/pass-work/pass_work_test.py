@@ -46,11 +46,13 @@ class Orca:
         made: dict | None = None,
         prompt: str = "journaled",
         project: str | None = PROJECT,
+        reached: str | None = HEAD,
     ) -> None:
         self.there = there
         self.made = made
         self.prompt = prompt
         self.project = project
+        self.reached = reached
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, *args: str, timeout: int = 60) -> dict:
@@ -68,8 +70,9 @@ class Orca:
             return {"worktree": self.made}
         if command == ("terminal", "create"):
             return {"terminal": {"handle": "t1"}}
-        if command == ("terminal", "wait"):
-            return {"wait": {"satisfied": True}}
+        if command == ("terminal", "read"):
+            said = [f"PASS-HEAD {self.reached}"] if self.reached else []
+            return {"terminal": {"tail": ["$ git fetch origin", *said, "$ "]}}
         if command == ("terminal", "list"):
             return {"terminals": []}
         if command == ("agent", "launch"):
@@ -113,7 +116,7 @@ class PassTest(unittest.TestCase):
                     pass_work,
                     orca=orca,
                     git=git or git_answers(),
-                    HEAD_POLLS=1,
+                    SYNC_TIMEOUT=0,
                     close_passed_setup=mock.Mock(),
                 ),
                 mock.patch.object(pass_work.subprocess, "run", self.push),
@@ -193,7 +196,8 @@ class PassTest(unittest.TestCase):
 
     def test_no_claude_starts_on_another_commit_or_branch(self):
         cases = {
-            "existing worktree never reached it": Orca([PRIMARY, tree(STALE)]),
+            "existing worktree stayed behind": Orca([PRIMARY, tree()], reached=STALE),
+            "existing worktree never answered": Orca([PRIMARY, tree()], reached=None),
             "new worktree on a stale commit": Orca([PRIMARY], made=tree(STALE)),
             "new worktree on a renamed branch": Orca(
                 [PRIMARY], made=tree(HEAD, "me/task-2")

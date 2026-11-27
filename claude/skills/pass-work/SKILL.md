@@ -25,7 +25,9 @@ scratch note) do not travel, so put what matters from them in the brief.
 
 ## Write the brief
 
-Write it to a file, for a reader who was never in this conversation:
+Write it to a file outside the worktree (your scratch directory), so it does
+not count as an uncommitted path, for a reader who was never in this
+conversation:
 
 - what the work is for, in the user's words where they gave them
 - what is done, and how you checked it
@@ -38,18 +40,23 @@ Write it to a file, for a reader who was never in this conversation:
   running elsewhere
 - a loop or scheduled job you ended, with the exact command that starts it again
 
+The script puts two sentences in front of your brief: which machine the work
+came from, with the branch and commit, and that this machine may lack
+something the other has. Leave those out.
+
 ## Pass
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/pass_work.py --to personal --brief-file <file>
+python3 ${CLAUDE_SKILL_DIR}/pass_work.py --to <machine> --brief-file <file>
 ```
 
 `--to` takes the other machine's name in `orca environment list`, or any part
-only it has. `--dry-run` says what a pass would do and changes nothing.
+only it has, such as `work` or `personal`. `--dry-run`, which needs no brief,
+says what a pass would do and changes nothing.
 
 The other Orca gets the branch in a new worktree, or fast-forwarded in the one
 it already has on that branch, and Claude starts there with the brief. The
-script prints that worktree and session; give both to the user.
+script prints that worktree and session; report both.
 
 Then stop working on this branch here. This worktree stays, and a pass back
 lands in it.

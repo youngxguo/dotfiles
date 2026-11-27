@@ -16,8 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kickoff"))
 from kickoff import close_passed_setup, git, orca  # noqa: E402
 
 BRANCH_NAME = re.compile(r"^[A-Za-z0-9._/-]+$")
-SYNC_TIMEOUT_MS = 180_000
-HEAD_POLLS = 20
+SYNC_TIMEOUT = 180
+HEAD_MARK = "PASS-HEAD"
+HEAD_LINE = re.compile(rf"^{HEAD_MARK} ([0-9a-f]{{40}})$")
 DELIVERED = {"journaled", "handed-to-terminal"}
 OPENING = (
     "This work was passed to you from the Orca on {source}. Branch {branch} is at"
@@ -82,9 +83,13 @@ def publish(branch: str, head: str) -> None:
         )
 
 
-def run_there(to: str, worktree_id: str, title: str, command: str) -> None:
-    """Orca drops a terminal's output once it exits, so nothing is read back: the
-    caller checks the result in Orca's own worktree data."""
+def run_there(to: str, worktree_id: str, title: str, command: str) -> str | None:
+    """Runs `command` in a terminal of that worktree on `to` and returns the commit
+    the worktree is on afterwards, or None when it never answered.
+
+    The terminal stays open and prints the commit itself, read from its screen:
+    Orca drops a terminal's output once it exits, and its worktree list can lag
+    git by more than twenty seconds after a merge."""
     target = ("--environment", to)
     handle = orca(
         "terminal",
@@ -94,29 +99,24 @@ def run_there(to: str, worktree_id: str, title: str, command: str) -> None:
         "--title",
         title,
         "--command",
-        f"{command}; exit",
+        f'{command}; echo "{HEAD_MARK} $(git rev-parse HEAD)"',
         *target,
     )["terminal"]["handle"]
+    deadline = time.monotonic() + SYNC_TIMEOUT
     try:
-        waited = orca(
-            "terminal",
-            "wait",
-            "--terminal",
-            handle,
-            "--for",
-            "exit",
-            "--timeout-ms",
-            str(SYNC_TIMEOUT_MS),
-            *target,
-            timeout=SYNC_TIMEOUT_MS // 1000 + 30,
-        )
+        while True:
+            read = orca("terminal", "read", "--terminal", handle, "--screen", *target)
+            for line in reversed((read.get("terminal") or {}).get("tail") or []):
+                if answered := HEAD_LINE.match(line.strip()):
+                    return answered.group(1)
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(1)
     finally:
         try:
             orca("terminal", "close", "--terminal", handle, *target)
         except SystemExit:
             pass
-    if not (waited.get("wait") or {}).get("satisfied"):
-        raise SystemExit(f"`{command}` did not finish on {to}")
 
 
 def fetch(branch: str) -> str:
@@ -155,32 +155,23 @@ def destination(to: str, project: str, branch: str) -> tuple[dict, dict | None]:
     return primary, on_branch
 
 
-def fast_forwarded(to: str, project: str, branch: str, head: str) -> dict | None:
-    """Orca's worktree list lags git by a few seconds after a merge."""
-    for attempt in range(HEAD_POLLS):
-        if attempt:
-            time.sleep(1)
-        _, there = destination(to, project, branch)
-        if there is not None and there.get("head") == head:
-            return there
-    return None
-
-
 def bring(
     to: str, project: str, branch: str, head: str, note: str
 ) -> tuple[dict, bool]:
     """The worktree on `to` that holds the branch at `head`, and whether it is new."""
     primary, on_branch = destination(to, project, branch)
     target = on_branch or primary
-    run_there(to, target["id"], f"pass {branch}", sync_command(branch, bool(on_branch)))
+    reached = run_there(
+        to, target["id"], f"pass {branch}", sync_command(branch, bool(on_branch))
+    )
     if on_branch is not None:
-        there = fast_forwarded(to, project, branch, head)
-        if there is None:
+        if reached != head:
             raise SystemExit(
                 f"{on_branch['path']} on {to} did not fast-forward to {head[:12]}:"
                 " it has commits or changes of its own on this branch, or could not"
                 " fetch. Settle it there first"
             )
+        there = on_branch
         orca(
             "worktree",
             "set",
