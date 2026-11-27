@@ -32,10 +32,11 @@ seat, and say so in the report.
 - Read `~/.local/state/setup-audit/declined.md`: one line per suggestion the
   person turned down. Never raise one of those again.
 - Read the last seven reports in `~/.local/state/setup-audit/reports/` dated
-  before today, so a second run on the same day reads fresh. A finding
-  that is still true carries its first date (`since 10-24`). One that has stood
-  unacted for seven days moves to the Standing list at the end, one line each,
-  and never leads the report.
+  before today, so a second run on the same day reads fresh. Take their
+  findings and dates, not their shape. A finding that is still true carries
+  its first date (`since 10-24`). One that has stood unacted for seven days
+  moves to the Standing list at the end, one line each, and never leads the
+  report.
 
 ## 2. Read the work
 
@@ -177,8 +178,7 @@ In the work, look for patterns across sessions, not single events:
   theirs that never landed.
 
 The cost is their attention (prompts and hours spent steering), tokens spent,
-and work discarded. Put what went well in two or three lines, so the findings
-read against it.
+and work discarded.
 
 Each finding carries its evidence (the quoted line), what it costs, since when,
 and one fix: a command the person runs, a decision they make, or what a kickoff
@@ -187,27 +187,28 @@ one that clears today's instance.
 
 ## 5. Report
 
+The person reads the report for the changes to make, so it is that list and
+little else. It fits on one screen, about 40 lines. What was read along the
+way stays out: no window numbers, no account of what landed or went well, no
+list of surfaces that were fine, no work in flight.
+
 Write the report to `~/.local/state/setup-audit/reports/<YYYY-MM-DD>.md`
 (`<YYYY-MM-DD>-2.md` when today's exists), then print it in full as the last
 message, in this order:
 
-1. **Verdict.** One line on how the work and the setup went, and the one thing
-   to do today. It comes from whichever half costs more.
-2. **The work.** The window's numbers: prompts, sessions, peak concurrency,
-   PRs opened, merged and closed unmerged, and compactions. Then what landed,
-   in a few lines, then a ranked table of work findings (`W1`, `W2`, …):
-   finding, evidence, cost, fix, since.
-3. **The setup.** The same table for the setup.
-4. **Notes.** A short paragraph per finding, only where the table row can't
-   carry it.
-5. **Standing**, then the surfaces skipped and why.
-6. **What to do.** The findings synthesized into a short numbered list of
-   actions, one line each, naming the rows it settles; one action that covers
-   several rows is one line. Order: decisions only the person can make, then
-   changes this pane or a kickoff can make on their word, then quick ones they
-   do themselves. End by asking which to start.
-When the Slack tools are loaded, DM the person the verdict, the top three rows
-and the report's path.
+1. **Verdict.** One or two sentences on how the work and the setup went, and
+   the one thing to do today. It comes from whichever half costs more.
+2. **Changes to make.** One numbered list across both halves, ranked by cost,
+   seven items at most; a finding below the cut is left out. Each item is two
+   or three lines: the change first (the command they run, the decision they
+   make, or what this pane or a kickoff does on their word), then the quoted
+   line that shows the problem, what it costs, and since when.
+3. **Standing.** One line each, when there are any.
+4. **Skipped.** One line naming the surfaces not read and why, when there are
+   any.
+
+End by asking which to start. When the Slack tools are loaded, DM the person
+the verdict, the top three changes and the report's path.
 
 When the person declines a finding in the pane, append one line to
 `~/.local/state/setup-audit/declined.md` with the date and the finding.
