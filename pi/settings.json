@@ -22,6 +22,7 @@
     "npm:@ryan_nookpi/pi-extension-codex-fast-mode@0.2.6"
   ],
   "skills": [
+    "~/.claude/skills/herdr",
     "~/.claude/skills/kickoff",
     "~/.pi/agent/claude-synced-skills"
   ],

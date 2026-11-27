@@ -1,0 +1,10 @@
+id = "young.worktree-cleanup"
+name = "Worktree Cleanup"
+version = "0.1.0"
+min_herdr_version = "0.8.2"
+description = "Remove a herdr-managed git worktree checkout when its workspace is closed"
+platforms = ["linux", "macos"]
+
+[[events]]
+on = "workspace.closed"
+command = ["python3", "cleanup.py"]

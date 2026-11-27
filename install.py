@@ -27,7 +27,16 @@ VERIFY_MODE = False
 UPDATE_PLUGINS = False
 BTOP_VERSION = "v1.4.7"
 GH_EXTENSIONS = ("dlvhdr/gh-dash",)
+HERDR_INSTALL_URL = "https://herdr.dev/install.sh"
 TERMINAL_BROWSER_INSTALL_URL = "https://terminal-browser.sh/install"
+HERDR_PLUGINS = (
+    ("lmilojevicc/herdr-splits.nvim", "herdr-splits"),
+    ("kryptamine/herdr-auto-title", "herdr.auto-title"),
+)
+HERDR_LOCAL_PLUGINS = (
+    ("herdr/plugins/agent-index", "young.agent-index"),
+    ("herdr/plugins/worktree-cleanup", "young.worktree-cleanup"),
+)
 SETUP_AUDIT_JOB = "setup-audit-kickoff"
 SETUP_AUDIT_LAUNCHD_LABEL = f"com.young.{SETUP_AUDIT_JOB}"
 PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
@@ -65,6 +74,12 @@ LINUX_PACKAGE_OVERRIDES = {
         "dnf": "nodejs",
         "pacman": "nodejs",
         "zypper": "nodejs",
+    },
+    "go": {
+        "apt": "golang-go",
+        "dnf": "golang",
+        "pacman": "go",
+        "zypper": "go",
     },
     "imagemagick": {
         "dnf": "ImageMagick",
@@ -368,11 +383,24 @@ def link_file(source_path, target_path):
     target.symlink_to(source)
 
 
+def herdr_auto_title_config_path():
+    """herdr-auto-title resolves its config dir with Go's os.UserConfigDir:
+    Application Support on macOS, ~/.config elsewhere. It is not the plugin
+    config dir `herdr plugin list` prints."""
+    if sys.platform == "darwin":
+        base = HOME / "Library/Application Support"
+    else:
+        base = HOME / ".config"
+    return base / "herdr-auto-title/config.env"
+
+
 def managed_links():
     links = [
         ("zsh", REPO_ROOT / "zsh/zshrc", HOME / ".zshrc"),
         ("zsh", REPO_ROOT / "starship/starship.toml", HOME / ".config/starship.toml"),
         ("ghostty", REPO_ROOT / "ghostty/config", HOME / ".config/ghostty/config"),
+        ("herdr", REPO_ROOT / "herdr/config.toml", HOME / ".config/herdr/config.toml"),
+        ("herdr", REPO_ROOT / "herdr/auto-title.env", herdr_auto_title_config_path()),
     ]
 
     shader_dir = REPO_ROOT / "ghostty/shaders"
@@ -650,6 +678,103 @@ def install_ghostty():
     apply_links(links_for("ghostty"))
 
 
+def herdr_command():
+    if command_exists("herdr"):
+        return "herdr"
+    installer_binary = HOME / ".local/bin/herdr"
+    return str(installer_binary) if installer_binary.is_file() else None
+
+
+def herdr_installed():
+    return herdr_command() is not None
+
+
+def lazy_lock_commit(plugin_name):
+    # herdr-splits ships both halves from one repo: the herdr-side actions and
+    # the neovim-side plugin have to speak the same protocol, so pin herdr's copy
+    # to whatever lazy already pinned instead of drifting onto the default branch.
+    lockfile = REPO_ROOT / "neovim/lazy-lock.json"
+    try:
+        pins = json.loads(lockfile.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    entry = pins.get(plugin_name)
+    return entry.get("commit") if isinstance(entry, dict) else None
+
+
+def install_herdr_plugins():
+    herdr = herdr_command()
+    if herdr is None:
+        print("skipping herdr plugins: herdr is not installed")
+        return
+
+    try:
+        plugin_output = subprocess.check_output(
+            [herdr, "plugin", "list"], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, OSError):
+        print("skipping herdr plugins: unable to list installed plugins")
+        return
+
+    for repo, plugin_id in HERDR_PLUGINS:
+        if plugin_id in plugin_output:
+            print(f"herdr plugin {plugin_id} already installed")
+            continue
+        commit = lazy_lock_commit(repo.rsplit("/", 1)[-1])
+        pin = ["--ref", commit] if commit else []
+        try:
+            run([herdr, "plugin", "install", repo, *pin, "-y"])
+        except subprocess.CalledProcessError:
+            print(f"warning: unable to install herdr plugin {repo}; continuing")
+
+    for relative_path, plugin_id in HERDR_LOCAL_PLUGINS:
+        if plugin_id in plugin_output:
+            print(f"herdr plugin {plugin_id} already linked")
+            continue
+        try:
+            run([herdr, "plugin", "link", str(REPO_ROOT / relative_path)])
+        except subprocess.CalledProcessError:
+            print(f"warning: unable to link herdr plugin {relative_path}; continuing")
+
+    try:
+        status = subprocess.check_output(
+            [herdr, "status", "server"], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return
+    if "status: running" not in status:
+        return
+    try:
+        run([herdr, "server", "reload-config"])
+    except subprocess.CalledProcessError:
+        print(
+            "warning: unable to reload herdr config; restart herdr to pick up plugins"
+        )
+
+
+def install_herdr():
+    print("installing herdr")
+    if VERIFY_MODE:
+        print("verify mode: skipping herdr bootstrap")
+    elif herdr_installed():
+        print("herdr already installed")
+    else:
+        try:
+            run(["sh", "-c", f"curl -fsSL {HERDR_INSTALL_URL} | sh"])
+        except subprocess.CalledProcessError:
+            print("warning: unable to install herdr; continuing")
+
+    print("applying herdr config")
+    apply_links(links_for("herdr"))
+
+    if not VERIFY_MODE:
+        # herdr compiles auto-title from source when it installs it, so go has
+        # to be there first.
+        install_package("go")
+        print("installing herdr plugins")
+        install_herdr_plugins()
+
+
 def install_terminal_browser():
     print("installing terminal-browser")
     if VERIFY_MODE:
@@ -805,6 +930,34 @@ def merge_claude_global_config():
         reconcile_json_settings(target, CLAUDE_GLOBAL_CONFIG)
 
 
+def install_claude_herdr_skill():
+    herdr = herdr_command()
+    if herdr is None:
+        print("skipping claude herdr skill: herdr is not installed")
+        return
+    try:
+        skill = subprocess.check_output(
+            [herdr, "--skill"], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, OSError):
+        print("skipping claude herdr skill: `herdr --skill` failed")
+        return
+    if not skill.lstrip().startswith("---"):
+        print("skipping claude herdr skill: `herdr --skill` did not return a skill")
+        return
+
+    for config_dir in claude_config_dirs():
+        target = config_dir / "skills/herdr/SKILL.md"
+        if target.is_symlink():
+            raise RuntimeError(f"refusing to overwrite symlink: {target}")
+        if target.is_file() and target.read_text(encoding="utf-8") == skill:
+            print(f"claude herdr skill already current: {target}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(skill, encoding="utf-8")
+        print(f"wrote claude herdr skill to {target}")
+
+
 def merge_claude_settings():
     template = load_json_object(REPO_ROOT / "claude/settings.json", "claude settings")
     if template is None:
@@ -883,8 +1036,10 @@ def install_claude():
     merge_claude_settings()
     point_cseat_at_claude_settings()
     merge_claude_global_config()
+    install_claude_herdr_skill()
     if not VERIFY_MODE:
         install_claude_external_skills()
+        install_claude_herdr_integrations()
 
 
 def install_claude_external_skills():
@@ -1114,6 +1269,110 @@ def install_pi_cli():
         run(cmd)
     except subprocess.CalledProcessError:
         print("warning: unable to install pi; continuing")
+
+
+def install_herdr_integration(target, env=None):
+    herdr = herdr_command()
+    if herdr is None:
+        print(f"skipping {target} herdr integration: herdr is not installed")
+        return
+
+    check_kwargs = {"env": env} if env is not None else {}
+    try:
+        status = subprocess.check_output(
+            [herdr, "integration", "status"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            **check_kwargs,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        status = ""
+    if any(line.startswith(f"{target}: current ") for line in status.splitlines()):
+        print(f"{target} herdr integration already current")
+        return
+
+    try:
+        command = [herdr, "integration", "install", target]
+        if env is None:
+            run(command)
+        else:
+            run(command, env=env)
+    except subprocess.CalledProcessError:
+        print(f"warning: unable to install {target} herdr integration; continuing")
+
+
+def remove_cross_account_claude_herdr_hooks(config_dir):
+    """Keep only the Herdr SessionStart hook installed for this Claude account."""
+    settings_path = config_dir / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return
+    hooks = settings.get("hooks")
+    groups = hooks.get("SessionStart") if isinstance(hooks, dict) else None
+    if not isinstance(groups, list):
+        return
+
+    hook_names = ("herdr-agent-state.sh", "herdr-agent-state.ps1")
+    expected_hook_paths = tuple(str(config_dir / "hooks" / name) for name in hook_names)
+    changed = False
+    kept_groups = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            kept_groups.append(group)
+            continue
+        kept_commands = []
+        for hook in group["hooks"]:
+            command = hook.get("command", "") if isinstance(hook, dict) else ""
+            is_herdr_hook = isinstance(command, str) and any(
+                name in command for name in hook_names
+            )
+            is_expected_hook = isinstance(command, str) and any(
+                path in command for path in expected_hook_paths
+            )
+            if is_herdr_hook and not is_expected_hook:
+                changed = True
+                continue
+            kept_commands.append(hook)
+        if kept_commands:
+            if len(kept_commands) != len(group["hooks"]):
+                group["hooks"] = kept_commands
+            kept_groups.append(group)
+        elif group["hooks"]:
+            changed = True
+
+    if not changed:
+        return
+    hooks["SessionStart"] = kept_groups
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    print(f"removed cross-account claude herdr hooks from {settings_path}")
+
+
+def install_claude_herdr_integrations():
+    # Herdr registers its hook in settings.json under the login's own path.
+    # Logins that share one settings.json (cseat links each seat's to
+    # ~/.claude) keep the first login's registration: installing or cleaning
+    # up for a second one would strip it from all of them.
+    registered = set()
+    for config_dir in claude_config_dirs():
+        settings_path = (config_dir / "settings.json").resolve()
+        if settings_path in registered:
+            print(f"claude herdr integration already shared through {config_dir}")
+            continue
+        registered.add(settings_path)
+        env = os.environ.copy()
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+        install_herdr_integration("claude", env=env)
+        hooks_dir = config_dir / "hooks"
+        if any(
+            (hooks_dir / name).is_file()
+            for name in ("herdr-agent-state.sh", "herdr-agent-state.ps1")
+        ):
+            remove_cross_account_claude_herdr_hooks(config_dir)
+
+
+def install_pi_herdr_integration():
+    install_herdr_integration("pi")
 
 
 def merge_pi_settings():
@@ -1355,6 +1614,8 @@ def install_pi():
     merge_pi_settings()
     apply_links(links_for("pi"))
     link_pi_claude_synced_skills()
+    if not VERIFY_MODE:
+        install_pi_herdr_integration()
 
 
 def ensure_codex_local_config():
@@ -1477,6 +1738,7 @@ def run_install_flow():
     install_github_cli()
     install_zsh_stack()
     install_ghostty()
+    install_herdr()
     install_btop()
     install_terminal_browser()
     install_claude()

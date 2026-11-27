@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
-import autoSessionTitle, { titleFromPrompt } from "./auto-session-title.ts";
+import autoSessionTitle, {
+	herdrRepoToken,
+	herdrSubscriptionToken,
+	herdrTitleRows,
+	titleFromPrompt,
+} from "./auto-session-title.ts";
 
-function extensionHarness(entries = []) {
+function extensionHarness(entries = [], execImplementation) {
 	const handlers = new Map();
 	const terminalTitles = [];
+	const execCalls = [];
 	let sessionName = entries.findLast((entry) => entry.type === "session_info")?.name;
 	const pi = {
 		on(event, handler) {
@@ -18,6 +26,19 @@ function extensionHarness(entries = []) {
 			sessionName = name;
 			entries.push({ type: "session_info", name });
 		},
+		async exec(command, args) {
+			execCalls.push({ command, args });
+			if (execImplementation) return execImplementation(command, args);
+			if (args[0] === "agent" && args[1] === "list") {
+				return {
+					stdout: '{"result":{"agents":[]}}',
+					stderr: "",
+					code: 0,
+					killed: false,
+				};
+			}
+			return { stdout: "", stderr: "", code: 1, killed: false };
+		},
 	};
 	const ctx = {
 		mode: "tui",
@@ -27,7 +48,7 @@ function extensionHarness(entries = []) {
 		ui: { setTitle: (title) => terminalTitles.push(title) },
 	};
 	autoSessionTitle(pi);
-	return { ctx, handlers, pi, terminalTitles };
+	return { ctx, execCalls, handlers, pi, terminalTitles };
 }
 
 test("uses a short opening request as the fallback title", () => {
@@ -57,6 +78,37 @@ test("does not name an empty text-only prompt", () => {
 	assert.equal(titleFromPrompt(" \n\t "), undefined);
 });
 
+test("wraps Herdr titles into the shared three-row layout", () => {
+	assert.deepEqual(herdrTitleRows("Fix blank agents menu in herdr", 12), [
+		"Fix blank",
+		"agents menu",
+		"in herdr",
+	]);
+	assert.deepEqual(
+		herdrTitleRows("one two three four five six seven eight", 10),
+		["one two", "three four", "five six…"],
+	);
+});
+
+test("assigns repositories stable palette colors", () => {
+	assert.equal(herdrRepoToken("frontend"), herdrRepoToken("frontend"));
+	assert.notEqual(herdrRepoToken("frontend"), herdrRepoToken("backend"));
+});
+
+test("subscription palettes accept arbitrary labels and agree with Claude", () => {
+	const shell = readFileSync(new URL("../../claude/statusline-command.sh", import.meta.url), "utf8");
+	const python = shell.match(/account_slot=\$\(ACCOUNT="\$account" python3 -c '([\s\S]*?)'\)/)[1];
+	for (const label of ["c1", "c7", "c8", "c9", "c99", "c1000", "c99999999999999999999", "codex", ".claude-test", ".claude-é"]) {
+		const slot = execFileSync("python3", ["-c", python], {
+			env: { ...process.env, ACCOUNT: label }, encoding: "utf8",
+		}).trim();
+		assert.equal(herdrSubscriptionToken(label), slot === "8" ? "subscription_codex" : `subscription_color_${slot}`);
+		assert.match(herdrSubscriptionToken(label), /^subscription_(color_[1-7]|codex)$/);
+	}
+	assert.equal(herdrSubscriptionToken("c8"), herdrSubscriptionToken("c1"));
+	assert.equal(herdrSubscriptionToken("codex"), "subscription_codex");
+});
+
 test("names a new session and its terminal from the opening request", () => {
 	const harness = extensionHarness();
 	harness.handlers.get("before_agent_start")(
@@ -71,7 +123,7 @@ test("names a new session and its terminal from the opening request", () => {
 test("refines the fallback with a model-generated title", async () => {
 	const harness = extensionHarness();
 	harness.ctx.modelRegistry.complete = async () => ({
-		content: [{ type: "text", text: "Pi auto session titles" }],
+		content: [{ type: "text", text: "Pi and Herdr auto titles" }],
 	});
 	harness.handlers.get("before_agent_start")(
 		{ prompt: "auto session title is not working for pi" },
@@ -80,8 +132,8 @@ test("refines the fallback with a model-generated title", async () => {
 	harness.handlers.get("agent_settled")({}, harness.ctx);
 	await new Promise((resolve) => setImmediate(resolve));
 
-	assert.equal(harness.pi.getSessionName(), "Pi auto session titles");
-	assert.ok(harness.terminalTitles.includes("Pi auto session titles"));
+	assert.equal(harness.pi.getSessionName(), "Pi and Herdr auto titles");
+	assert.ok(harness.terminalTitles.includes("Pi and Herdr auto titles"));
 });
 
 test("does not replace a manual name", () => {
@@ -96,9 +148,277 @@ test("does not replace a manual name", () => {
 	assert.deepEqual(harness.terminalTitles, []);
 });
 
-test("clears its terminal title on /new", () => {
-	const harness = extensionHarness();
-	harness.handlers.get("session_shutdown")({ reason: "new" }, harness.ctx);
+test("clears its terminal and Herdr titles on /new", async () => {
+	const originalEnvironment = {
+		HERDR_BIN_PATH: process.env.HERDR_BIN_PATH,
+		HERDR_ENV: process.env.HERDR_ENV,
+		HERDR_PANE_ID: process.env.HERDR_PANE_ID,
+	};
+	process.env.HERDR_BIN_PATH = "herdr-test";
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p2";
 
-	assert.deepEqual(harness.terminalTitles, [""]);
+	try {
+		const harness = extensionHarness();
+		await harness.handlers.get("session_shutdown")(
+			{ reason: "new" },
+			harness.ctx,
+		);
+
+		assert.deepEqual(harness.terminalTitles, [""]);
+		const reports = harness.execCalls.filter(
+			(call) => call.command === "herdr-test" && call.args[0] === "pane",
+		);
+		assert.equal(reports.length, 3);
+		for (const report of reports) {
+			const updates = report.args.filter(
+				(arg) => arg === "--token" || arg === "--clear-token",
+			);
+			assert.ok(updates.length <= 16);
+		}
+		const reportArgs = reports.flatMap((report) => report.args);
+		for (const token of [
+			"title1",
+			"title2",
+			"title3",
+			"repo",
+			"repo_color_1",
+			"repo_color_2",
+			"repo_color_3",
+			"repo_color_4",
+			"repo_color_5",
+			"repo_color_6",
+			"branch",
+			"model",
+			"subscription",
+			"model_fable",
+			"model_opus",
+			"model_sonnet",
+			"model_haiku",
+			"model_sol",
+			"model_terra",
+			"model_luna",
+			"model_other",
+			...Array.from({ length: 7 }, (_, index) => `subscription_color_${index + 1}`),
+			"subscription_codex",
+			"pr_open",
+			"pr_draft",
+			"pr_merged",
+			"pr_closed",
+		]) {
+			const tokenIndex = reportArgs.indexOf(token);
+			assert.ok(tokenIndex > 0, `missing clear for ${token}`);
+			assert.equal(reportArgs[tokenIndex - 1], "--clear-token");
+		}
+		for (const report of reports) {
+			const seq = report.args[report.args.indexOf("--seq") + 1];
+			assert.ok(BigInt(seq) > BigInt(Number.MAX_SAFE_INTEGER));
+		}
+		assert.equal(
+			harness.execCalls.some((call) => call.command === "git" || call.command === "gh"),
+			false,
+		);
+	} finally {
+		for (const [name, value] of Object.entries(originalEnvironment)) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	}
+});
+
+test("publishes runtime details with the shared sidebar tokens", async () => {
+	const originalEnvironment = {
+		HERDR_BIN_PATH: process.env.HERDR_BIN_PATH,
+		HERDR_ENV: process.env.HERDR_ENV,
+		HERDR_PANE_ID: process.env.HERDR_PANE_ID,
+		HERDR_SOCKET_PATH: process.env.HERDR_SOCKET_PATH,
+	};
+	process.env.HERDR_BIN_PATH = "herdr-test";
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p2";
+	delete process.env.HERDR_SOCKET_PATH;
+
+	try {
+		const harness = extensionHarness([], async (command, args) => {
+			if (command === "herdr-test" && args[0] === "agent") {
+				return {
+					stdout:
+						'{"result":{"agents":[{"pane_id":"w1:p1"},{"pane_id":"w1:p2"}]}}',
+					stderr: "",
+					code: 0,
+					killed: false,
+				};
+			}
+			if (command === "git") {
+				return {
+					stdout: "/repo\nmain\n/repo/.git\n/repo/.git\n",
+					stderr: "",
+					code: 0,
+					killed: false,
+				};
+			}
+			if (command === "gh") {
+				return {
+					stdout: '[{"number":42,"state":"OPEN","isDraft":false}]',
+					stderr: "",
+					code: 0,
+					killed: false,
+				};
+			}
+			return { stdout: "", stderr: "", code: 0, killed: false };
+		});
+		harness.ctx.model = { id: "gpt-5.6-sol", provider: "openai-codex" };
+
+		harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
+		await new Promise((resolve) => setImmediate(resolve));
+		const emptySessionReport = harness.execCalls.find(
+			(call) => call.command === "herdr-test" && call.args[0] === "pane",
+		);
+		assert.ok(emptySessionReport);
+		assert.ok(emptySessionReport.args.includes("title1"));
+
+		harness.execCalls.length = 0;
+		harness.handlers.get("before_agent_start")(
+			{ prompt: "Fix blank agents menu in herdr" },
+			harness.ctx,
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+
+		const reports = harness.execCalls.filter(
+			(call) => call.command === "herdr-test" && call.args[0] === "pane",
+		);
+		assert.equal(reports.length, 3);
+		const bySource = (source) =>
+			reports.find(
+				(call) => call.args[call.args.indexOf("--source") + 1] === source,
+			);
+		const report = bySource("pi-auto-session-title");
+		const modelReport = bySource("pi-auto-session-title-model");
+		const subscriptionReport = bySource("pi-auto-session-title-subscription");
+		assert.ok(report);
+		assert.ok(modelReport);
+		assert.ok(subscriptionReport);
+		assert.ok(report.args.includes("title1=Fix blank agents menu in"));
+		assert.ok(report.args.includes("title2=herdr"));
+		assert.ok(report.args.includes("repo_color_4=📁 repo"));
+		assert.equal(report.args[report.args.indexOf("repo") - 1], "--clear-token");
+		assert.ok(report.args.includes("branch= main"));
+		assert.ok(modelReport.args.includes("model_sol=gpt-5.6-sol"));
+		assert.ok(subscriptionReport.args.includes("subscription_codex=codex"));
+		assert.ok(report.args.includes("pr_open= #42"));
+
+		harness.execCalls.length = 0;
+		const selectedModel = { id: "gpt-5.6-terra", provider: "openai-codex" };
+		harness.handlers.get("model_select")(
+			{ model: selectedModel, previousModel: harness.ctx.model, source: "set" },
+			harness.ctx,
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+
+		const changedReports = harness.execCalls.filter(
+			(call) => call.command === "herdr-test" && call.args[0] === "pane",
+		);
+		const changedModelReport = changedReports.find(
+			(call) =>
+				call.args[call.args.indexOf("--source") + 1] ===
+				"pi-auto-session-title-model",
+		);
+		const changedSubscriptionReport = changedReports.find(
+			(call) =>
+				call.args[call.args.indexOf("--source") + 1] ===
+				"pi-auto-session-title-subscription",
+		);
+		assert.ok(changedModelReport);
+		assert.ok(changedSubscriptionReport);
+		assert.ok(changedModelReport.args.includes("model_terra=gpt-5.6-terra"));
+		assert.ok(
+			changedSubscriptionReport.args.includes("subscription_codex=codex"),
+		);
+		const oldModelIndex = changedModelReport.args.indexOf("model_sol");
+		assert.ok(oldModelIndex > 0);
+		assert.equal(changedModelReport.args[oldModelIndex - 1], "--clear-token");
+	} finally {
+		for (const [name, value] of Object.entries(originalEnvironment)) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	}
+});
+
+test("reports a finished PR only when its head is in the branch history", async () => {
+	const originalEnvironment = {
+		HERDR_BIN_PATH: process.env.HERDR_BIN_PATH,
+		HERDR_ENV: process.env.HERDR_ENV,
+		HERDR_PANE_ID: process.env.HERDR_PANE_ID,
+		HERDR_SOCKET_PATH: process.env.HERDR_SOCKET_PATH,
+	};
+	process.env.HERDR_BIN_PATH = "herdr-test";
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
+	delete process.env.HERDR_SOCKET_PATH;
+
+	const cases = [
+		{ state: "OPEN", inHistory: false, token: "pr_open #42" },
+		{ state: "MERGED", inHistory: true, token: "pr_merged #42 merged" },
+		{ state: "MERGED", inHistory: false, token: undefined },
+		{ state: "CLOSED", inHistory: false, token: undefined },
+	];
+	try {
+		for (const { state, inHistory, token } of cases) {
+			const harness = extensionHarness([], async (command, args) => {
+				if (command === "herdr-test" && args[0] === "agent") {
+					return {
+						stdout: '{"result":{"agents":[{"pane_id":"w1:p1"}]}}',
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (command === "git" && args.includes("merge-base")) {
+					return { stdout: "", stderr: "", code: inHistory ? 0 : 1, killed: false };
+				}
+				if (command === "git") {
+					return {
+						stdout: "/repo\nyoung/reused\n/repo/.git\n/repo/.git\n",
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				if (command === "gh") {
+					return {
+						stdout: JSON.stringify([
+							{ number: 42, state, isDraft: false, headRefOid: "a75bdd4d" },
+						]),
+						stderr: "",
+						code: 0,
+						killed: false,
+					};
+				}
+				return { stdout: "", stderr: "", code: 0, killed: false };
+			});
+
+			harness.handlers.get("before_agent_start")(
+				{ prompt: "Fix the sidebar PR tag" },
+				harness.ctx,
+			);
+			await new Promise((resolve) => setImmediate(resolve));
+
+			const report = harness.execCalls.find(
+				(call) =>
+					call.command === "herdr-test" &&
+					call.args[call.args.indexOf("--source") + 1] === "pi-auto-session-title",
+			);
+			assert.ok(report, `${state} in history ${inHistory}`);
+			const prTokens = report.args
+				.filter((arg) => arg.startsWith("pr_") && arg.includes("="))
+				.map((arg) => `${arg.split("=")[0]} ${arg.slice(arg.indexOf("#"))}`);
+			assert.deepEqual(prTokens, token ? [token] : [], `${state} in history ${inHistory}`);
+		}
+	} finally {
+		for (const [name, value] of Object.entries(originalEnvironment)) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	}
 });
