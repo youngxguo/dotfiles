@@ -165,9 +165,14 @@ def bring(
         to, target["id"], f"pass {branch}", sync_command(branch, bool(on_branch))
     )
     if on_branch is not None:
+        if reached is None:
+            raise SystemExit(
+                f"{on_branch['path']} on {to} did not answer in {SYNC_TIMEOUT}s:"
+                " nothing was started. Pass again once it is reachable"
+            )
         if reached != head:
             raise SystemExit(
-                f"{on_branch['path']} on {to} did not fast-forward to {head[:12]}:"
+                f"{on_branch['path']} on {to} is at {reached[:12]}, not {head[:12]}:"
                 " it has commits or changes of its own on this branch, or could not"
                 " fetch. Settle it there first"
             )

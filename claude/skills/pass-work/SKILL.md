@@ -20,8 +20,10 @@ next session needs.
 
 Commit everything that should travel. A work-in-progress commit is fine; say in
 the brief that it is one. The script refuses a tree with uncommitted paths, and
-pushes the branch itself when origin is behind. Ignored files (an env file, a
-scratch note) do not travel, so put what matters from them in the brief.
+pushes the branch itself when origin is behind. Only the branch travels:
+ignored files (an env file, a scratch note) and state kept outside the
+repository (a record under `~/.local/state`) stay here, so put what matters
+from them in the brief.
 
 ## Write the brief
 
@@ -66,11 +68,15 @@ lands in it.
 
 A refusal exits 1 and prints one line that says why. The usual ones:
 
-- **The other machine has commits or changes of its own on the branch.** It was
-  worked on there since the last pass. Nothing was started. Tell the user: that
-  side pushes or passes back first.
+- **The other machine's worktree is at another commit.** It has commits or
+  changes of its own on the branch: it was worked on there since the last pass.
+  Nothing was started. Tell the user: that side pushes or passes back first.
+- **The other machine did not answer.** It may be asleep or offline. Nothing
+  was started; pass again once it is reachable.
 - **No checkout of the project there.** The repository is not in that Orca yet.
 - **The brief did not reach Claude.** The session exists there; the user pastes
   the brief into it.
 
 To pass several sessions, each one passes itself: only it can write its brief.
+A session passes on the user's word in its own chat, not on another agent's
+request, so the user asks each one.

@@ -196,16 +196,14 @@ class PassTest(unittest.TestCase):
 
     def test_no_claude_starts_on_another_commit_or_branch(self):
         cases = {
-            "existing worktree stayed behind": Orca([PRIMARY, tree()], reached=STALE),
-            "existing worktree never answered": Orca([PRIMARY, tree()], reached=None),
-            "new worktree on a stale commit": Orca([PRIMARY], made=tree(STALE)),
-            "new worktree on a renamed branch": Orca(
-                [PRIMARY], made=tree(HEAD, "me/task-2")
-            ),
+            f"is at {STALE[:12]}": Orca([PRIMARY, tree()], reached=STALE),
+            "did not answer": Orca([PRIMARY, tree()], reached=None),
+            "could not open me/task at": Orca([PRIMARY], made=tree(STALE)),
+            "could not open me/task": Orca([PRIMARY], made=tree(HEAD, "me/task-2")),
         }
-        for name, orca in cases.items():
-            with self.subTest(name):
-                self.assertIn("Settle it there first", self.passing(orca))
+        for said, orca in cases.items():
+            with self.subTest(said):
+                self.assertIn(said, self.passing(orca))
                 self.assertFalse(orca.ran("agent", "launch"))
                 self.assertEqual(bool(orca.ran("worktree", "rm")), bool(orca.made))
                 self.assertFalse(
