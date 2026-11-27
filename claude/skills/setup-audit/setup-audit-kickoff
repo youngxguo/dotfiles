@@ -7,6 +7,12 @@
 # picks chat or terminal. A tick before 09:00, after today's pass, without
 # Orca or without network exits quietly, so a machine asleep at 09:00 runs the
 # pass at its first real wake.
+#
+# The audit runs on one machine, the one that holds its reports and declined
+# list. Turn it off on any other and install.py leaves it off:
+#   macOS: launchctl disable gui/$(id -u)/com.young.setup-audit-kickoff
+#   Linux: systemctl --user disable --now setup-audit-kickoff.timer &&
+#          ln -sf /dev/null ~/.config/systemd/user/setup-audit-kickoff.timer
 set -uo pipefail
 
 script=$(realpath "$0")

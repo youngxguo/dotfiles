@@ -864,7 +864,9 @@ class SetupAuditJobInstallTest(unittest.TestCase):
             home = Path(tmpdir) / "home"
             script = home / ".local/bin/setup-audit-kickoff"
             plist = home / "Library/LaunchAgents/com.young.setup-audit-kickoff.plist"
-            launchctl_print = mock.Mock(return_value=mock.Mock(returncode=113))
+            launchctl_print = mock.Mock(
+                return_value=mock.Mock(returncode=113, stdout="")
+            )
             with mock.patch.object(install.subprocess, "run", launchctl_print):
                 commands = self.install_job(home, "darwin")
 
@@ -891,9 +893,40 @@ class SetupAuditJobInstallTest(unittest.TestCase):
                 [["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)]],
             )
 
-            loaded = mock.Mock(return_value=mock.Mock(returncode=0))
+            loaded = mock.Mock(return_value=mock.Mock(returncode=0, stdout=""))
             with mock.patch.object(install.subprocess, "run", loaded):
                 self.assertEqual(self.install_job(home, "darwin"), [])
+
+    def test_macos_leaves_a_disabled_agent_off_and_unloads_it(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-audit-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            label = "com.young.setup-audit-kickoff"
+            service = f"gui/{os.getuid()}/{label}"
+            disabled = f'\tdisabled services = {{\n\t\t"{label}" => disabled\n\t}}\n'
+            launchctl = mock.Mock(return_value=mock.Mock(returncode=0, stdout=disabled))
+            with mock.patch.object(install.subprocess, "run", launchctl):
+                self.assertEqual(self.install_job(home, "darwin"), [])
+
+            self.assertEqual(
+                [call.args[0] for call in launchctl.mock_calls],
+                [
+                    ["launchctl", "print", service],
+                    ["launchctl", "print-disabled", f"gui/{os.getuid()}"],
+                    ["launchctl", "bootout", service],
+                ],
+            )
+
+    def test_linux_leaves_a_masked_timer_off(self):
+        with tempfile.TemporaryDirectory(prefix="dotfiles-audit-test-") as tmpdir:
+            home = Path(tmpdir) / "home"
+            units = home / ".config/systemd/user"
+            units.mkdir(parents=True)
+            (units / "setup-audit-kickoff.timer").symlink_to(os.devnull)
+            commands = self.install_job(
+                home, "linux", command_exists=mock.Mock(return_value=True)
+            )
+            self.assertEqual(commands, [])
+            self.assertFalse((units / "setup-audit-kickoff.service").exists())
 
     def test_linux_enables_a_persistent_systemd_timer(self):
         with tempfile.TemporaryDirectory(prefix="dotfiles-audit-test-") as tmpdir:
