@@ -24,6 +24,10 @@ is a line the person runs or a kickoff they order. It belongs to no project:
 it reads every repository on the machine the same way and never applies one
 repository's rules to the rest.
 
+It runs on one of the person's machines: its reports and its declined list
+live only there, so a second machine's run would raise what was already turned
+down. `setup-audit-kickoff` says how a machine turns its job off.
+
 Budget: about 45 minutes. Skip a read only when its tool is missing from this
 seat, and say so in the report.
 

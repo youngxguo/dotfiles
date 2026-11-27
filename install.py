@@ -1112,6 +1112,15 @@ def setup_audit_launchd_plist(script):
     }
 
 
+def launchd_job_disabled(domain, label):
+    listing = subprocess.run(
+        ["launchctl", "print-disabled", domain],
+        capture_output=True,
+        text=True,
+    ).stdout
+    return bool(re.search(rf'"{re.escape(label)}" => (disabled|true)', listing))
+
+
 def install_setup_audit_launchd(script):
     plist = HOME / f"Library/LaunchAgents/{SETUP_AUDIT_LAUNCHD_LABEL}.plist"
     changed = write_if_changed(plist, plistlib.dumps(setup_audit_launchd_plist(script)))
@@ -1128,6 +1137,15 @@ def install_setup_audit_launchd(script):
         ).returncode
         == 0
     )
+    # The audit runs on one of the person's machines. Any other turns it off
+    # with `launchctl disable`, which launchd keeps for that machine alone.
+    if launchd_job_disabled(domain, SETUP_AUDIT_LAUNCHD_LABEL):
+        if loaded:
+            subprocess.run(["launchctl", "bootout", service], stderr=subprocess.DEVNULL)
+        print(
+            f"launchd job {SETUP_AUDIT_LAUNCHD_LABEL} is disabled here; leaving it off"
+        )
+        return
     if loaded and not changed:
         print(f"launchd job {SETUP_AUDIT_LAUNCHD_LABEL} already loaded")
         return
@@ -1168,6 +1186,11 @@ WantedBy=timers.target
 
 def install_setup_audit_systemd(script):
     unit_dir = HOME / ".config/systemd/user"
+    # A timer linked to /dev/null is systemd's mask: the machine's own off switch.
+    timer = unit_dir / f"{SETUP_AUDIT_JOB}.timer"
+    if timer.is_symlink() and os.path.realpath(timer) == os.devnull:
+        print(f"systemd timer {timer.name} is masked here; leaving it off")
+        return
     changed = False
     for name, content in setup_audit_systemd_units(script).items():
         changed |= write_if_changed(unit_dir / name, content.encode())
